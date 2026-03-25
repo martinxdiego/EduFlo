@@ -1,0 +1,238 @@
+{
+  "brand_identity": {
+    "name": "EduFlow",
+    "tagline": "The Digital Atelier for Swiss Teachers",
+    "core_values": [
+      "Swiss Precision",
+      "Teacher Warmth",
+      "Content Clarity",
+      "Efficiency"
+    ],
+    "personality": "A helpful, organized, and aesthetically pleasing teaching assistant. Not a robot, but a smart tool."
+  },
+  "typography": {
+    "font_family": {
+      "headings": "Outfit, sans-serif",
+      "body": "Inter, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "weights": {
+      "light": 300,
+      "regular": 400,
+      "medium": 500,
+      "semibold": 600,
+      "bold": 700
+    },
+    "rules": {
+      "headings": {
+        "letter_spacing": "-0.02em",
+        "line_height": "1.1",
+        "transform": "none"
+      },
+      "body": {
+        "letter_spacing": "-0.01em",
+        "line_height": "1.6"
+      },
+      "overline": {
+        "text_transform": "uppercase",
+        "letter_spacing": "0.05em",
+        "font_weight": 600,
+        "font_size": "0.75rem"
+      }
+    }
+  },
+  "colors": {
+    "palette": {
+      "primary": {
+        "DEFAULT": "#E63946",
+        "foreground": "#FFFFFF",
+        "hover": "#D32F2F",
+        "light": "#FFEBEE"
+      },
+      "secondary": {
+        "DEFAULT": "#457B9D",
+        "foreground": "#FFFFFF",
+        "hover": "#1D3557",
+        "light": "#F1FAEE"
+      },
+      "accent": {
+        "DEFAULT": "#E9C46A",
+        "foreground": "#1A1A1A"
+      },
+      "background": {
+        "DEFAULT": "#F8F9FA",
+        "paper": "#FFFFFF",
+        "subtle": "#F1F5F9"
+      },
+      "text": {
+        "primary": "#1A1A1A",
+        "secondary": "#64748B",
+        "muted": "#94A3B8"
+      },
+      "border": {
+        "DEFAULT": "#E2E8F0",
+        "active": "#CBD5E1"
+      },
+      "success": {
+        "DEFAULT": "#2A9D8F",
+        "foreground": "#FFFFFF"
+      },
+      "warning": {
+        "DEFAULT": "#F4A261",
+        "foreground": "#FFFFFF"
+      },
+      "destructive": {
+        "DEFAULT": "#EF233C",
+        "foreground": "#FFFFFF"
+      }
+    },
+    "gradients": {
+      "primary": "linear-gradient(135deg, #E63946 0%, #F77F00 100%)",
+      "subtle": "linear-gradient(180deg, #F8F9FA 0%, #FFFFFF 100%)",
+      "glass": "linear-gradient(180deg, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0.4) 100%)"
+    },
+    "dark_mode_strategy": "Deep Slate",
+    "dark_palette": {
+      "background": "#0F172A",
+      "surface": "#1E293B",
+      "border": "#334155"
+    }
+  },
+  "visual_enhancers": {
+    "radius": {
+      "sm": "0.25rem",
+      "md": "0.5rem",
+      "lg": "0.75rem",
+      "xl": "1rem",
+      "full": "9999px"
+    },
+    "shadows": {
+      "sm": "0 1px 2px 0 rgba(0, 0, 0, 0.05)",
+      "card": "0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)",
+      "float": "0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04)",
+      "stage": "0 20px 25px -5px rgba(0, 0, 0, 0.08), 0 10px 10px -5px rgba(0, 0, 0, 0.03)"
+    },
+    "glassmorphism": {
+      "backdrop_blur": "blur(12px)",
+      "background": "rgba(255, 255, 255, 0.7)",
+      "border": "1px solid rgba(255, 255, 255, 0.5)"
+    },
+    "textures": {
+      "noise": "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E\")"
+    }
+  },
+  "layout_strategies": {
+    "dashboard": {
+      "type": "Bento Grid",
+      "grid_cols": "grid-cols-1 md:grid-cols-12",
+      "gap": "gap-6",
+      "padding": "p-8",
+      "container_max_width": "max-w-7xl mx-auto"
+    },
+    "editor": {
+      "type": "Split Screen",
+      "left_panel_width": "w-1/3",
+      "canvas_width": "w-2/3",
+      "background": "bg-slate-50"
+    },
+    "wizard": {
+      "type": "Centered Focus",
+      "max_width": "max-w-2xl",
+      "progress_bar": "top-0 fixed w-full z-50"
+    }
+  },
+  "component_rules": {
+    "buttons": {
+      "default": "h-10 px-4 py-2 rounded-md font-medium transition-all active:scale-95",
+      "primary": "bg-primary text-primary-foreground hover:bg-primary/90 shadow-md",
+      "secondary": "bg-white text-secondary-foreground border border-input hover:bg-accent hover:text-accent-foreground shadow-sm",
+      "ghost": "hover:bg-accent hover:text-accent-foreground"
+    },
+    "cards": {
+      "style": "bg-white border border-border shadow-card rounded-lg overflow-hidden",
+      "hover_effect": "hover:shadow-float hover:border-primary/20 transition-all duration-300"
+    },
+    "inputs": {
+      "style": "h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+    },
+    "dialogs": {
+      "style": "bg-white/95 backdrop-blur-md border border-white/20 shadow-xl sm:rounded-lg"
+    }
+  },
+  "feature_ux_improvements": {
+    "editor": [
+      {
+        "feature": "Drag-and-Drop Reorder",
+        "implementation": "Use `framer-motion` Reorder.Group for questions. Add a 'handle' icon to each question card."
+      },
+      {
+        "feature": "Question Conversion",
+        "implementation": "Dropdown menu in question header: 'Convert to...'. Preserves prompt, adapts structure."
+      },
+      {
+        "feature": "Rich Text & Images",
+        "implementation": "Integrate Tiptap or Quill for question stems. Add 'Insert Image' button using Shadcn Dialog + Upload."
+      }
+    ],
+    "upload_wizard": [
+      {
+        "feature": "Empty State",
+        "implementation": "Large, friendly dropzone with illustration. 'Drag exams, worksheets, or notes here'."
+      },
+      {
+        "feature": "Progress Feedback",
+        "implementation": "Stepped progress bar with estimated time. 'Analyzing PDF... (10s remaining)'."
+      }
+    ],
+    "accessibility": [
+      {
+        "feature": "Keyboard Nav",
+        "implementation": "Ensure all interactive elements have visible focus states (ring-2)."
+      },
+      {
+        "feature": "Screen Reader",
+        "implementation": "Add aria-labels to icon-only buttons. Use semantic HTML (main, section, article)."
+      }
+    ],
+    "ai_assistant": [
+      {
+        "feature": "Context Awareness",
+        "implementation": "Floating chat panel that reads the current editor content state."
+      }
+    ]
+  },
+  "image_assets": {
+    "dashboard_welcome": "https://images.unsplash.com/photo-1706866256047-65287e002ed7?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDR8MHwxfHNlYXJjaHwyfHxzd2lzcyUyMG1pbmltYWxpc3QlMjBsYW5kc2NhcGUlMjBhZXN0aGV0aWN8ZW58MHx8fHwxNzc0MjkwNTk5fDA&ixlib=rb-4.1.0&q=85",
+    "subjects": {
+      "math": "https://images.unsplash.com/photo-1546523766-d3847411d9eb",
+      "german": "https://images.unsplash.com/photo-1768815210987-591340ed69fb?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MTN8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMGdlb21ldHJpYyUyMHNoYXBlcyUyMGVkdWNhdGlvbiUyMGNvbG9yZnVsfGVufDB8fHx8MTc3NDI5MDYwMHww&ixlib=rb-4.1.0&q=85",
+      "french": "https://images.pexels.com/photos/4965825/pexels-photo-4965825.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+    },
+    "empty_states": {
+      "library": "https://images.pexels.com/photos/430207/pexels-photo-430207.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+    }
+  },
+  "motion_guidelines": {
+    "page_transitions": "variants={ { initial: { opacity: 0, y: 20 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -20 } } } transition={ { duration: 0.3 } }",
+    "hover": "whileHover={ { scale: 1.02 } } whileTap={ { scale: 0.98 } }",
+    "list_stagger": "staggerChildren: 0.05"
+  },
+  "universal_guidelines": [
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered design elements with z-index hierarchy",
+    "Use glass-morphism effects with backdrop filters (12-24px blur)",
+    "You MUST NOT apply universal transition. Eg: transition: all. This results in breaking transforms. Always add transitions for specific interactive elements like button, input excluding transforms",
+    "You MUST NOT center align the app container, ie do not add .App { text-align: center; } in the css file. This disrupts the human natural reading flow of text",
+    "Always use modern button styles like pill-shaped, or sharp button with interaction animations & color relevant to the app style",
+    "NEVER: use AI assistant Emoji characters for icons.",
+    "Every interaction needs micro-animations - hover states, transitions, parallax effects, and entrance animations. Static = dead.",
+    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
+    "Subtle grain textures, noise overlays, custom cursors, selection states, and loading animations: separates good from extraordinary.",
+    "Main agent relies on these image URLs. Missing categories = placeholder text which is FORBIDDEN",
+    "Prioritize using pre-existing components from src/components/ui when applicable",
+    "Components MUST use named exports (export const ComponentName = ...)",
+    "Pages MUST use default exports (export default function PageName() {...})",
+    "Use sonner for toasts from /app/frontend/components/ui/sonner.tsx"
+  ]
+}

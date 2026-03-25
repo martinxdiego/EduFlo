@@ -1,0 +1,78 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment files
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Next.js
+.next/
+**/.next/
+out/
+**/out/
+next-env.d.ts
+*.tsbuildinfo
+
+# Production builds
+dist/
+build/
+coverage/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE / Editor
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Archives
+*.zip
+*.tar.gz
+*.tar
+*.tgz
+
+# Backups
+frontend_backup/
+
+# Local data
+*.db
+data/
+
+# Memory / working files
+memory/
+**/memory/
+test_reports/
+**/test_reports/
+
+# Claude Code / AI tools
+.claude/
+.emergent/
+.gitconfig
+
+# Misc
+*.pem
+*.pack
+dump.rdb
+.cache/
+.vercel
+.chainlit
+chainlit.md
