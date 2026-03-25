@@ -55,7 +55,6 @@ frontend_backup/
 
 # Local data
 *.db
-data/
 
 # Memory / working files
 memory/
