@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { BookOpen, CheckCircle2, ArrowRight, Clock, Send, ArrowLeft, Star, Trophy, Loader2 } from 'lucide-react'
+import { BookOpen, CheckCircle2, ArrowRight, Clock, Send, ArrowLeft, Star, Trophy, Loader2, XCircle, AlertCircle, Sparkles, ChevronDown, ChevronUp } from 'lucide-react'
 
 export default function SchuelerPage() {
   const [accessCode, setAccessCode] = useState('')
@@ -116,60 +116,141 @@ export default function SchuelerPage() {
 
   // Results screen
   if (submitted && results) {
-    const totalQuestions = questions.length
-    const correctCount = results.correctCount || 0
-    const percentage = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0
+    const totalQuestions = results.totalQuestions || questions.length
+    const percentage = results.scorePercentage ?? (results.correctCount ? Math.round((results.correctCount / totalQuestions) * 100) : 0)
+    const questionFeedback = results.questionResults || []
+    const [showDetails, setShowDetails] = useState(false)
+
     return (
-      <div className="min-h-screen bg-gradient-to-b from-green-50 via-white to-blue-50 flex items-center justify-center p-4">
-        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="max-w-lg w-full text-center">
-          <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', delay: 0.2 }}
-            className="w-24 h-24 mx-auto mb-6 bg-green-100 rounded-full flex items-center justify-center">
-            <Trophy className="h-12 w-12 text-green-600" />
+      <div className="min-h-screen bg-gradient-to-b from-green-50 via-white to-blue-50 p-4">
+        <div className="max-w-2xl mx-auto">
+          {/* Score Summary */}
+          <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="text-center mb-8">
+            <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', delay: 0.2 }}
+              className={`w-24 h-24 mx-auto mb-6 rounded-full flex items-center justify-center ${percentage >= 80 ? 'bg-green-100' : percentage >= 50 ? 'bg-yellow-100' : 'bg-red-100'}`}>
+              <Trophy className={`h-12 w-12 ${percentage >= 80 ? 'text-green-600' : percentage >= 50 ? 'text-yellow-600' : 'text-red-600'}`} />
+            </motion.div>
+            <h2 className="text-3xl font-bold text-gray-900 mb-2">Geschafft!</h2>
+            <p className="text-gray-600 mb-6">Du hast die Aufgabe abgeschlossen.</p>
+
+            <div className="bg-white rounded-2xl shadow-lg p-6 mb-6 space-y-4">
+              <div className="grid grid-cols-3 gap-4">
+                <div className="bg-blue-50 rounded-xl p-3">
+                  <p className="text-2xl font-bold text-blue-600">{totalQuestions}</p>
+                  <p className="text-xs text-gray-600">Fragen</p>
+                </div>
+                <div className="bg-green-50 rounded-xl p-3">
+                  <p className="text-2xl font-bold text-green-600">{results.earnedPoints ?? results.correctCount ?? 0}/{results.totalPoints ?? totalQuestions}</p>
+                  <p className="text-xs text-gray-600">Punkte</p>
+                </div>
+                <div className="bg-purple-50 rounded-xl p-3">
+                  <p className="text-2xl font-bold text-purple-600">{percentage}%</p>
+                  <p className="text-xs text-gray-600">Ergebnis</p>
+                </div>
+              </div>
+
+              <div className="w-full bg-gray-100 rounded-full h-3">
+                <motion.div initial={{ width: 0 }} animate={{ width: `${percentage}%` }} transition={{ duration: 1, delay: 0.5 }}
+                  className={`h-full rounded-full ${percentage >= 80 ? 'bg-green-500' : percentage >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`} />
+              </div>
+
+              {percentage >= 80 && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1 }}
+                  className="flex items-center gap-2 justify-center text-green-700 bg-green-50 p-3 rounded-xl">
+                  <Star className="h-5 w-5" /> Sehr gut gemacht!
+                </motion.div>
+              )}
+
+              {results.needsReview && (
+                <div className="flex items-center gap-2 justify-center text-amber-700 bg-amber-50 p-3 rounded-xl text-sm">
+                  <AlertCircle className="h-4 w-4" /> Einige Antworten werden noch von deiner Lehrperson geprüft.
+                </div>
+              )}
+
+              {results.duration && (
+                <p className="text-sm text-gray-500 flex items-center justify-center gap-1.5">
+                  <Clock className="h-4 w-4" /> Zeit: {Math.floor(results.duration / 60)} Min. {results.duration % 60} Sek.
+                </p>
+              )}
+            </div>
           </motion.div>
-          <h2 className="text-3xl font-bold text-gray-900 mb-2">Geschafft!</h2>
-          <p className="text-gray-600 mb-6">Du hast die Aufgabe abgeschlossen.</p>
 
-          <div className="bg-white rounded-2xl shadow-lg p-6 mb-6 space-y-4">
-            <div className="grid grid-cols-3 gap-4">
-              <div className="bg-blue-50 rounded-xl p-3">
-                <p className="text-2xl font-bold text-blue-600">{totalQuestions}</p>
-                <p className="text-xs text-gray-600">Fragen</p>
-              </div>
-              <div className="bg-green-50 rounded-xl p-3">
-                <p className="text-2xl font-bold text-green-600">{correctCount}</p>
-                <p className="text-xs text-gray-600">Richtig</p>
-              </div>
-              <div className="bg-purple-50 rounded-xl p-3">
-                <p className="text-2xl font-bold text-purple-600">{percentage}%</p>
-                <p className="text-xs text-gray-600">Ergebnis</p>
-              </div>
+          {/* Detailed Feedback Toggle */}
+          {questionFeedback.length > 0 && (
+            <div className="mb-6">
+              <button onClick={() => setShowDetails(!showDetails)}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white shadow-sm border border-gray-200 text-gray-700 font-medium hover:bg-gray-50 transition-all">
+                {showDetails ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                {showDetails ? 'Feedback ausblenden' : 'Detailliertes Feedback anzeigen'}
+              </button>
+
+              <AnimatePresence>
+                {showDetails && (
+                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                    className="mt-4 space-y-3 overflow-hidden">
+                    {questionFeedback.map((qr, idx) => (
+                      <motion.div key={idx} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.05 }}
+                        className={`bg-white rounded-xl border-2 p-4 ${
+                          qr.isCorrect === true ? 'border-green-200' :
+                          qr.isCorrect === 'partial' ? 'border-yellow-200' :
+                          qr.isCorrect === false ? 'border-red-200' : 'border-gray-200'
+                        }`}>
+                        <div className="flex items-start gap-3">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${
+                            qr.isCorrect === true ? 'bg-green-100' :
+                            qr.isCorrect === 'partial' ? 'bg-yellow-100' :
+                            qr.isCorrect === false ? 'bg-red-100' : 'bg-gray-100'
+                          }`}>
+                            {qr.isCorrect === true && <CheckCircle2 className="h-4 w-4 text-green-600" />}
+                            {qr.isCorrect === 'partial' && <AlertCircle className="h-4 w-4 text-yellow-600" />}
+                            {qr.isCorrect === false && <XCircle className="h-4 w-4 text-red-600" />}
+                            {qr.isCorrect === null && <Clock className="h-4 w-4 text-gray-400" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-sm font-semibold text-gray-900">Frage {qr.questionNumber || idx + 1}</span>
+                              <div className="flex items-center gap-2">
+                                {qr.aiGraded && (
+                                  <span className="text-xs bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                    <Sparkles className="h-3 w-3" /> KI-bewertet
+                                  </span>
+                                )}
+                                {qr.pointsAwarded !== null && (
+                                  <span className="text-xs font-medium text-gray-500">{qr.pointsAwarded}/{qr.maxPoints} P.</span>
+                                )}
+                              </div>
+                            </div>
+                            <p className="text-sm text-gray-600 mb-2">{qr.question}</p>
+                            {qr.studentAnswer && (
+                              <p className="text-sm bg-gray-50 rounded-lg p-2 mb-2">
+                                <span className="text-gray-400 text-xs">Deine Antwort: </span>
+                                {Array.isArray(qr.studentAnswer) ? qr.studentAnswer.join(', ') : String(qr.studentAnswer)}
+                              </p>
+                            )}
+                            {qr.feedback && (
+                              <p className={`text-sm font-medium ${
+                                qr.isCorrect === true ? 'text-green-700' :
+                                qr.isCorrect === 'partial' ? 'text-yellow-700' :
+                                qr.isCorrect === false ? 'text-red-700' : 'text-gray-500'
+                              }`}>{qr.feedback}</p>
+                            )}
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
+          )}
 
-            {/* Progress bar */}
-            <div className="w-full bg-gray-100 rounded-full h-3">
-              <motion.div initial={{ width: 0 }} animate={{ width: `${percentage}%` }} transition={{ duration: 1, delay: 0.5 }}
-                className={`h-full rounded-full ${percentage >= 80 ? 'bg-green-500' : percentage >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`} />
-            </div>
-
-            {percentage >= 80 && (
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1 }}
-                className="flex items-center gap-2 justify-center text-green-700 bg-green-50 p-3 rounded-xl">
-                <Star className="h-5 w-5" /> Sehr gut gemacht!
-              </motion.div>
-            )}
-
-            {results.duration && (
-              <p className="text-sm text-gray-500 flex items-center justify-center gap-1.5">
-                <Clock className="h-4 w-4" /> Zeit: {Math.floor(results.duration / 60)} Min. {results.duration % 60} Sek.
-              </p>
-            )}
+          <div className="text-center">
+            <button onClick={() => { setAssignment(null); setSubmitted(false); setAnswers({}); setAccessCode(''); setResults(null) }}
+              className="px-6 py-3 rounded-xl bg-gray-100 text-gray-700 font-medium hover:bg-gray-200 transition-all">
+              Neue Aufgabe starten
+            </button>
           </div>
-
-          <button onClick={() => { setAssignment(null); setSubmitted(false); setAnswers({}); setAccessCode(''); setResults(null) }}
-            className="px-6 py-3 rounded-xl bg-gray-100 text-gray-700 font-medium hover:bg-gray-200 transition-all">
-            Neue Aufgabe starten
-          </button>
-        </motion.div>
+        </div>
       </div>
     )
   }

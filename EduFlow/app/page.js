@@ -263,6 +263,7 @@ const Home = () => {
   const [assignmentSubmissions, setAssignmentSubmissions] = useState([])
   const [errorAnalysis, setErrorAnalysis] = useState(null)
   const [analysisLoading, setAnalysisLoading] = useState(false)
+  const [expandedSubmission, setExpandedSubmission] = useState(null)
   const [shareModalOpen, setShareModalOpen] = useState(false)
   const [shareForm, setShareForm] = useState({ className: '', deadline: '' })
 
@@ -4620,19 +4621,31 @@ const Home = () => {
                       <table className="w-full">
                         <thead><tr className="border-b bg-gray-50/50">
                           <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Name</th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600">Punkte</th>
                           <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600">Ergebnis</th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600">Status</th>
                           <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600">Zeit</th>
                           <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600">Abgabe</th>
                         </tr></thead>
                         <tbody>
                           {assignmentSubmissions.map(sub => (
-                            <tr key={sub.id} className="border-b last:border-0 hover:bg-gray-50/50">
+                            <tr key={sub.id} className="border-b last:border-0 hover:bg-gray-50/50 cursor-pointer"
+                              onClick={() => setExpandedSubmission(expandedSubmission === sub.id ? null : sub.id)}>
                               <td className="px-4 py-3 text-sm font-medium text-gray-900">{sub.student_name}</td>
+                              <td className="px-4 py-3 text-center text-sm text-gray-600">
+                                {sub.earned_points ?? sub.correct_count ?? '–'}/{sub.total_points ?? sub.total_questions}
+                              </td>
                               <td className="px-4 py-3 text-center">
                                 <span className={`text-sm font-bold ${sub.score_percentage >= 80 ? 'text-green-600' : sub.score_percentage >= 50 ? 'text-amber-600' : 'text-red-600'}`}>
                                   {sub.score_percentage}%
                                 </span>
-                                <span className="text-xs text-gray-400 ml-1">({sub.correct_count}/{sub.total_questions})</span>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                {sub.needs_review ? (
+                                  <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Prüfen</span>
+                                ) : (
+                                  <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Fertig</span>
+                                )}
                               </td>
                               <td className="px-4 py-3 text-center text-xs text-gray-500">
                                 {sub.duration ? `${Math.floor(sub.duration / 60)}:${String(sub.duration % 60).padStart(2, '0')}` : '–'}
@@ -4644,6 +4657,47 @@ const Home = () => {
                           ))}
                         </tbody>
                       </table>
+
+                      {/* Expanded submission detail */}
+                      {expandedSubmission && (() => {
+                        const sub = assignmentSubmissions.find(s => s.id === expandedSubmission)
+                        if (!sub || !sub.question_results) return null
+                        return (
+                          <div className="border-t bg-gray-50/50 p-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <h4 className="text-sm font-semibold text-gray-900">Detailkorrektur — {sub.student_name}</h4>
+                              <button onClick={(e) => { e.stopPropagation(); setExpandedSubmission(null) }} className="text-xs text-gray-400 hover:text-gray-600">Schliessen</button>
+                            </div>
+                            <div className="space-y-2">
+                              {sub.question_results.map((qr, qi) => (
+                                <div key={qi} className={`flex items-start gap-3 p-3 rounded-lg text-sm ${
+                                  qr.isCorrect === true ? 'bg-green-50 border border-green-200' :
+                                  qr.isCorrect === 'partial' ? 'bg-yellow-50 border border-yellow-200' :
+                                  qr.isCorrect === false ? 'bg-red-50 border border-red-200' : 'bg-white border border-gray-200'
+                                }`}>
+                                  <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${
+                                    qr.isCorrect === true ? 'bg-green-200' :
+                                    qr.isCorrect === 'partial' ? 'bg-yellow-200' :
+                                    qr.isCorrect === false ? 'bg-red-200' : 'bg-gray-200'
+                                  }`}>
+                                    <span className="text-[10px] font-bold">{qr.questionNumber || qi + 1}</span>
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs text-gray-500 mb-1">{qr.question || `Frage ${qr.questionNumber || qi + 1}`}</p>
+                                    <p className="text-sm"><span className="text-gray-400">Antwort:</span> {Array.isArray(qr.studentAnswer) ? qr.studentAnswer.join(', ') : String(qr.studentAnswer || '–')}</p>
+                                    {qr.feedback && <p className="text-xs mt-1 font-medium text-gray-700">{qr.feedback}</p>}
+                                  </div>
+                                  <div className="text-right flex-shrink-0">
+                                    <span className="text-sm font-bold">{qr.pointsAwarded ?? '–'}/{qr.maxPoints ?? 1}</span>
+                                    {qr.aiGraded && <p className="text-[10px] text-purple-500 mt-0.5">KI</p>}
+                                    {qr.needsManualReview && <p className="text-[10px] text-amber-500 mt-0.5">Prüfen</p>}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })()}
                     </Card>
                   )}
 

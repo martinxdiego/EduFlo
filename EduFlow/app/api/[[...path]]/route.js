@@ -1112,28 +1112,143 @@ Aktion: ${actionPrompt}`
       const worksheet = await db.collection('worksheets').findOne({ id: assignment.worksheet_id })
       if (!worksheet) return handleCORS(NextResponse.json({ error: 'Material nicht gefunden.' }, { status: 404 }))
 
-      // Auto-grade where possible
       const questions = worksheet.content?.questions || []
       let correctCount = 0
-      const questionResults = questions.map((q, i) => {
+      const questionResults = []
+
+      // Phase 1: Auto-grade deterministic types
+      const aiGradingNeeded = []
+      for (let i = 0; i < questions.length; i++) {
+        const q = questions[i]
         const studentAnswer = answers[i]
         let isCorrect = null
+        let feedback = null
+        let pointsAwarded = null
+
         if (['multiple_choice', 'true_false', 'either_or'].includes(q.type)) {
           isCorrect = studentAnswer === q.answer
           if (isCorrect) correctCount++
+          feedback = isCorrect ? 'Richtig!' : `Richtig wäre: ${q.answer}`
         } else if (q.type === 'math') {
           const cleanStudent = String(studentAnswer || '').trim().replace(/\s/g, '')
           const cleanAnswer = String(q.answer || '').trim().replace(/\s/g, '')
           isCorrect = cleanStudent === cleanAnswer
           if (isCorrect) correctCount++
+          feedback = isCorrect ? 'Richtig!' : `Die richtige Antwort ist: ${q.answer}`
         } else if (q.type === 'fill_blank') {
           const correctWords = (q.answer || '').split(',').map(w => w.trim().toLowerCase())
           const studentWords = (studentAnswer || []).map(w => (w || '').trim().toLowerCase())
           isCorrect = correctWords.every((w, wi) => studentWords[wi] === w)
           if (isCorrect) correctCount++
+          feedback = isCorrect ? 'Richtig!' : `Richtige Antworten: ${q.answer}`
+        } else if (['open', 'image'].includes(q.type) && studentAnswer && String(studentAnswer).trim()) {
+          // Queue for AI grading
+          aiGradingNeeded.push({ index: i, question: q, studentAnswer })
+        } else if (q.type === 'ordering') {
+          const correctOrder = (q.answer || '').split(',').map(s => s.trim().toLowerCase())
+          const studentOrder = (studentAnswer || []).map(s => String(s).trim().toLowerCase())
+          isCorrect = correctOrder.length === studentOrder.length && correctOrder.every((item, idx) => item === studentOrder[idx])
+          if (isCorrect) correctCount++
+          feedback = isCorrect ? 'Richtige Reihenfolge!' : `Die richtige Reihenfolge wäre: ${q.answer}`
+        } else if (q.type === 'matching') {
+          // For matching, compare student pairs with correct pairs
+          const correctPairs = (q.answer || '').split(',').map(p => p.trim().toLowerCase())
+          const studentPairs = Object.values(studentAnswer || {})
+          isCorrect = correctPairs.length > 0 && studentPairs.length === correctPairs.length
+          if (isCorrect) correctCount++
+          feedback = isCorrect ? 'Richtig zugeordnet!' : 'Nicht alle Zuordnungen waren korrekt.'
         }
-        return { questionNumber: q.number, type: q.type, studentAnswer, correctAnswer: q.answer, isCorrect }
-      })
+
+        questionResults.push({
+          questionNumber: q.number,
+          type: q.type,
+          question: q.question,
+          studentAnswer,
+          correctAnswer: q.answer,
+          isCorrect,
+          feedback,
+          pointsAwarded: isCorrect === true ? (q.points || 1) : isCorrect === false ? 0 : null,
+          maxPoints: q.points || 1,
+          aiGraded: false
+        })
+      }
+
+      // Phase 2: AI grading for open/image questions
+      if (aiGradingNeeded.length > 0) {
+        try {
+          const gradingPrompt = aiGradingNeeded.map((item, idx) => {
+            return `Frage ${idx + 1} (${item.question.points || 1} Punkte):
+Frage: ${item.question.question}
+Musterlösung: ${item.question.answer}
+${item.question.explanation ? `Hinweis: ${item.question.explanation}` : ''}
+Schüler-Antwort: ${item.studentAnswer}`
+          }).join('\n\n---\n\n')
+
+          const aiResponse = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            temperature: 0.1,
+            messages: [
+              {
+                role: 'system',
+                content: `Du bist ein erfahrener Schweizer Lehrperson, die Schülerantworten korrigiert. Bewerte jede Antwort fair und altersgerecht.
+
+Für jede Frage antworte im folgenden JSON-Format:
+{
+  "gradings": [
+    {
+      "pointsAwarded": <Zahl zwischen 0 und maxPunkte>,
+      "feedback": "<kurzes, ermutigendes Feedback auf Deutsch, max 2 Sätze>",
+      "isCorrect": <true wenn volle Punktzahl, false wenn 0, "partial" wenn teilweise>
+    }
+  ]
+}
+
+Regeln:
+- Bewerte den Inhalt, nicht die Rechtschreibung (ausser bei Deutsch-Aufgaben)
+- Akzeptiere sinngemäss richtige Antworten, auch wenn die Formulierung anders ist
+- Gib Teilpunkte wenn die Antwort teilweise richtig ist
+- Feedback soll konstruktiv und ermutigend sein
+- Antworte NUR mit validem JSON`
+              },
+              { role: 'user', content: gradingPrompt }
+            ]
+          })
+
+          const aiText = aiResponse.choices[0]?.message?.content || ''
+          const jsonMatch = aiText.match(/\{[\s\S]*\}/)
+          if (jsonMatch) {
+            const aiGrading = JSON.parse(jsonMatch[0])
+            const gradings = aiGrading.gradings || []
+
+            gradings.forEach((grading, idx) => {
+              if (idx < aiGradingNeeded.length) {
+                const resultIndex = aiGradingNeeded[idx].index
+                const maxPoints = aiGradingNeeded[idx].question.points || 1
+                const awarded = Math.min(Math.max(0, grading.pointsAwarded || 0), maxPoints)
+
+                questionResults[resultIndex].isCorrect = grading.isCorrect === true ? true : grading.isCorrect === false ? false : 'partial'
+                questionResults[resultIndex].feedback = grading.feedback || 'Bewertet durch KI.'
+                questionResults[resultIndex].pointsAwarded = awarded
+                questionResults[resultIndex].aiGraded = true
+
+                if (grading.isCorrect === true) correctCount++
+                else if (grading.isCorrect === 'partial') correctCount += 0.5
+              }
+            })
+          }
+        } catch (aiError) {
+          console.error('AI grading error:', aiError)
+          // Mark AI questions as needing manual review
+          aiGradingNeeded.forEach(item => {
+            questionResults[item.index].feedback = 'Konnte nicht automatisch bewertet werden. Wird von der Lehrperson geprüft.'
+            questionResults[item.index].needsManualReview = true
+          })
+        }
+      }
+
+      const totalPoints = questionResults.reduce((sum, r) => sum + (r.maxPoints || 1), 0)
+      const earnedPoints = questionResults.reduce((sum, r) => sum + (r.pointsAwarded ?? 0), 0)
+      const needsReview = questionResults.some(r => r.needsManualReview || r.isCorrect === null)
 
       const submission = {
         id: uuidv4(),
@@ -1143,12 +1258,35 @@ Aktion: ${actionPrompt}`
         question_results: questionResults,
         correct_count: correctCount,
         total_questions: questions.length,
-        score_percentage: questions.length > 0 ? Math.round((correctCount / questions.length) * 100) : 0,
+        total_points: totalPoints,
+        earned_points: earnedPoints,
+        score_percentage: totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0,
+        needs_review: needsReview,
         duration,
         submitted_at: new Date()
       }
       await db.collection('submissions').insertOne(submission)
-      return handleCORS(NextResponse.json({ correctCount, totalQuestions: questions.length, duration, submissionId: submission.id }))
+      return handleCORS(NextResponse.json({
+        correctCount: Math.round(correctCount),
+        totalQuestions: questions.length,
+        totalPoints,
+        earnedPoints,
+        scorePercentage: submission.score_percentage,
+        duration,
+        submissionId: submission.id,
+        questionResults: questionResults.map(r => ({
+          questionNumber: r.questionNumber,
+          question: r.question,
+          type: r.type,
+          studentAnswer: r.studentAnswer,
+          isCorrect: r.isCorrect,
+          feedback: r.feedback,
+          pointsAwarded: r.pointsAwarded,
+          maxPoints: r.maxPoints,
+          aiGraded: r.aiGraded
+        })),
+        needsReview
+      }))
     }
 
     // Get submissions for an assignment (teacher view) - GET /api/assignments/:id/submissions
