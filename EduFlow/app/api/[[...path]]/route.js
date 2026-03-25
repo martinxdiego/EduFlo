@@ -8,14 +8,27 @@ import jwt from 'jsonwebtoken'
 // MongoDB connection
 let client
 let db
+let connectPromise
 
 async function connectToMongo() {
-  if (!client) {
-    client = new MongoClient(process.env.MONGO_URL)
-    await client.connect()
-    db = client.db(process.env.DB_NAME)
-  }
-  return db
+  if (db) return db
+  if (connectPromise) return connectPromise
+
+  connectPromise = (async () => {
+    try {
+      client = new MongoClient(process.env.MONGO_URL)
+      await client.connect()
+      db = client.db(process.env.DB_NAME)
+      return db
+    } catch (error) {
+      client = null
+      db = null
+      connectPromise = null
+      throw error
+    }
+  })()
+
+  return connectPromise
 }
 
 // OpenAI client
@@ -1091,11 +1104,29 @@ Aktion: ${actionPrompt}`
       // Return worksheet without answers for student view
       const studentContent = {
         ...worksheet.content,
-        questions: (worksheet.content?.questions || []).map(q => ({
-          number: q.number, type: q.type, question: q.question,
-          options: q.options, points: q.points, imageUrl: q.imageUrl,
-          // Don't send answer to students
-        }))
+        questions: (worksheet.content?.questions || []).map(q => {
+          const base = {
+            number: q.number, type: q.type, question: q.question,
+            options: q.options, points: q.points, imageUrl: q.imageUrl,
+          }
+          // For matching: send answer structure so students can see items to match
+          if (q.type === 'matching' && q.answer) {
+            base.answer = q.answer // contains "A→B, C→D" pairs needed for display
+          }
+          // For ordering: send answer so items can be shuffled and displayed
+          if (q.type === 'ordering' && q.answer) {
+            base.answer = q.answer // contains comma-separated items
+          }
+          // For either_or/true_false: ensure options exist
+          if (q.type === 'true_false' && (!q.options || q.options.length === 0)) {
+            base.options = ['Wahr', 'Falsch']
+          }
+          if (q.type === 'either_or' && (!q.options || q.options.length === 0) && q.answer) {
+            // Try to extract options from the answer or question
+            base.options = ['Ja', 'Nein']
+          }
+          return base
+        })
       }
       return handleCORS(NextResponse.json({
         title: worksheet.title, subject: worksheet.subject, grade: worksheet.grade,
@@ -1151,11 +1182,24 @@ Aktion: ${actionPrompt}`
           if (isCorrect) correctCount++
           feedback = isCorrect ? 'Richtige Reihenfolge!' : `Die richtige Reihenfolge wäre: ${q.answer}`
         } else if (q.type === 'matching') {
-          // For matching, compare student pairs with correct pairs
-          const correctPairs = (q.answer || '').split(',').map(p => p.trim().toLowerCase())
-          const studentPairs = Object.values(studentAnswer || {})
-          isCorrect = correctPairs.length > 0 && studentPairs.length === correctPairs.length
+          // Student answer is { selectedLeft, matches: { leftIdx: rightIdx } }
+          const studentMatches = (studentAnswer?.matches) || studentAnswer || {}
+          const correctPairsRaw = (q.answer || '').split(',').filter(Boolean)
+          const correctLeft = correctPairsRaw.map(p => p.split('→')[0]?.trim())
+          const correctRight = correctPairsRaw.map(p => p.split('→')[1]?.trim())
+          // Reconstruct shuffled right order using same seed as frontend
+          const rightItems = correctRight.map((text, i) => ({ text, origIdx: i }))
+          const matchSeed = (q.number || 0) * 7 + correctPairsRaw.length
+          const shuffledRight = [...rightItems].sort((a, b) => ((a.origIdx * 31 + matchSeed) % 97) - ((b.origIdx * 31 + matchSeed) % 97))
+          let matchCorrect = 0
+          for (const [leftIdx, rightIdx] of Object.entries(studentMatches)) {
+            const li = parseInt(leftIdx)
+            const ri = parseInt(rightIdx)
+            if (shuffledRight[ri]?.origIdx === li) matchCorrect++
+          }
+          isCorrect = matchCorrect === correctPairsRaw.length && Object.keys(studentMatches).length === correctPairsRaw.length
           if (isCorrect) correctCount++
+          feedback = isCorrect ? 'Alle richtig zugeordnet!' : `${matchCorrect}/${correctPairsRaw.length} richtig zugeordnet.`
           feedback = isCorrect ? 'Richtig zugeordnet!' : 'Nicht alle Zuordnungen waren korrekt.'
         }
 

@@ -264,6 +264,7 @@ const Home = () => {
   const [errorAnalysis, setErrorAnalysis] = useState(null)
   const [analysisLoading, setAnalysisLoading] = useState(false)
   const [expandedSubmission, setExpandedSubmission] = useState(null)
+  const [errorAnalysisOpen, setErrorAnalysisOpen] = useState(true)
   const [shareModalOpen, setShareModalOpen] = useState(false)
   const [shareForm, setShareForm] = useState({ className: '', deadline: '' })
 
@@ -347,6 +348,7 @@ const Home = () => {
         const userData = await response.json()
         setUser(userData)
         fetchWorksheets(authToken)
+        loadAssignments(authToken)
       } else {
         localStorage.removeItem('teachertime_token')
         setToken(null)
@@ -2197,9 +2199,11 @@ const Home = () => {
   // SCHÜLER-MODUS / ASSIGNMENTS
   // ============================================================
 
-  const loadAssignments = async () => {
+  const loadAssignments = async (authToken) => {
     try {
-      const res = await fetch('/api/assignments', { headers: { 'Authorization': `Bearer ${token}` } })
+      const t = authToken || token
+      if (!t) return
+      const res = await fetch('/api/assignments', { headers: { 'Authorization': `Bearer ${t}` } })
       if (res.ok) { const data = await res.json(); setAssignments(data) }
     } catch (err) { console.error('Load assignments error:', err) }
   }
@@ -4526,14 +4530,16 @@ const Home = () => {
                           <div className="space-y-4">
                             <div>
                               <Label className="text-xs">Material auswählen</Label>
-                              <Select onValueChange={(val) => setShareForm(prev => ({ ...prev, worksheetId: val }))}>
-                                <SelectTrigger className="mt-1"><SelectValue placeholder="Material wählen..." /></SelectTrigger>
-                                <SelectContent>
-                                  {worksheets.map(ws => (
-                                    <SelectItem key={ws.id} value={ws.id}>{ws.title} ({ws.subject})</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                              <select
+                                className="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                                value={shareForm.worksheetId || ''}
+                                onChange={(e) => setShareForm(prev => ({ ...prev, worksheetId: e.target.value }))}
+                              >
+                                <option value="" disabled>Material wählen...</option>
+                                {worksheets.map(ws => (
+                                  <option key={ws.id} value={ws.id}>{ws.title} ({ws.subject})</option>
+                                ))}
+                              </select>
                             </div>
                             <div>
                               <Label className="text-xs">Klasse (optional)</Label>
@@ -4705,10 +4711,13 @@ const Home = () => {
                   {errorAnalysis && (
                     <div className="space-y-4">
                       <Card className="glass-card border-0">
-                        <CardHeader className="pb-3">
-                          <CardTitle className="text-lg flex items-center gap-2"><BarChart3 className="h-5 w-5 text-purple-500" /> Fehleranalyse</CardTitle>
+                        <CardHeader className="pb-3 cursor-pointer" onClick={() => setErrorAnalysisOpen(!errorAnalysisOpen)}>
+                          <CardTitle className="text-lg flex items-center justify-between">
+                            <span className="flex items-center gap-2"><BarChart3 className="h-5 w-5 text-purple-500" /> Fehleranalyse</span>
+                            <ChevronDown className={`h-5 w-5 text-gray-400 transition-transform ${errorAnalysisOpen ? 'rotate-180' : ''}`} />
+                          </CardTitle>
                         </CardHeader>
-                        <CardContent className="space-y-4">
+                        {errorAnalysisOpen && <CardContent className="space-y-4">
                           {/* Class overview */}
                           <div className="grid grid-cols-3 gap-3">
                             <div className="bg-blue-50 rounded-xl p-3 text-center">
@@ -4755,7 +4764,7 @@ const Home = () => {
                               <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{errorAnalysis.aiAnalysis}</div>
                             </div>
                           )}
-                        </CardContent>
+                        </CardContent>}
                       </Card>
                     </div>
                   )}

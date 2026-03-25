@@ -15,6 +15,7 @@ export default function SchuelerPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [results, setResults] = useState(null)
+  const [showDetails, setShowDetails] = useState(false)
 
   const loadAssignment = async () => {
     if (!accessCode.trim()) return
@@ -119,7 +120,6 @@ export default function SchuelerPage() {
     const totalQuestions = results.totalQuestions || questions.length
     const percentage = results.scorePercentage ?? (results.correctCount ? Math.round((results.correctCount / totalQuestions) * 100) : 0)
     const questionFeedback = results.questionResults || []
-    const [showDetails, setShowDetails] = useState(false)
 
     return (
       <div className="min-h-screen bg-gradient-to-b from-green-50 via-white to-blue-50 p-4">
@@ -333,33 +333,61 @@ export default function SchuelerPage() {
         const rightItems = pairs.map((p, i) => ({ text: p.split('→')[1]?.trim(), origIdx: i }))
         const seed = (q.number || currentQuestion) * 7 + pairs.length
         const shuffledRight = [...rightItems].sort((a, b) => ((a.origIdx * 31 + seed) % 97) - ((b.origIdx * 31 + seed) % 97))
+        // matchState: { selectedLeft: number|null, matches: { [leftIdx]: rightIdx } }
+        const matchState = currentAnswer || { selectedLeft: null, matches: {} }
+        const matches = matchState.matches || {}
+        const selectedLeft = matchState.selectedLeft
+
+        const handleLeftClick = (li) => {
+          if (matches[li] !== undefined) {
+            // Undo this match
+            const newMatches = { ...matches }
+            delete newMatches[li]
+            setAnswers(prev => ({ ...prev, [currentQuestion]: { selectedLeft: null, matches: newMatches } }))
+          } else {
+            setAnswers(prev => ({ ...prev, [currentQuestion]: { ...matchState, selectedLeft: li } }))
+          }
+        }
+        const handleRightClick = (ri) => {
+          if (selectedLeft === null || selectedLeft === undefined) return
+          if (Object.values(matches).includes(ri)) return
+          const newMatches = { ...matches, [selectedLeft]: ri }
+          setAnswers(prev => ({ ...prev, [currentQuestion]: { selectedLeft: null, matches: newMatches } }))
+        }
+
         return (
           <div className="space-y-4">
-            <p className="text-sm text-gray-500">Ordne die Begriffe zu. Tippe links und dann rechts.</p>
+            <p className="text-sm text-gray-500">Klicke links auf einen Begriff, dann rechts auf die passende Zuordnung. Klicke erneut links um eine Zuordnung zu lösen.</p>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
-                {leftItems.map((item, li) => (
-                  <div key={li} className="px-4 py-3 rounded-xl bg-blue-50 border border-blue-200 text-sm font-medium text-blue-900">
-                    {item}
-                    {(currentAnswer || {})[li] !== undefined && (
-                      <span className="ml-2 text-blue-500">→ {shuffledRight[(currentAnswer || {})[li]]?.text}</span>
-                    )}
-                  </div>
-                ))}
+                {leftItems.map((item, li) => {
+                  const isMatched = matches[li] !== undefined
+                  const isActive = selectedLeft === li
+                  return (
+                    <button key={li} onClick={() => handleLeftClick(li)}
+                      className={`w-full text-left px-4 py-3 rounded-xl border-2 text-sm font-medium transition-all ${
+                        isActive ? 'border-blue-500 bg-blue-100 text-blue-900 ring-2 ring-blue-300' :
+                        isMatched ? 'border-green-300 bg-green-50 text-green-800' :
+                        'border-blue-200 bg-blue-50 text-blue-900 hover:border-blue-400'
+                      }`}>
+                      {item}
+                      {isMatched && (
+                        <span className="ml-2 text-green-600 text-xs">→ {shuffledRight[matches[li]]?.text}</span>
+                      )}
+                    </button>
+                  )
+                })}
               </div>
               <div className="space-y-2">
                 {shuffledRight.map((item, ri) => {
-                  const isSelected = Object.values(currentAnswer || {}).includes(ri)
+                  const isUsed = Object.values(matches).includes(ri)
                   return (
-                    <button key={ri} onClick={() => {
-                      const pending = Object.keys(currentAnswer || {}).length
-                      if (pending < leftItems.length) {
-                        setAnswers(prev => ({ ...prev, [currentQuestion]: { ...(prev[currentQuestion] || {}), [pending]: ri } }))
-                      }
-                    }}
-                      disabled={isSelected}
-                      className={`w-full text-left px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
-                        isSelected ? 'bg-gray-100 border-gray-200 text-gray-400' : 'bg-green-50 border-green-200 text-green-900 hover:bg-green-100'
+                    <button key={ri} onClick={() => handleRightClick(ri)}
+                      disabled={isUsed || selectedLeft === null}
+                      className={`w-full text-left px-4 py-3 rounded-xl border-2 text-sm font-medium transition-all ${
+                        isUsed ? 'bg-gray-100 border-gray-200 text-gray-400' :
+                        selectedLeft !== null ? 'bg-green-50 border-green-200 text-green-900 hover:border-green-400 hover:bg-green-100' :
+                        'bg-gray-50 border-gray-200 text-gray-500'
                       }`}>
                       {item.text}
                     </button>
@@ -367,9 +395,9 @@ export default function SchuelerPage() {
                 })}
               </div>
             </div>
-            {Object.keys(currentAnswer || {}).length > 0 && (
-              <button onClick={() => setAnswers(prev => ({ ...prev, [currentQuestion]: {} }))}
-                className="text-xs text-gray-500 hover:text-red-500">Zuordnung zurücksetzen</button>
+            {Object.keys(matches).length > 0 && (
+              <button onClick={() => setAnswers(prev => ({ ...prev, [currentQuestion]: { selectedLeft: null, matches: {} } }))}
+                className="text-xs text-gray-500 hover:text-red-500">Alle Zuordnungen zurücksetzen</button>
             )}
           </div>
         )
