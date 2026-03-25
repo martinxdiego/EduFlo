@@ -328,10 +328,19 @@ export default function SchuelerPage() {
         )
 
       case 'matching':
-        const pairs = (q.answer || '').split(',').filter(Boolean)
-        const leftItems = pairs.map(p => p.split('→')[0]?.trim())
-        const rightItems = pairs.map((p, i) => ({ text: p.split('→')[1]?.trim(), origIdx: i }))
-        const seed = (q.number || currentQuestion) * 7 + pairs.length
+        const pairsRaw = (q.answer || '').split(',').filter(Boolean)
+        // Support both "A→B" and "A-B" and "A - B" formats
+        const parsePair = (p) => {
+          const trimmed = p.trim()
+          if (trimmed.includes('→')) return trimmed.split('→').map(s => s.trim())
+          if (trimmed.includes(' - ')) return trimmed.split(' - ').map(s => s.trim())
+          if (trimmed.includes('-')) return [trimmed.split('-')[0].trim(), trimmed.split('-').slice(1).join('-').trim()]
+          return [trimmed, trimmed]
+        }
+        const parsedPairs = pairsRaw.map(parsePair)
+        const leftItems = parsedPairs.map(p => p[0])
+        const rightItems = parsedPairs.map((p, i) => ({ text: p[1], origIdx: i }))
+        const seed = (q.number || currentQuestion) * 7 + parsedPairs.length
         const shuffledRight = [...rightItems].sort((a, b) => ((a.origIdx * 31 + seed) % 97) - ((b.origIdx * 31 + seed) % 97))
         // matchState: { selectedLeft: number|null, matches: { [leftIdx]: rightIdx } }
         const matchState = currentAnswer || { selectedLeft: null, matches: {} }
