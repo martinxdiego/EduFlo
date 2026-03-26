@@ -2221,7 +2221,9 @@ const Home = () => {
       })
       if (res.ok) {
         const data = await res.json()
-        setSuccessMessage(`Zugangscode: ${data.code} — Teilen Sie diesen Code mit Ihren Schülern.`)
+        const studentUrl = `${window.location.origin}/schueler?code=${data.code}`
+        setSuccessMessage(`Zugangscode: ${data.code} — Schüler-Link: ${studentUrl}`)
+        try { navigator.clipboard.writeText(studentUrl) } catch(e) {}
         setShareModalOpen(false)
         setShareForm({ className: '', deadline: '' })
         loadAssignments()
@@ -4751,7 +4753,7 @@ const Home = () => {
 
                           <Separator className="my-4" />
                           <p className="text-xs text-gray-500">
-                            Nach der Freigabe erhalten Sie einen Zugangscode. Schüler öffnen <strong>/schueler</strong> und geben den Code ein.
+                            Nach der Freigabe erhalten Sie einen Schüler-Link, der automatisch in die Zwischenablage kopiert wird. Teilen Sie diesen Link mit Ihrer Klasse.
                           </p>
                         </motion.div>
                       </motion.div>
@@ -4783,6 +4785,10 @@ const Home = () => {
                             <p className="text-xs text-gray-500 mt-1">{a.class_name ? `${a.class_name} · ` : ''}{new Date(a.created_at).toLocaleDateString('de-CH')}</p>
                             {a.submission_count > 0 && <p className="text-xs text-blue-600 mt-1">{a.submission_count} Abgabe{a.submission_count !== 1 ? 'n' : ''}</p>}
                             {a.deadline && <p className="text-xs text-amber-600 mt-1">Frist: {new Date(a.deadline).toLocaleDateString('de-CH')}</p>}
+                            <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(`${window.location.origin}/schueler?code=${a.code}`); setSuccessMessage('Schüler-Link kopiert!') }}
+                              className="text-xs text-blue-500 hover:text-blue-700 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                              <Copy className="h-3 w-3" /> Link kopieren
+                            </button>
                           </CardContent>
                           {/* Delete confirmation overlay */}
                           {deleteConfirm === a.id && (
@@ -4820,8 +4826,15 @@ const Home = () => {
                     <CardContent className="py-4">
                       <div className="flex items-center justify-between flex-wrap gap-3">
                         <div>
-                          <h3 className="font-semibold text-gray-900">{selectedAssignment.class_name || 'Aufgabe'}</h3>
-                          <p className="text-xs text-gray-500">Code: <span className="font-mono text-blue-600">{selectedAssignment.code}</span> · {assignmentSubmissions.length} Abgaben</p>
+                          <h3 className="font-semibold text-gray-900">{selectedAssignment.worksheet_title || selectedAssignment.class_name || 'Aufgabe'}</h3>
+                          <p className="text-xs text-gray-500 mb-1">{selectedAssignment.class_name ? `${selectedAssignment.class_name} · ` : ''}Code: <span className="font-mono text-blue-600">{selectedAssignment.code}</span> · {assignmentSubmissions.length} Abgaben</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <p className="text-xs text-gray-400 font-mono truncate max-w-[300px]">{typeof window !== 'undefined' ? `${window.location.origin}/schueler?code=${selectedAssignment.code}` : ''}</p>
+                            <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/schueler?code=${selectedAssignment.code}`); setSuccessMessage('Schüler-Link kopiert!') }}
+                              className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 flex-shrink-0">
+                              <Copy className="h-3 w-3" /> Kopieren
+                            </button>
+                          </div>
                         </div>
                         <div className="flex gap-2 flex-wrap">
                           <Button variant="outline" size="sm" className="text-xs" onClick={() => loadClassOverview(selectedAssignment.id)}>
