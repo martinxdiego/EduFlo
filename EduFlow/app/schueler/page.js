@@ -195,7 +195,7 @@ export default function SchuelerPage() {
         duration,
         studentToken: studentToken !== 'guest' ? studentToken : null,
       }
-      console.log('[EduFlow] Submitting quiz:', { code: accessCode, name: payload.studentName, answerCount: answersArray.length })
+      console.log('[EduFlow] Submitting quiz:', { code: accessCode, codeLength: accessCode.length, name: payload.studentName, answerCount: answersArray.length, payload: JSON.stringify(payload).substring(0, 300) })
       const res = await fetch('/api/student/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

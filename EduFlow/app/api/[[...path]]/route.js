@@ -1280,7 +1280,12 @@ Aktion: ${actionPrompt}`
         } catch (e) { /* guest mode */ }
       }
       const assignment = await db.collection('assignments').findOne({ code: assignmentCode, status: 'active' })
-      if (!assignment) return handleCORS(NextResponse.json({ error: 'Aufgabe nicht gefunden.' }, { status: 404 }))
+      if (!assignment) {
+        // Debug: check if assignment exists with different status
+        const anyAssignment = await db.collection('assignments').findOne({ code: assignmentCode })
+        console.log('[Submit Debug] code:', assignmentCode, 'found:', !!anyAssignment, 'status:', anyAssignment?.status)
+        return handleCORS(NextResponse.json({ error: `Aufgabe nicht gefunden. Code: "${assignmentCode}", Status: ${anyAssignment ? anyAssignment.status : 'nicht vorhanden'}` }, { status: 404 }))
+      }
       const worksheet = await db.collection('worksheets').findOne({ id: assignment.worksheet_id })
       if (!worksheet) return handleCORS(NextResponse.json({ error: 'Material nicht gefunden.' }, { status: 404 }))
 
