@@ -622,6 +622,17 @@ const Home = () => {
       .replace(/✓/g, 'X')   // checkmark
       .replace(/•/g, '-')    // bullet
       .replace(/\u2610/g, '[ ]') // ballot box
+      // Strip all emojis and symbols outside Latin-1 range
+      .replace(/[\u{1F600}-\u{1F9FF}]/gu, '')  // emoticons & supplemental symbols
+      .replace(/[\u{2600}-\u{27BF}]/gu, '')     // misc symbols & dingbats
+      .replace(/[\u{FE00}-\u{FE0F}]/gu, '')     // variation selectors
+      .replace(/[\u{1F300}-\u{1F5FF}]/gu, '')   // misc symbols & pictographs
+      .replace(/[\u{1FA00}-\u{1FA6F}]/gu, '')   // chess symbols & extended
+      .replace(/[\u{1FA70}-\u{1FAFF}]/gu, '')   // symbols extended-A
+      .replace(/[\u{200D}]/gu, '')               // zero-width joiner
+      .replace(/[\u{20E3}]/gu, '')               // combining enclosing keycap
+      .replace(/[\u{E0020}-\u{E007F}]/gu, '')   // tags
+      .trim()
   }
 
   const generatePDF = (worksheet, version = 'student') => {
@@ -662,13 +673,6 @@ const Home = () => {
     setFillHex(tc.accent)
     doc.rect(0, 0, pageWidth, 2.5, 'F')
     yPosition = 14
-
-    // Decorative header icon (emoji as text)
-    if (pdfTheme.decorations?.headerIcon) {
-      doc.setFontSize(16)
-      doc.text(pdfTheme.decorations.headerIcon, pageWidth / 2, yPosition, { align: 'center' })
-      yPosition += 8
-    }
 
     // ---- EXAM HEADER ----
     if (isExam) {
@@ -735,29 +739,35 @@ const Home = () => {
         yPosition += 8
       }
     } else {
-      // ---- WORKSHEET / QUIZ / VOCAB HEADER ----
-      doc.setFontSize(18)
+      // ---- WORKSHEET / QUIZ / VOCAB HEADER (Canva-inspired) ----
+      // Subtle header background block
+      setFillHex(tc.primaryLight)
+      doc.roundedRect(15, yPosition - 8, pageWidth - 30, 32, 3, 3, 'F')
+
+      doc.setFontSize(16)
       doc.setFont('helvetica', 'bold')
       setColor(tc.primary)
       const titleText = worksheet.title || worksheet.content?.title || 'Material'
-      const titleLines = doc.splitTextToSize(titleText, pageWidth - 40)
+      const titleLines = doc.splitTextToSize(titleText, pageWidth - 50)
       doc.text(titleLines, pageWidth / 2, yPosition, { align: 'center' })
-      yPosition += titleLines.length * 8 + 2
+      yPosition += titleLines.length * 7 + 3
 
-      doc.setFontSize(10)
+      // Metadata badges inline
+      doc.setFontSize(9)
       doc.setFont('helvetica', 'normal')
       doc.setTextColor(100, 100, 100)
-      doc.text(`Klasse: ${worksheet.grade} | Fach: ${worksheet.subject} | Schwierigkeit: ${DIFFICULTY_LABELS[worksheet.difficulty] || worksheet.difficulty}`, pageWidth / 2, yPosition, { align: 'center' })
-      yPosition += 5
+      const metaText = `${worksheet.grade}. Klasse  ·  ${worksheet.subject}  ·  ${DIFFICULTY_LABELS[worksheet.difficulty] || worksheet.difficulty}`
+      doc.text(metaText, pageWidth / 2, yPosition, { align: 'center' })
+      yPosition += 12
 
       if (version === 'student') {
-        yPosition += 5
         doc.setTextColor(0, 0, 0)
-        doc.setFontSize(11)
-        doc.text('Name: ____________________________________________     Datum: ______________', 20, yPosition)
+        doc.setFontSize(10)
+        doc.setFont('helvetica', 'normal')
+        doc.text('Name: ___________________________________________', 20, yPosition)
+        doc.text('Datum: ______________', pageWidth - 60, yPosition)
         yPosition += 10
       } else {
-        yPosition += 3
         doc.setFontSize(9)
         doc.setTextColor(180, 0, 0)
         doc.setFont('helvetica', 'bold')
@@ -779,19 +789,28 @@ const Home = () => {
     worksheet.content?.questions?.forEach((q, qIdx) => {
       checkPage(60)
       const qType = q.type || (q.options ? 'multiple_choice' : 'open')
-      const qEmoji = getQuestionDecoration(pdfTheme, qIdx)
 
-      // Themed left border for question
-      setFillHex(tc.questionBorder)
-      doc.rect(15, yPosition - 4, tp_pdf.questionBorderWidth, 10, 'F')
+      // Question number in themed circle/badge
+      setFillHex(tc.accent)
+      doc.circle(22, yPosition - 1, 4, 'F')
+      doc.setFontSize(9)
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(255, 255, 255)
+      doc.text(String(q.number), 22, yPosition + 0.5, { align: 'center' })
 
-      doc.setFontSize(11)
+      // Question text - use normal weight for readability, bold only for first few words
+      doc.setFontSize(10.5)
       doc.setFont('helvetica', 'bold')
       doc.setTextColor(30, 30, 30)
-      const prefix = qEmoji ? `${qEmoji} ` : ''
-      const questionText = sanitizePdfText(`${prefix}${q.number}. ${q.question}`)
-      const questionLines = doc.splitTextToSize(questionText, showPoints ? pageWidth - 55 : pageWidth - 40)
-      doc.text(questionLines, 20, yPosition)
+      const questionText = sanitizePdfText(q.question)
+      const maxWidth = showPoints ? pageWidth - 60 : pageWidth - 45
+      const questionLines = doc.splitTextToSize(questionText, maxWidth)
+      doc.text(questionLines, 29, yPosition)
+
+      // Themed left border spanning full question height
+      const qTextHeight = questionLines.length * 5 + 2
+      setFillHex(tc.questionBorder)
+      doc.rect(15, yPosition - 5, 1.5, qTextHeight + 3, 'F')
 
       // Points badge (only for exams)
       if (showPoints) {
@@ -805,46 +824,49 @@ const Home = () => {
         doc.setTextColor(0, 0, 0)
       }
 
-      yPosition += questionLines.length * 6 + 3
+      yPosition += questionLines.length * 5 + 4
 
-      // === MC / True-False / Either-Or: clean option rendering ===
+      // === MC / True-False / Either-Or: Canva-style option cards ===
       if (['multiple_choice', 'true_false', 'either_or'].includes(qType) && q.options) {
         doc.setFont('helvetica', 'normal')
         doc.setFontSize(10)
-        doc.setTextColor(50, 50, 50)
-        yPosition += 1
+        yPosition += 2
         q.options.forEach((option, oi) => {
-          checkPage(10)
+          checkPage(12)
           const letter = String.fromCharCode(65 + oi)
           const cleanOption = sanitizePdfText(option.replace(/^[A-Z]\)\s*/, ''))
+          const optionLines = doc.splitTextToSize(cleanOption, pageWidth - 65)
+          const optionHeight = optionLines.length * 5 + 4
+
+          // Light background card for each option
+          setFillHex(tc.primaryLight + '60')
+          setDrawHex(tc.accent + '40')
+          doc.setLineWidth(0.2)
+          doc.roundedRect(29, yPosition - 4.5, pageWidth - 54, optionHeight, 2, 2, 'FD')
+
+          // Letter badge
           if (isExam) {
             setDrawHex(tc.accent)
-            doc.setLineWidth(0.4)
-            doc.rect(28, yPosition - 3.5, 3.5, 3.5)
-            doc.setLineWidth(0.2)
-            doc.setTextColor(50, 50, 50)
-            doc.text(`${letter})`, 34, yPosition)
-            const optionLines = doc.splitTextToSize(cleanOption, pageWidth - 65)
-            doc.text(optionLines, 42, yPosition)
-            yPosition += optionLines.length * 5 + 3
-          } else {
-            setDrawHex(tc.accent)
             doc.setLineWidth(0.3)
-            doc.circle(30, yPosition - 1.2, 2)
+            doc.rect(32, yPosition - 3, 3.5, 3.5)
             doc.setLineWidth(0.2)
+          } else {
+            setFillHex(tc.accent)
+            doc.circle(34, yPosition - 1, 2.5, 'F')
+            doc.setTextColor(255, 255, 255)
             doc.setFont('helvetica', 'bold')
             doc.setFontSize(8)
-            setColor(tc.accent)
-            doc.text(letter, 28.8, yPosition)
-            doc.setFont('helvetica', 'normal')
-            doc.setFontSize(10)
-            doc.setTextColor(50, 50, 50)
-            const optionLines = doc.splitTextToSize(cleanOption, pageWidth - 60)
-            doc.text(optionLines, 37, yPosition)
-            yPosition += optionLines.length * 5 + 3
+            doc.text(letter, 34, yPosition, { align: 'center' })
           }
+
+          // Option text
+          doc.setFont('helvetica', 'normal')
+          doc.setFontSize(10)
+          doc.setTextColor(50, 50, 50)
+          doc.text(optionLines, 42, yPosition)
+          yPosition += optionHeight + 1.5
         })
-        yPosition += 3
+        yPosition += 2
       }
 
       // === Fill in the blank: inline text with underline gaps ===
@@ -1101,21 +1123,23 @@ const Home = () => {
       })
     }
 
-    // Footer with theme
-    checkPage(20)
+    // Footer with theme — Canva-style info bar
+    checkPage(25)
     yPosition += 10
-    setDrawHex(tc.accent)
-    doc.setLineWidth(tp_pdf.headerLineWidth)
-    doc.line(20, yPosition, pageWidth - 20, yPosition)
+    setFillHex(tc.primaryLight)
+    setDrawHex(tc.accent + '40')
+    doc.setLineWidth(0.3)
+    doc.roundedRect(15, yPosition - 2, pageWidth - 30, 14, 2, 2, 'FD')
     doc.setLineWidth(0.2)
-    yPosition += 8
-    doc.setFontSize(10)
+    doc.setFontSize(9)
     doc.setFont('helvetica', 'bold')
     setColor(tc.primary)
     if (showPoints) {
-      doc.text(`Total: ${worksheet.content?.total_points || '–'} Punkte | Geschätzte Zeit: ${worksheet.content?.estimated_time || '–'}`, 20, yPosition)
+      doc.text(`Total: ${worksheet.content?.total_points || '–'} Punkte`, 22, yPosition + 6)
+      doc.setFont('helvetica', 'normal')
+      doc.text(`Geschätzte Zeit: ${worksheet.content?.estimated_time || '–'}`, pageWidth - 22, yPosition + 6, { align: 'right' })
     } else {
-      doc.text(`Geschätzte Zeit: ${worksheet.content?.estimated_time || '–'}`, 20, yPosition)
+      doc.text(`Geschätzte Zeit: ${worksheet.content?.estimated_time || '–'}`, pageWidth / 2, yPosition + 6, { align: 'center' })
     }
     doc.setTextColor(0, 0, 0)
 

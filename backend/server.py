@@ -148,59 +148,114 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
 
 def get_system_prompt(grade: str, subject: str, difficulty: str, mode: str = 'worksheet') -> str:
     """Generate the system prompt for worksheet/exam generation"""
-    
+
     difficulty_descriptions = {
-        'easy': 'Einfach - grundlegende Konzepte, einfache Sprache',
-        'medium': 'Mittel - altersgerechte Herausforderung',
-        'hard': 'Schwierig - anspruchsvolle Aufgaben für fortgeschrittene Schüler'
+        'easy': """EINFACH — Aber NICHT trivial!
+- Grundlegendes Textverständnis und Wiedergabe
+- Kurze, klare Sätze, aber trotzdem inhaltlich gehaltvoll
+- Fragen, die Wissen abfragen und einfache Zusammenhänge erkennen lassen
+- Multiple-Choice-Optionen müssen ALLE plausibel klingen (keine offensichtlich absurden Antworten!)
+- Mindestens 2-3 Sätze pro Fragestellung""",
+        'medium': """MITTEL — Anwendung und Analyse:
+- Schüler müssen Wissen auf neue Situationen übertragen
+- Fragen erfordern Begründungen und Erklärungen
+- Verknüpfung von mehreren Konzepten
+- Mindestens 2-4 Sätze pro Fragestellung, oft mit Kontext oder Szenario
+- Multiple-Choice: Alle Optionen müssen realistisch und durchdacht sein""",
+        'hard': """SCHWIERIG — Synthese, Bewertung und kritisches Denken:
+- Komplexe Szenarien und Fallbeispiele als Basis für Fragen
+- Schüler müssen argumentieren, bewerten, vergleichen und Schlüsse ziehen
+- Transferaufgaben: Wissen auf unbekannte Situationen anwenden
+- Mindestens 3-5 Sätze pro Fragestellung mit reichem Kontext
+- Multiple-Choice: Alle Optionen müssen sorgfältig formuliert sein — keine offensichtlich falschen Antworten wie "Astronaut" bei einer Geschichtsfrage!
+- Offene Fragen sollen zum Nachdenken anregen und mehrteilige Antworten erfordern"""
     }
-    
+
     mode_instructions = {
-        'worksheet': 'This is a practice worksheet. Questions should help students learn and practice concepts without grading pressure.',
-        'exam': 'This is a graded exam. Each question should have clear point values and assessment criteria. Be precise and fair.'
+        'worksheet': """Dies ist ein ÜBUNGS-Arbeitsblatt. Die Fragen sollen:
+- Zum Nachdenken und Entdecken anregen
+- Verschiedene Denkebenen ansprechen (nicht nur Fakten abfragen!)
+- Abwechslungsreich und motivierend sein
+- Kontext und Szenarien bieten, nicht nur nackte Fragen""",
+        'exam': """Dies ist eine BENOTETE Prüfung. Die Fragen sollen:
+- Fair und klar formuliert sein
+- Verschiedene Kompetenzstufen abdecken (Wissen, Verstehen, Anwenden, Analysieren)
+- Eindeutige Bewertungskriterien haben
+- Punkteverteilung muss zum Schwierigkeitsgrad passen"""
     }
-    
+
     points_instruction = '"points": 2,' if mode == 'exam' else ''
     total_points_instruction = '"total_points": sum of all question points,' if mode == 'exam' else ''
 
-    return f"""You are an expert Swiss primary school teacher creating {'worksheets' if mode == 'worksheet' else 'exams'} aligned with Lehrplan 21 (Swiss curriculum).
+    return f"""Du bist ein erfahrener Schweizer Primarschullehrer mit 15 Jahren Berufserfahrung. Du erstellst hochwertige, kreative und pädagogisch durchdachte Unterrichtsmaterialien nach Lehrplan 21.
 
-Grade Level: {grade} (Primarschule)
-Subject: {subject}
-Difficulty: {difficulty_descriptions.get(difficulty, 'medium')}
-Mode: {'Arbeitsblatt (Worksheet)' if mode == 'worksheet' else 'Prüfung (Exam)'}
+=== KONTEXT ===
+Klassenstufe: {grade}. Klasse (Primarschule Schweiz)
+Fach: {subject}
+Schwierigkeitsgrad: {difficulty_descriptions.get(difficulty, difficulty_descriptions['medium'])}
+Modus: {'Arbeitsblatt (Übung)' if mode == 'worksheet' else 'Prüfung (benotet)'}
 
-{mode_instructions[mode]}
+{mode_instructions.get(mode, mode_instructions['worksheet'])}
 
-Create age-appropriate questions that:
-- Use clear, simple German suitable for grade {grade}
-- Align with Lehrplan 21 competencies
-- Include varied question types (multiple_choice, short_answer, problem_solving, gap_text)
-- Are engaging and relevant to Swiss students
-- Consider Swiss cultural context
+=== QUALITÄTSANFORDERUNGEN (SEHR WICHTIG!) ===
 
-Format your response as a JSON object with:
+1. **REICHHALTIGE FRAGEN**: Jede Frage muss substanziell sein. KEINE Ein-Satz-Fragen!
+   - SCHLECHT: "Was war eine typische Beschäftigung im Mittelalter?"
+   - GUT: "Im Mittelalter war die Gesellschaft in verschiedene Stände eingeteilt. Der Adel, die Geistlichen und die Bauern hatten sehr unterschiedliche Aufgaben und Rechte. Erkläre, welche Aufgaben ein Ritter im Mittelalter hatte und warum die Bauern den grössten Teil der Bevölkerung ausmachten."
+
+2. **INTELLIGENTE MULTIPLE-CHOICE-OPTIONEN**: ALLE Antwortmöglichkeiten müssen realistisch und plausibel klingen!
+   - SCHLECHT: A) Ritter, B) Astronaut, C) Computerprogrammierer, D) YouTuber
+   - GUT: A) Ritter und Burgherren, B) Handwerker in den Zünften, C) Mönche in Klöstern, D) Fahrende Händler und Kaufleute
+   - Die falschen Antworten sollen zum Nachdenken anregen, NICHT offensichtlich absurd sein!
+
+3. **KONTEXTREICHE AUFGABENSTELLUNGEN**: Baue Szenarien, Geschichten, Quelltexte oder Situationen in die Fragen ein.
+   - Beginne Fragen mit einer kurzen Einleitung, einem Zitat, einer Situation oder einem Beispiel
+   - Verwende "Stell dir vor...", "Ein Bauer im Jahr 1350...", "Lies den folgenden Text..."
+
+4. **SCHWEIZER KONTEXT**: Verwende Schweizer Beispiele, Orte, Bräuche und den Schweizer Lehrplan 21.
+   - Zürich, Bern, Luzern statt Berlin oder Wien
+   - Schweizer Geschichte, Geographie, Kultur wo passend
+   - Schweizerdeutsche Begriffe in Klammern wo hilfreich
+
+5. **VIELFÄLTIGE FRAGETYPEN**: Mische verschiedene Typen kreativ:
+   - "multiple_choice": Gut durchdachte Optionen (4 Stück), alle plausibel
+   - "open": Offene Fragen die zum Argumentieren, Erklären oder Reflektieren einladen (NICHT nur "Nenne zwei Dinge...")
+   - "fill_blank": Lückentexte mit zusammenhängendem, informativem Text (markiere Lücken mit ___)
+   - "matching": Kreative Zuordnungsaufgaben (Format in answer: "links1→rechts1, links2→rechts2")
+   - "ordering": Elemente in richtige Reihenfolge bringen
+   - "true_false": Aussagen die zum Nachdenken anregen, nicht offensichtlich richtig/falsch
+   - "math": Rechenaufgaben mit Textaufgaben-Kontext (für Mathematik)
+
+6. **ERKLÄRUNGEN FÜR LEHRER**: Jede Frage braucht eine ausführliche Erklärung mit didaktischem Hinweis.
+
+7. **ANTWORTZEILEN**: Setze "answerLines" passend: 2 für kurze Antworten, 4-6 für ausführliche offene Fragen.
+
+=== ANTWORTFORMAT (JSON) ===
 {{
-  "title": "{'Arbeitsblatt' if mode == 'worksheet' else 'Prüfung'}: [Topic] - Klasse {grade}",
+  "title": "{subject}: [Kreatives Thema] - {grade}. Klasse",
   "questions": [
     {{
       "id": "q1",
       "number": 1,
-      "type": "multiple_choice" | "short_answer" | "problem_solving" | "gap_text",
-      "question": "Question text",
-      "options": ["A", "B", "C", "D"] (for multiple choice only),
-      "answer": "Correct answer",
-      "explanation": "Brief explanation for teachers",
+      "type": "multiple_choice",
+      "question": "Ausführlicher Fragetext mit Kontext und Szenario (mindestens 2-3 Sätze!)",
+      "options": ["Plausible Option A", "Plausible Option B", "Plausible Option C", "Plausible Option D"],
+      "answer": "Die korrekte Antwort",
+      "explanation": "Ausführliche Erklärung für die Lehrperson mit didaktischem Hinweis",
       {points_instruction}
       "answerLines": 3
     }}
   ],
-  "teacher_notes": "{'Tips for grading and common student mistakes' if mode == 'worksheet' else 'Grading rubric and point distribution explanation'}",
+  "teacher_notes": "Ausführliche Hinweise: Lernziele, häufige Fehler, Differenzierungsmöglichkeiten, Bezug zum Lehrplan 21",
   {total_points_instruction}
-  "estimated_time": "20-30 minutes"
+  "estimated_time": "XX Minuten"
 }}
 
-IMPORTANT: Each question must have a unique "id" field like "q1", "q2", etc."""
+WICHTIG:
+- Jede Frage braucht eine eindeutige "id" ("q1", "q2", etc.)
+- Schreibe ALLE Texte auf Deutsch (Schweizer Hochdeutsch)
+- Qualität vor Quantität: Lieber weniger, dafür richtig gute Fragen!
+- KEINE trivialen oder offensichtlich absurden Antwortoptionen!"""
 
 # ==================== AUTH ROUTES ====================
 
@@ -267,7 +322,7 @@ async def generate_worksheet(data: WorksheetGenerateRequest, user = Depends(get_
         raise HTTPException(status_code=403, detail="Monatliches Limit erreicht. Bitte auf Premium upgraden.")
     
     system_prompt = get_system_prompt(data.grade, data.subject, data.difficulty, data.mode)
-    user_prompt = f"Create a {'worksheet' if data.mode == 'worksheet' else 'exam'} with {data.questionCount} questions about: {data.topic}\n\nMake it engaging and appropriate for {data.grade}. Klasse students in Switzerland."
+    user_prompt = f"Erstelle ein {'Arbeitsblatt' if data.mode == 'worksheet' else 'eine Prüfung'} mit {data.questionCount} Fragen zum Thema: {data.topic}\n\nKlassenstufe: {data.grade}. Klasse, Schweiz.\n\nWICHTIG: Die Fragen müssen kreativ, ausführlich und inhaltlich reichhaltig sein. Jede Frage soll mindestens 2-3 Sätze lang sein und einen spannenden Kontext bieten. Bei Multiple-Choice müssen ALLE Optionen realistisch und plausibel klingen — keine offensichtlich absurden Antworten!"
     
     completion = openai_client.chat.completions.create(
         model="gpt-4o",
@@ -338,7 +393,7 @@ async def generate_worksheet_stream(data: WorksheetGenerateRequest, user = Depen
             logger.info(f"Starting OpenAI streaming for {data.topic}")
             
             system_prompt = get_system_prompt(data.grade, data.subject, data.difficulty, data.mode)
-            user_prompt = f"Create a {'worksheet' if data.mode == 'worksheet' else 'exam'} with {data.questionCount} questions about: {data.topic}\n\nMake it engaging and appropriate for {data.grade}. Klasse students in Switzerland."
+            user_prompt = f"Erstelle ein {'Arbeitsblatt' if data.mode == 'worksheet' else 'eine Prüfung'} mit {data.questionCount} Fragen zum Thema: {data.topic}\n\nKlassenstufe: {data.grade}. Klasse, Schweiz.\n\nWICHTIG: Die Fragen müssen kreativ, ausführlich und inhaltlich reichhaltig sein. Jede Frage soll mindestens 2-3 Sätze lang sein und einen spannenden Kontext bieten. Bei Multiple-Choice müssen ALLE Optionen realistisch und plausibel klingen — keine offensichtlich absurden Antworten!"
             
             try:
                 stream = openai_client.chat.completions.create(
@@ -547,7 +602,7 @@ async def regenerate_worksheet(data: RegenerateRequest, user = Depends(get_curre
     
     mode = worksheet.get('mode', 'worksheet')
     system_prompt = get_system_prompt(worksheet['grade'], worksheet['subject'], data.newDifficulty, mode)
-    user_prompt = f"Create a {'worksheet' if mode == 'worksheet' else 'exam'} with {worksheet['question_count']} questions about: {worksheet['topic']}\n\nMake it engaging and appropriate for {worksheet['grade']}. Klasse students in Switzerland."
+    user_prompt = f"Erstelle ein {'Arbeitsblatt' if mode == 'worksheet' else 'eine Prüfung'} mit {worksheet['question_count']} Fragen zum Thema: {worksheet['topic']}\n\nKlassenstufe: {worksheet['grade']}. Klasse, Schweiz.\n\nWICHTIG: Die Fragen müssen kreativ, ausführlich und inhaltlich reichhaltig sein. Jede Frage soll mindestens 2-3 Sätze lang sein und einen spannenden Kontext bieten. Bei Multiple-Choice müssen ALLE Optionen realistisch und plausibel klingen!"
     
     completion = openai_client.chat.completions.create(
         model="gpt-4o",
