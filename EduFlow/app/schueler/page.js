@@ -51,7 +51,7 @@ export default function SchuelerPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const code = params.get('code')
-    if (code) setAccessCode(code.toUpperCase())
+    if (code) setAccessCode(code.toUpperCase().trim())
   }, [])
 
   // ============================================================
@@ -159,7 +159,7 @@ export default function SchuelerPage() {
     setLoading(true)
     setError('')
     try {
-      const res = await fetch(`/api/student/assignment/${accessCode}`)
+      const res = await fetch(`/api/student/assignment/${accessCode.trim()}`)
       if (!res.ok) {
         const data = await res.json()
         setError(data.error || 'Aufgabe nicht gefunden.')
@@ -189,7 +189,7 @@ export default function SchuelerPage() {
 
     try {
       const payload = {
-        assignmentCode: accessCode,
+        assignmentCode: accessCode.trim(),
         studentName: studentName || student?.display_name || 'Unbekannt',
         answers: answersArray,
         duration,
@@ -850,7 +850,7 @@ export default function SchuelerPage() {
               <input
                 type="text"
                 value={accessCode}
-                onChange={(e) => setAccessCode(e.target.value.toUpperCase())}
+                onChange={(e) => setAccessCode(e.target.value.toUpperCase().trim())}
                 placeholder="Zugangscode"
                 className="flex-1 px-4 py-3 rounded-xl border border-gray-200 text-lg font-mono text-center tracking-widest focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none"
                 maxLength={8}
