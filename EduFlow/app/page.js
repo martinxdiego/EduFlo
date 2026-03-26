@@ -96,40 +96,115 @@ const TEMPLATE_CATEGORIES = [
   { id: 'uebung', label: 'Übungen' },
   { id: 'sozial', label: 'Sozialformen' },
   { id: 'wortschatz', label: 'Wortschatz' },
+  { id: 'foerderung', label: 'Förderung' },
+  { id: 'digital', label: 'Digital & MI' },
 ]
 
 const STARTER_TEMPLATES = [
-  // Arbeitsblätter
-  { id: 't1', name: 'Multiplikations-Drill', subject: 'Mathematik', grade: '3', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 15, description: 'Einmaleins-Training mit aufsteigender Schwierigkeit', tags: ['Rechnen', 'Grundlagen'] },
-  { id: 't2', name: 'Leseverständnis', subject: 'Deutsch', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Text lesen und Verständnisfragen beantworten', tags: ['Lesen', 'Textarbeit'] },
+  // ============ ARBEITSBLÄTTER ============
+  // Deutsch
+  { id: 't1', name: 'Leseverständnis Kurztext', subject: 'Deutsch', grade: '3', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 6, description: 'Kurztext mit Verständnisfragen und Wortschatzübung', tags: ['Lesen', 'Wortschatz'] },
+  { id: 't2', name: 'Leseverständnis Sachtext', subject: 'Deutsch', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Sachtext lesen, Informationen entnehmen und Fragen beantworten', tags: ['Lesen', 'Textarbeit'] },
   { id: 't3', name: 'Diktat-Vorlage', subject: 'Deutsch', grade: '4', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 10, description: 'Standardvorlage für wöchentliche Diktate', tags: ['Schreiben', 'Rechtschreibung'] },
-  { id: 't9', name: 'Sachaufgaben Alltag', subject: 'Mathematik', grade: '4', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Textaufgaben aus dem Alltag der Schüler', tags: ['Rechnen', 'Textaufgaben'] },
-  { id: 't10', name: 'Lesetext mit Fragen', subject: 'Deutsch', grade: '3', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 6, description: 'Kurztext mit Verständnisfragen und Wortschatzübung', tags: ['Lesen', 'Wortschatz'] },
-  { id: 't11', name: 'Geometrie Formen', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Formen erkennen, benennen, berechnen', tags: ['Geometrie', 'Formen'] },
-  { id: 't12', name: 'Wochenplan-Aufgaben', subject: 'Deutsch', grade: '4', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 12, description: 'Gemischte Aufgaben für die Wochenplanarbeit', tags: ['Wochenplan', 'Gemischt'] },
-  { id: 't13', name: 'Hausaufgabenblatt', subject: 'Mathematik', grade: '3', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 8, description: 'Kurze Hausaufgaben zur Festigung des Stoffes', tags: ['Hausaufgaben', 'Festigung'] },
-  // Prüfungen
-  { id: 't6', name: 'Bruchrechnen Prüfung', subject: 'Mathematik', grade: '6', type: 'exam', category: 'pruefung', difficulty: 'hard', questionCount: 12, description: 'Formale Prüfung zu Brüchen mit Notenskala', tags: ['Prüfung', 'Brüche'] },
-  { id: 't14', name: 'Deutsch Grammatik-Test', subject: 'Deutsch', grade: '5', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 15, description: 'Grammatikprüfung: Zeiten, Fälle, Satzglieder', tags: ['Prüfung', 'Grammatik'] },
-  { id: 't15', name: 'NMG Lernzielkontrolle', subject: 'NMG', grade: '4', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 10, description: 'Themenabschluss-Prüfung für NMG', tags: ['Prüfung', 'Sachunterricht'] },
-  { id: 't16', name: 'Repetitionstest', subject: 'Mathematik', grade: '5', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 15, description: 'Wiederholungsprüfung über mehrere Themen', tags: ['Repetition', 'Gemischt'] },
-  { id: 't17', name: 'Schnelltest 10 Minuten', subject: 'Deutsch', grade: '3', type: 'exam', category: 'pruefung', difficulty: 'easy', questionCount: 5, description: 'Kurzer Schnelltest für den Stundenbeginn', tags: ['Schnelltest', 'Kurz'] },
-  // Quizze
-  { id: 't5', name: 'NMG Lernkontrolle', subject: 'NMG', grade: '4', type: 'quiz', category: 'quiz', difficulty: 'medium', questionCount: 10, description: 'Kurze Lernkontrolle zu NMG-Themen', tags: ['Quiz', 'Sachunterricht'] },
-  { id: 't18', name: 'Wahr oder Falsch Quiz', subject: 'NMG', grade: '5', type: 'quiz', category: 'quiz', difficulty: 'easy', questionCount: 10, description: 'Aussagen bewerten – stimmt das wirklich?', tags: ['Quiz', 'Wahr/Falsch'] },
-  { id: 't19', name: 'Kopfrechnen-Quiz', subject: 'Mathematik', grade: '4', type: 'quiz', category: 'quiz', difficulty: 'medium', questionCount: 15, description: 'Schnelles Kopfrechnen mit Zeitdruck', tags: ['Quiz', 'Kopfrechnen'] },
-  // Sozialformen
-  { id: 't20', name: 'Partnerarbeit Deutsch', subject: 'Deutsch', grade: '5', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 6, description: 'Aufgaben für die Arbeit zu zweit – gegenseitig abfragen', tags: ['Partnerarbeit', 'Kooperativ'] },
-  { id: 't21', name: 'Gruppenarbeit Forschen', subject: 'NMG', grade: '5', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 5, description: 'Forschungsaufträge für Gruppen mit Präsentation', tags: ['Gruppenarbeit', 'Forschen'] },
-  { id: 't22', name: 'Lernstationen', subject: 'Mathematik', grade: '4', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 8, description: 'Stationsarbeit mit unterschiedlichen Aufgabentypen', tags: ['Stationen', 'Differenziert'] },
-  // Wortschatz
-  { id: 't4', name: 'Vokabeltest Englisch', subject: 'Englisch', grade: '5', type: 'vocabulary', category: 'wortschatz', difficulty: 'medium', questionCount: 20, description: 'Wörterliste mit Übersetzungsübungen', tags: ['Vokabeln', 'Englisch'] },
-  { id: 't8', name: 'Französisch Grundwortschatz', subject: 'Französisch', grade: '5', type: 'vocabulary', category: 'wortschatz', difficulty: 'easy', questionCount: 25, description: 'Basisvokabular mit Übungen', tags: ['Vokabeln', 'Französisch'] },
-  { id: 't23', name: 'Lückentext Sprache', subject: 'Deutsch', grade: '4', type: 'worksheet', category: 'wortschatz', difficulty: 'medium', questionCount: 10, description: 'Lückentext zum Wortschatz und Sprachgefühl', tags: ['Lückentext', 'Wortschatz'] },
-  // Übungen
-  { id: 't7', name: 'Aufsatz-Bewertung', subject: 'Deutsch', grade: '6', type: 'worksheet', category: 'uebung', difficulty: 'medium', questionCount: 5, description: 'Kriterienbasierte Schreibaufgabe', tags: ['Schreiben', 'Bewertung'] },
-  { id: 't24', name: 'Differenzierte Aufgaben', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'uebung', difficulty: 'medium', questionCount: 12, description: 'Drei Niveaus: Basis, Erweitert, Profi', tags: ['Differenzierung', 'Niveaus'] },
-  { id: 't25', name: 'Prüfungsvorbereitung', subject: 'Deutsch', grade: '6', type: 'worksheet', category: 'uebung', difficulty: 'hard', questionCount: 15, description: 'Gemischte Übungen zur Prüfungsvorbereitung', tags: ['Vorbereitung', 'Repetition'] },
+  { id: 't4', name: 'Wochenplan-Aufgaben', subject: 'Deutsch', grade: '4', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 12, description: 'Gemischte Aufgaben für die Wochenplanarbeit', tags: ['Wochenplan', 'Gemischt'] },
+  { id: 't5', name: 'Textanalyse Erzählung', subject: 'Deutsch', grade: '7', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Erzähltext analysieren: Aufbau, Figuren, Spannungskurve', tags: ['Textanalyse', 'Literatur'] },
+  { id: 't6', name: 'Argumentieren & Diskutieren', subject: 'Deutsch', grade: '8', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'hard', questionCount: 6, description: 'Argumente formulieren, Pro/Contra abwägen, Stellungnahme schreiben', tags: ['Argumentieren', 'Schreiben'] },
+  { id: 't7', name: 'Satzglieder bestimmen', subject: 'Deutsch', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Subjekt, Prädikat, Objekte, Adverbiale erkennen und bestimmen', tags: ['Grammatik', 'Satzglieder'] },
+  { id: 't8', name: 'Bericht schreiben', subject: 'Deutsch', grade: '6', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 5, description: 'Aufbau und Merkmale eines Berichts üben (W-Fragen, sachlicher Stil)', tags: ['Schreiben', 'Bericht'] },
+  { id: 't9', name: 'Buchstaben & Laute', subject: 'Deutsch', grade: '1', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 8, description: 'Buchstaben erkennen, Anlaute zuordnen, erste Wörter lesen', tags: ['Erstlesen', 'Zyklus 1'] },
+  { id: 't10', name: 'Gedichte verstehen', subject: 'Deutsch', grade: '6', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 6, description: 'Gedichte lesen, Reimschema erkennen, Stilmittel benennen', tags: ['Lyrik', 'Literatur'] },
+  // Mathematik
+  { id: 't11', name: 'Multiplikations-Drill', subject: 'Mathematik', grade: '3', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 15, description: 'Einmaleins-Training mit aufsteigender Schwierigkeit', tags: ['Rechnen', 'Grundlagen'] },
+  { id: 't12', name: 'Sachaufgaben Alltag', subject: 'Mathematik', grade: '4', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Textaufgaben aus dem Alltag der Schüler', tags: ['Rechnen', 'Textaufgaben'] },
+  { id: 't13', name: 'Geometrie Formen', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Formen erkennen, benennen, Eigenschaften beschreiben', tags: ['Geometrie', 'Formen'] },
+  { id: 't14', name: 'Hausaufgabenblatt', subject: 'Mathematik', grade: '3', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 8, description: 'Kurze Hausaufgaben zur Festigung des Stoffes', tags: ['Hausaufgaben', 'Festigung'] },
+  { id: 't15', name: 'Bruchrechnen Grundlagen', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 12, description: 'Brüche kürzen, erweitern, addieren und subtrahieren', tags: ['Brüche', 'Grundlagen'] },
+  { id: 't16', name: 'Dezimalzahlen & Prozent', subject: 'Mathematik', grade: '6', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Umwandlung Bruch–Dezimalzahl–Prozent, Grundaufgaben', tags: ['Dezimalzahlen', 'Prozent'] },
+  { id: 't17', name: 'Gleichungen lösen', subject: 'Mathematik', grade: '7', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Lineare Gleichungen schrittweise lösen', tags: ['Algebra', 'Gleichungen'] },
+  { id: 't18', name: 'Fläche & Umfang', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Fläche und Umfang von Rechteck, Quadrat, Dreieck berechnen', tags: ['Geometrie', 'Berechnung'] },
+  { id: 't19', name: 'Zahlenraum bis 100', subject: 'Mathematik', grade: '2', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 12, description: 'Addition und Subtraktion im Zahlenraum bis 100', tags: ['Rechnen', 'Zyklus 1'] },
+  { id: 't20', name: 'Proportionalität & Dreisatz', subject: 'Mathematik', grade: '8', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'hard', questionCount: 8, description: 'Direkte und indirekte Proportionalität, Dreisatz anwenden', tags: ['Proportionalität', 'Dreisatz'] },
+  // NMG
+  { id: 't21', name: 'Unser Körper', subject: 'NMG', grade: '3', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 8, description: 'Körperteile, Organe und ihre Funktionen kennenlernen', tags: ['Körper', 'Gesundheit'] },
+  { id: 't22', name: 'Tiere im Wald', subject: 'NMG', grade: '4', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Waldtiere, Nahrungsketten, Lebensräume', tags: ['Tiere', 'Lebensraum'] },
+  { id: 't23', name: 'Wetter & Klima', subject: 'NMG', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Wetterphänomene, Wasserkreislauf, Klimazonen der Schweiz', tags: ['Wetter', 'Klima'] },
+  { id: 't24', name: 'Die Schweiz entdecken', subject: 'NMG', grade: '4', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Kantone, Geographie, Sprachen und Kultur der Schweiz', tags: ['Schweiz', 'Geographie'] },
+  { id: 't25', name: 'Strom & Energie', subject: 'NMG', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Stromkreis, erneuerbare Energien, Energiesparen im Alltag', tags: ['Energie', 'Technik'] },
+  // Englisch
+  { id: 't26', name: 'My Daily Routine', subject: 'Englisch', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 8, description: 'Tagesablauf beschreiben, Present Simple üben', tags: ['Speaking', 'Writing'] },
+  { id: 't27', name: 'Reading Comprehension', subject: 'Englisch', grade: '6', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Englischen Text lesen und Verständnisfragen beantworten', tags: ['Reading', 'Comprehension'] },
+  { id: 't28', name: 'Past Simple Stories', subject: 'Englisch', grade: '7', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Vergangenheitsform: regelmässige und unregelmässige Verben', tags: ['Grammar', 'Past Simple'] },
+  // Französisch
+  { id: 't29', name: 'Se présenter', subject: 'Französisch', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 8, description: 'Sich vorstellen, Name, Alter, Hobbys auf Französisch', tags: ['Sprechen', 'Grundlagen'] },
+  { id: 't30', name: 'Les verbes au présent', subject: 'Französisch', grade: '6', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 12, description: 'Verben konjugieren: être, avoir, -er Verben', tags: ['Grammatik', 'Verben'] },
+  // Natur & Technik (Zyklus 3)
+  { id: 't31', name: 'Zellen & Mikroskopieren', subject: 'Natur und Technik', grade: '7', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Pflanzliche und tierische Zellen, Mikroskop-Aufbau', tags: ['Biologie', 'Zellen'] },
+  { id: 't32', name: 'Periodensystem Grundlagen', subject: 'Natur und Technik', grade: '8', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'hard', questionCount: 10, description: 'Elemente, Ordnungszahl, Gruppen und Perioden', tags: ['Chemie', 'PSE'] },
+  { id: 't33', name: 'Kräfte & Bewegung', subject: 'Natur und Technik', grade: '8', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Schwerkraft, Reibung, Geschwindigkeit, Newtonsche Gesetze', tags: ['Physik', 'Mechanik'] },
+  // RZG (Zyklus 3)
+  { id: 't34', name: 'Mittelalter in der Schweiz', subject: 'RZG', grade: '7', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Burgen, Ritter, Stadtgründungen, Eidgenossenschaft', tags: ['Geschichte', 'Mittelalter'] },
+  { id: 't35', name: 'Demokratie & Staatskunde', subject: 'RZG', grade: '8', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Gewaltenteilung, Bundesrat, Volksinitiative, Referendum', tags: ['Staatskunde', 'Politik'] },
+
+  // ============ PRÜFUNGEN ============
+  { id: 't36', name: 'Bruchrechnen Prüfung', subject: 'Mathematik', grade: '6', type: 'exam', category: 'pruefung', difficulty: 'hard', questionCount: 12, description: 'Formale Prüfung zu Brüchen mit Notenskala', tags: ['Prüfung', 'Brüche'] },
+  { id: 't37', name: 'Deutsch Grammatik-Test', subject: 'Deutsch', grade: '5', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 15, description: 'Grammatikprüfung: Zeiten, Fälle, Satzglieder', tags: ['Prüfung', 'Grammatik'] },
+  { id: 't38', name: 'NMG Lernzielkontrolle', subject: 'NMG', grade: '4', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 10, description: 'Themenabschluss-Prüfung für NMG', tags: ['Prüfung', 'Sachunterricht'] },
+  { id: 't39', name: 'Repetitionstest Mathe', subject: 'Mathematik', grade: '5', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 15, description: 'Wiederholungsprüfung über mehrere Themen', tags: ['Repetition', 'Gemischt'] },
+  { id: 't40', name: 'Schnelltest 10 Min', subject: 'Deutsch', grade: '3', type: 'exam', category: 'pruefung', difficulty: 'easy', questionCount: 5, description: 'Kurzer Schnelltest für den Stundenbeginn', tags: ['Schnelltest', 'Kurz'] },
+  { id: 't41', name: 'Englisch Halbjahrsprüfung', subject: 'Englisch', grade: '6', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 20, description: 'Vocabulary, Grammar, Reading Comprehension', tags: ['Prüfung', 'Halbjahr'] },
+  { id: 't42', name: 'Französisch Unité-Test', subject: 'Französisch', grade: '6', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 15, description: 'Abschlusstest einer Unité: Vokabeln, Grammatik, Leseverständnis', tags: ['Prüfung', 'Unité'] },
+  { id: 't43', name: 'Algebra Lernkontrolle', subject: 'Mathematik', grade: '8', type: 'exam', category: 'pruefung', difficulty: 'hard', questionCount: 10, description: 'Gleichungen, Ungleichungen, Terme vereinfachen', tags: ['Prüfung', 'Algebra'] },
+  { id: 't44', name: 'Aufsatz-Prüfung', subject: 'Deutsch', grade: '7', type: 'exam', category: 'pruefung', difficulty: 'hard', questionCount: 3, description: 'Erörterung oder Erzählung schreiben mit Bewertungskriterien', tags: ['Prüfung', 'Schreiben'] },
+  { id: 't45', name: 'NT Lernkontrolle Biologie', subject: 'Natur und Technik', grade: '7', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 12, description: 'Zellen, Organe, Ökosysteme – Grundlagen der Biologie', tags: ['Prüfung', 'Biologie'] },
+
+  // ============ QUIZZE ============
+  { id: 't46', name: 'NMG Lernkontrolle', subject: 'NMG', grade: '4', type: 'quiz', category: 'quiz', difficulty: 'medium', questionCount: 10, description: 'Kurze Lernkontrolle zu NMG-Themen', tags: ['Quiz', 'Sachunterricht'] },
+  { id: 't47', name: 'Wahr oder Falsch', subject: 'NMG', grade: '5', type: 'quiz', category: 'quiz', difficulty: 'easy', questionCount: 10, description: 'Aussagen bewerten – stimmt das wirklich?', tags: ['Quiz', 'Wahr/Falsch'] },
+  { id: 't48', name: 'Kopfrechnen-Quiz', subject: 'Mathematik', grade: '4', type: 'quiz', category: 'quiz', difficulty: 'medium', questionCount: 15, description: 'Schnelles Kopfrechnen mit aufsteigendem Schwierigkeitsgrad', tags: ['Quiz', 'Kopfrechnen'] },
+  { id: 't49', name: 'Kantone-Quiz', subject: 'NMG', grade: '5', type: 'quiz', category: 'quiz', difficulty: 'medium', questionCount: 12, description: 'Schweizer Kantone, Hauptorte und Wappen erkennen', tags: ['Quiz', 'Schweiz'] },
+  { id: 't50', name: 'Englisch Irregular Verbs', subject: 'Englisch', grade: '6', type: 'quiz', category: 'quiz', difficulty: 'medium', questionCount: 20, description: 'Unregelmässige Verben: Infinitive, Past Simple, Past Participle', tags: ['Quiz', 'Verben'] },
+  { id: 't51', name: 'Wortarten-Quiz', subject: 'Deutsch', grade: '4', type: 'quiz', category: 'quiz', difficulty: 'medium', questionCount: 12, description: 'Nomen, Verben, Adjektive – Wörter richtig zuordnen', tags: ['Quiz', 'Grammatik'] },
+  { id: 't52', name: 'Einmaleins-Blitz', subject: 'Mathematik', grade: '3', type: 'quiz', category: 'quiz', difficulty: 'easy', questionCount: 20, description: 'Schnelles Einmaleins-Training mit allen Reihen', tags: ['Quiz', 'Einmaleins'] },
+  { id: 't53', name: 'Tier-Quiz Schweiz', subject: 'NMG', grade: '3', type: 'quiz', category: 'quiz', difficulty: 'easy', questionCount: 10, description: 'Heimische Tiere erkennen und Fakten wissen', tags: ['Quiz', 'Tiere'] },
+
+  // ============ SOZIALFORMEN ============
+  { id: 't54', name: 'Partnerarbeit Deutsch', subject: 'Deutsch', grade: '5', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 6, description: 'Aufgaben für die Arbeit zu zweit – gegenseitig abfragen', tags: ['Partnerarbeit', 'Kooperativ'] },
+  { id: 't55', name: 'Gruppenarbeit Forschen', subject: 'NMG', grade: '5', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 5, description: 'Forschungsaufträge für Gruppen mit Präsentation', tags: ['Gruppenarbeit', 'Forschen'] },
+  { id: 't56', name: 'Lernstationen Mathe', subject: 'Mathematik', grade: '4', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 8, description: 'Stationsarbeit mit unterschiedlichen Aufgabentypen', tags: ['Stationen', 'Differenziert'] },
+  { id: 't57', name: 'Lerntempoduett', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 8, description: 'Zwei Niveaus: Schnelle helfen Langsameren, alle lernen', tags: ['Kooperativ', 'Differenziert'] },
+  { id: 't58', name: 'Placemat-Methode', subject: 'NMG', grade: '6', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 4, description: 'Vierergruppen: Erst einzeln denken, dann gemeinsam diskutieren', tags: ['Placemat', 'Kooperativ'] },
+  { id: 't59', name: 'Expertengruppen Jigsaw', subject: 'Deutsch', grade: '7', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 6, description: 'Jigsaw-Methode: Jeder wird Experte für ein Thema', tags: ['Jigsaw', 'Kooperativ'] },
+
+  // ============ WORTSCHATZ ============
+  { id: 't60', name: 'Vokabeltest Englisch', subject: 'Englisch', grade: '5', type: 'vocabulary', category: 'wortschatz', difficulty: 'medium', questionCount: 20, description: 'Wörterliste mit Übersetzungsübungen', tags: ['Vokabeln', 'Englisch'] },
+  { id: 't61', name: 'Französisch Grundwortschatz', subject: 'Französisch', grade: '5', type: 'vocabulary', category: 'wortschatz', difficulty: 'easy', questionCount: 25, description: 'Basisvokabular mit Übungen', tags: ['Vokabeln', 'Französisch'] },
+  { id: 't62', name: 'Lückentext Sprache', subject: 'Deutsch', grade: '4', type: 'worksheet', category: 'wortschatz', difficulty: 'medium', questionCount: 10, description: 'Lückentext zum Wortschatz und Sprachgefühl', tags: ['Lückentext', 'Wortschatz'] },
+  { id: 't63', name: 'Fachwörter NMG', subject: 'NMG', grade: '5', type: 'vocabulary', category: 'wortschatz', difficulty: 'medium', questionCount: 15, description: 'Fachbegriffe aus dem NMG-Unterricht üben und zuordnen', tags: ['Fachbegriffe', 'NMG'] },
+  { id: 't64', name: 'Fremdwörter Deutsch', subject: 'Deutsch', grade: '7', type: 'vocabulary', category: 'wortschatz', difficulty: 'medium', questionCount: 15, description: 'Häufige Fremdwörter verstehen und richtig verwenden', tags: ['Fremdwörter', 'Wortschatz'] },
+  { id: 't65', name: 'Englisch Phrasal Verbs', subject: 'Englisch', grade: '8', type: 'vocabulary', category: 'wortschatz', difficulty: 'hard', questionCount: 20, description: 'Wichtige Phrasal Verbs: look up, give in, turn out...', tags: ['Phrasal Verbs', 'Advanced'] },
+
+  // ============ ÜBUNGEN ============
+  { id: 't66', name: 'Aufsatz-Training', subject: 'Deutsch', grade: '6', type: 'worksheet', category: 'uebung', difficulty: 'medium', questionCount: 5, description: 'Kriterienbasierte Schreibaufgabe mit Selbstbewertung', tags: ['Schreiben', 'Bewertung'] },
+  { id: 't67', name: 'Differenzierte Aufgaben', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'uebung', difficulty: 'medium', questionCount: 12, description: 'Drei Niveaus: Basis, Erweitert, Profi', tags: ['Differenzierung', 'Niveaus'] },
+  { id: 't68', name: 'Prüfungsvorbereitung', subject: 'Deutsch', grade: '6', type: 'worksheet', category: 'uebung', difficulty: 'hard', questionCount: 15, description: 'Gemischte Übungen zur Prüfungsvorbereitung', tags: ['Vorbereitung', 'Repetition'] },
+  { id: 't69', name: 'Rechtschreib-Training', subject: 'Deutsch', grade: '4', type: 'worksheet', category: 'uebung', difficulty: 'medium', questionCount: 12, description: 'Häufige Fehlerwörter, Doppelkonsonanten, Dehnungs-h', tags: ['Rechtschreibung', 'Übung'] },
+  { id: 't70', name: 'Terme vereinfachen', subject: 'Mathematik', grade: '7', type: 'worksheet', category: 'uebung', difficulty: 'medium', questionCount: 15, description: 'Terme zusammenfassen, ausmultiplizieren, faktorisieren', tags: ['Algebra', 'Terme'] },
+  { id: 't71', name: 'Hörverständnis Englisch', subject: 'Englisch', grade: '7', type: 'worksheet', category: 'uebung', difficulty: 'medium', questionCount: 8, description: 'Übungen zum Hörverstehen mit Lückentexten und Multiple Choice', tags: ['Listening', 'Comprehension'] },
+
+  // ============ FÖRDERUNG ============
+  { id: 't72', name: 'DaZ Grundwortschatz', subject: 'Deutsch', grade: '3', type: 'worksheet', category: 'foerderung', difficulty: 'easy', questionCount: 10, description: 'Deutsch als Zweitsprache: Alltagswörter mit Bildern', tags: ['DaZ', 'Grundwortschatz'] },
+  { id: 't73', name: 'Leseförderung Silben', subject: 'Deutsch', grade: '2', type: 'worksheet', category: 'foerderung', difficulty: 'easy', questionCount: 8, description: 'Silbentraining, Silbenbögen, einfache Wörter erlesen', tags: ['Leseförderung', 'Silben'] },
+  { id: 't74', name: 'Dyskalkulie Übungen', subject: 'Mathematik', grade: '3', type: 'worksheet', category: 'foerderung', difficulty: 'easy', questionCount: 10, description: 'Grundlegendes Mengenverständnis, Zahlzerlegung, Stellenwerte', tags: ['Dyskalkulie', 'Förderung'] },
+  { id: 't75', name: 'Begabtenförderung Mathe', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'foerderung', difficulty: 'hard', questionCount: 6, description: 'Knobelaufgaben, Logikrätsel und Muster erkennen', tags: ['Begabtenförderung', 'Knobeln'] },
+  { id: 't76', name: 'Lesen lernen Zyklus 1', subject: 'Deutsch', grade: '1', type: 'worksheet', category: 'foerderung', difficulty: 'easy', questionCount: 6, description: 'Erste Wörter und Sätze lesen, Bild-Wort-Zuordnung', tags: ['Erstlesen', 'Zyklus 1'] },
+  { id: 't77', name: 'LRS-Training', subject: 'Deutsch', grade: '4', type: 'worksheet', category: 'foerderung', difficulty: 'easy', questionCount: 10, description: 'Lese-Rechtschreib-Schwäche: Visualisierung, Regeln, Merkwörter', tags: ['LRS', 'Förderung'] },
+
+  // ============ DIGITAL & MI ============
+  { id: 't78', name: 'Sicher im Internet', subject: 'Medien und Informatik', grade: '5', type: 'worksheet', category: 'digital', difficulty: 'medium', questionCount: 8, description: 'Passwortsicherheit, Datenschutz, Cybermobbing erkennen', tags: ['Medienkompetenz', 'Sicherheit'] },
+  { id: 't79', name: 'Algorithmen verstehen', subject: 'Medien und Informatik', grade: '5', type: 'worksheet', category: 'digital', difficulty: 'medium', questionCount: 6, description: 'Einfache Algorithmen lesen, verstehen und selber erstellen', tags: ['Informatik', 'Algorithmen'] },
+  { id: 't80', name: 'Fake News erkennen', subject: 'Medien und Informatik', grade: '7', type: 'worksheet', category: 'digital', difficulty: 'medium', questionCount: 8, description: 'Nachrichten prüfen, Quellen bewerten, Manipulation erkennen', tags: ['Medienkompetenz', 'Fake News'] },
+  { id: 't81', name: 'Programmieren Grundlagen', subject: 'Medien und Informatik', grade: '6', type: 'worksheet', category: 'digital', difficulty: 'medium', questionCount: 6, description: 'Scratch/Blockly: Sequenz, Schleife, Bedingung verstehen', tags: ['Programmieren', 'Scratch'] },
+  { id: 't82', name: 'Daten & Diagramme', subject: 'Medien und Informatik', grade: '5', type: 'worksheet', category: 'digital', difficulty: 'easy', questionCount: 8, description: 'Daten sammeln, ordnen und in Diagrammen darstellen', tags: ['Daten', 'Diagramme'] },
 ]
 
 // LEHRPLAN_CYCLES imported from @/data/lehrplan21
