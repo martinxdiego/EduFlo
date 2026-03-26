@@ -28,7 +28,7 @@ import {
   ArrowLeftRight, Type, ListOrdered, GitBranch,
   ChevronUp, Wand2, Save, GripVertical, ArrowUp, ArrowDown,
   RotateCcw, Shuffle, Bot, CircleDot, Palette,
-  AlignLeft, Pen, SquarePen
+  AlignLeft, Pen, SquarePen, Users, UserMinus
 } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import jsPDF from 'jspdf'
@@ -266,11 +266,19 @@ const Home = () => {
   const [expandedSubmission, setExpandedSubmission] = useState(null)
   const [errorAnalysisOpen, setErrorAnalysisOpen] = useState(true)
   const [shareModalOpen, setShareModalOpen] = useState(false)
-  const [shareForm, setShareForm] = useState({ className: '', deadline: '' })
+  const [shareForm, setShareForm] = useState({ className: '', classId: '', deadline: '', targetNiveau: '' })
   const [editingQuestion, setEditingQuestion] = useState(null) // { subId, qIndex, points, feedback, comment }
   const [classOverview, setClassOverview] = useState(null)
   const [classOverviewOpen, setClassOverviewOpen] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(null)
+
+  // Klassenverwaltung
+  const [teacherClasses, setTeacherClasses] = useState([])
+  const [selectedClass, setSelectedClass] = useState(null)
+  const [classDetailData, setClassDetailData] = useState(null)
+  const [newClassName, setNewClassName] = useState('')
+  const [classLoading, setClassLoading] = useState(false)
+  const [classStats, setClassStats] = useState(null)
 
   // Collaboration
   const [comments, setComments] = useState([])
@@ -340,6 +348,11 @@ const Home = () => {
       localStorage.setItem('eduflow_competency_tracker', JSON.stringify(competencyTracker))
     }
   }, [competencyTracker])
+
+  // Load classes when switching to classes view
+  useEffect(() => {
+    if (activeView === 'classes' && token) loadTeacherClasses()
+  }, [activeView])
 
   // ============================================================
   // AUTH
@@ -2217,15 +2230,15 @@ const Home = () => {
       const res = await fetch('/api/assignments/share', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ worksheetId, className: shareForm.className, deadline: shareForm.deadline || null })
+        body: JSON.stringify({ worksheetId, className: shareForm.className, classId: shareForm.classId || null, deadline: shareForm.deadline || null, targetNiveau: shareForm.targetNiveau || null })
       })
       if (res.ok) {
         const data = await res.json()
         const studentUrl = `${window.location.origin}/schueler?code=${data.code}`
-        setSuccessMessage(`Zugangscode: ${data.code} — Schüler-Link: ${studentUrl}`)
+        setSuccessMessage(`Zugangscode: ${data.code} — Schüler-Link wurde in die Zwischenablage kopiert! Teilen Sie diesen Link mit Ihren Schülern: ${studentUrl}`)
         try { navigator.clipboard.writeText(studentUrl) } catch(e) {}
         setShareModalOpen(false)
-        setShareForm({ className: '', deadline: '' })
+        setShareForm({ className: '', classId: '', deadline: '', targetNiveau: '' })
         loadAssignments()
       }
     } catch (err) { setError('Freigabe fehlgeschlagen.') }
@@ -2299,6 +2312,101 @@ const Home = () => {
         setSuccessMessage('Aufgabe gelöscht.')
       } else { setError('Löschen fehlgeschlagen.') }
     } catch (err) { setError('Löschen fehlgeschlagen.') }
+  }
+
+  // ========== KLASSENVERWALTUNG ==========
+
+  const loadTeacherClasses = async () => {
+    try {
+      const res = await fetch('/api/classes', { headers: { 'Authorization': `Bearer ${token}` } })
+      if (res.ok) setTeacherClasses(await res.json())
+    } catch (e) { console.error('Classes error:', e) }
+  }
+
+  const createClass = async () => {
+    if (!newClassName.trim()) return
+    setClassLoading(true)
+    try {
+      const res = await fetch('/api/classes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ name: newClassName.trim() })
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setTeacherClasses(prev => [...prev, data])
+        setNewClassName('')
+        setSuccessMessage(`Klasse "${data.name}" erstellt. Beitritts-Code: ${data.join_code}`)
+      }
+    } catch (e) { setError('Klasse erstellen fehlgeschlagen.') }
+    setClassLoading(false)
+  }
+
+  const loadClassDetail = async (classId) => {
+    try {
+      const res = await fetch(`/api/classes/${classId}`, { headers: { 'Authorization': `Bearer ${token}` } })
+      if (res.ok) {
+        const data = await res.json()
+        setClassDetailData(data)
+        setSelectedClass(classId)
+        loadClassStats(classId)
+      }
+    } catch (e) { console.error('Class detail error:', e) }
+  }
+
+  const updateStudentNiveau = async (classId, studentId, niveau) => {
+    try {
+      const res = await fetch(`/api/classes/${classId}/students/${studentId}/niveau`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ niveau })
+      })
+      if (res.ok) {
+        setClassDetailData(prev => ({
+          ...prev,
+          enrolled_students: prev.enrolled_students.map(s =>
+            s.student_id === studentId ? { ...s, niveau } : s
+          )
+        }))
+      }
+    } catch (e) { setError('Niveau-Änderung fehlgeschlagen.') }
+  }
+
+  const removeStudentFromClass = async (classId, studentId) => {
+    try {
+      const res = await fetch(`/api/classes/${classId}/students/${studentId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (res.ok) {
+        setClassDetailData(prev => ({
+          ...prev,
+          enrolled_students: prev.enrolled_students.filter(s => s.student_id !== studentId)
+        }))
+        setSuccessMessage('Schüler/in entfernt.')
+      }
+    } catch (e) { setError('Entfernen fehlgeschlagen.') }
+  }
+
+  const deleteClass = async (classId) => {
+    try {
+      const res = await fetch(`/api/classes/${classId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (res.ok) {
+        setTeacherClasses(prev => prev.filter(c => c.id !== classId))
+        if (selectedClass === classId) { setSelectedClass(null); setClassDetailData(null) }
+        setSuccessMessage('Klasse gelöscht.')
+      }
+    } catch (e) { setError('Löschen fehlgeschlagen.') }
+  }
+
+  const loadClassStats = async (classId) => {
+    try {
+      const res = await fetch(`/api/classes/${classId}/stats`, { headers: { 'Authorization': `Bearer ${token}` } })
+      if (res.ok) setClassStats(await res.json())
+    } catch (e) { console.error('Class stats error:', e) }
   }
 
   // Load class overview
@@ -2629,6 +2737,7 @@ const Home = () => {
     { id: 'curriculum', label: 'Lehrplan 21', icon: GraduationCap },
     { id: 'planner', label: 'Jahresplaner', icon: Calendar },
     { id: 'students', label: 'Schüler', icon: User },
+    { id: 'classes', label: 'Klassen', icon: Users },
     { id: 'exports', label: 'Exporte', icon: Clock },
     { id: 'settings', label: 'Einstellungen', icon: Settings },
   ]
@@ -2824,7 +2933,7 @@ const Home = () => {
                             <Button variant="outline" size="sm" onClick={() => handleExportDOCX(selectedWorksheet, 'student')} className="glass-card border-0 text-xs">
                               <FileText className="h-4 w-4 mr-1" /> Word
                             </Button>
-                            <Button variant="outline" size="sm" onClick={() => { setShareModalOpen(true); setShareForm(prev => ({ ...prev, worksheetId: selectedWorksheet.id })) }} className="glass-card border-0 text-xs" title="An Schüler freigeben">
+                            <Button variant="outline" size="sm" onClick={() => { setShareModalOpen(true); loadTeacherClasses(); setShareForm(prev => ({ ...prev, worksheetId: selectedWorksheet.id })) }} className="glass-card border-0 text-xs" title="An Schüler freigeben">
                               <Send className="h-4 w-4 mr-1" /> Freigeben
                             </Button>
                             <Button variant="outline" size="sm" onClick={() => saveVersion(selectedWorksheet.id)} className="glass-card border-0 text-xs" title="Version speichern">
@@ -4734,8 +4843,32 @@ const Home = () => {
                             </div>
                             <div>
                               <Label className="text-xs">Klasse (optional)</Label>
-                              <Input value={shareForm.className} onChange={(e) => setShareForm(prev => ({ ...prev, className: e.target.value }))}
-                                placeholder="z.B. 4a, 6b..." className="mt-1 text-sm" />
+                              <select
+                                className="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                                value={shareForm.classId || ''}
+                                onChange={(e) => {
+                                  const cls = teacherClasses.find(c => c.id === e.target.value)
+                                  setShareForm(prev => ({ ...prev, classId: e.target.value, className: cls?.name || '' }))
+                                }}
+                              >
+                                <option value="">Keine Klasse</option>
+                                {teacherClasses.map(cls => (
+                                  <option key={cls.id} value={cls.id}>{cls.name} ({(cls.enrolled_students || []).length} Schüler)</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <Label className="text-xs">Niveau-Zuweisung (optional, Lehrplan 21)</Label>
+                              <select
+                                className="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                                value={shareForm.targetNiveau || ''}
+                                onChange={(e) => setShareForm(prev => ({ ...prev, targetNiveau: e.target.value }))}
+                              >
+                                <option value="">Alle Niveaus</option>
+                                <option value="A">A — Grundanforderungen</option>
+                                <option value="B">B — Mittlere Anforderungen</option>
+                                <option value="C">C — Erweiterte Anforderungen</option>
+                              </select>
                             </div>
                             <div>
                               <Label className="text-xs">Abgabefrist (optional)</Label>
@@ -4785,10 +4918,16 @@ const Home = () => {
                             <p className="text-xs text-gray-500 mt-1">{a.class_name ? `${a.class_name} · ` : ''}{new Date(a.created_at).toLocaleDateString('de-CH')}</p>
                             {a.submission_count > 0 && <p className="text-xs text-blue-600 mt-1">{a.submission_count} Abgabe{a.submission_count !== 1 ? 'n' : ''}</p>}
                             {a.deadline && <p className="text-xs text-amber-600 mt-1">Frist: {new Date(a.deadline).toLocaleDateString('de-CH')}</p>}
-                            <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(`${window.location.origin}/schueler?code=${a.code}`); setSuccessMessage('Schüler-Link kopiert!') }}
-                              className="text-xs text-blue-500 hover:text-blue-700 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
-                              <Copy className="h-3 w-3" /> Link kopieren
-                            </button>
+                            <div className="mt-2 p-2 bg-blue-50 rounded-lg border border-blue-100" onClick={(e) => e.stopPropagation()}>
+                              <p className="text-[10px] text-gray-500 mb-1">Schüler-Link:</p>
+                              <div className="flex items-center gap-1.5">
+                                <p className="text-[11px] font-mono text-blue-700 truncate flex-1">{window.location.origin}/schueler?code={a.code}</p>
+                                <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/schueler?code=${a.code}`); setSuccessMessage('Schüler-Link kopiert!') }}
+                                  className="shrink-0 text-xs bg-blue-600 text-white px-2 py-0.5 rounded hover:bg-blue-700 transition-colors flex items-center gap-1">
+                                  <Copy className="h-3 w-3" /> Kopieren
+                                </button>
+                              </div>
+                            </div>
                           </CardContent>
                           {/* Delete confirmation overlay */}
                           {deleteConfirm === a.id && (
@@ -5216,6 +5355,240 @@ const Home = () => {
                   </table>
                 </div></Card>
               )}
+            </motion.div>
+          )}
+
+          {/* ============ KLASSEN VIEW ============ */}
+          {activeView === 'classes' && (
+            <motion.div key="classes" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-6xl mx-auto">
+              <div className="mb-6 flex items-end justify-between flex-wrap gap-4">
+                <div>
+                  <h2 className="text-3xl font-bold text-gradient mb-1">Klassenverwaltung</h2>
+                  <p className="text-gray-600 text-sm">Klassen erstellen, Schüler verwalten und Niveaus zuweisen (Lehrplan 21).</p>
+                </div>
+                <Button size="sm" className="btn-premium text-xs" onClick={loadTeacherClasses}>
+                  <RefreshCw className="h-3.5 w-3.5 mr-1" /> Aktualisieren
+                </Button>
+              </div>
+
+              {/* Create new class */}
+              <Card className="glass-card border-0 mb-6">
+                <CardContent className="py-4">
+                  <div className="flex gap-3 items-end">
+                    <div className="flex-1">
+                      <Label className="text-xs">Neue Klasse erstellen</Label>
+                      <Input value={newClassName} onChange={(e) => setNewClassName(e.target.value)}
+                        placeholder="z.B. 4a, 6b, Deutsch 5c..." className="mt-1 text-sm"
+                        onKeyDown={(e) => e.key === 'Enter' && createClass()} />
+                    </div>
+                    <Button size="sm" className="btn-premium" onClick={createClass} disabled={!newClassName.trim() || classLoading}>
+                      <PlusCircle className="h-3.5 w-3.5 mr-1" /> Erstellen
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="grid lg:grid-cols-3 gap-6">
+                {/* Class list */}
+                <div className="space-y-3">
+                  {teacherClasses.length === 0 ? (
+                    <Card className="glass-card border-0">
+                      <CardContent className="py-12 text-center">
+                        <Users className="h-10 w-10 text-gray-300 mx-auto mb-3" />
+                        <p className="text-gray-500 font-medium">Noch keine Klassen</p>
+                        <p className="text-xs text-gray-400 mt-1">Erstellen Sie oben eine Klasse.</p>
+                      </CardContent>
+                    </Card>
+                  ) : teacherClasses.map(cls => (
+                    <Card key={cls.id} className={`glass-card border-0 cursor-pointer transition-all hover:shadow-lg ${selectedClass === cls.id ? 'ring-2 ring-blue-400' : ''}`}
+                      onClick={() => loadClassDetail(cls.id)}>
+                      <CardContent className="py-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h4 className="font-bold text-gray-900">{cls.name}</h4>
+                            <p className="text-xs text-gray-500">{(cls.enrolled_students || []).length} Schüler/innen</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs font-mono bg-blue-50 text-blue-700 px-2 py-1 rounded-lg">{cls.join_code || '–'}</p>
+                            <p className="text-[10px] text-gray-400 mt-1">Beitritts-Code</p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+
+                {/* Class detail / Roster */}
+                <div className="lg:col-span-2">
+                  {classDetailData ? (
+                    <>
+                    <Card className="glass-card border-0">
+                      <CardHeader className="pb-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <CardTitle className="text-lg">Klasse {classDetailData.name}</CardTitle>
+                            <CardDescription>
+                              Beitritts-Code: <span className="font-mono font-bold text-blue-600">{classDetailData.join_code || '–'}</span>
+                              {' · '}{(classDetailData.enrolled_students || []).length} Schüler/innen
+                            </CardDescription>
+                          </div>
+                          <Button variant="outline" size="sm" className="text-xs text-red-500 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => { if (confirm(`Klasse "${classDetailData.name}" wirklich löschen?`)) deleteClass(classDetailData.id) }}>
+                            <Trash2 className="h-3 w-3 mr-1" /> Löschen
+                          </Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        {/* Niveau legend */}
+                        <div className="flex items-center gap-4 mb-4 p-3 bg-gray-50 rounded-xl">
+                          <span className="text-xs font-semibold text-gray-600">Niveaus (Lehrplan 21):</span>
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">A — Grundanforderungen</span>
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">B — Mittlere Anforderungen</span>
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">C — Erweiterte Anforderungen</span>
+                        </div>
+
+                        {(classDetailData.enrolled_students || []).length === 0 ? (
+                          <div className="text-center py-8">
+                            <Users className="h-8 w-8 text-gray-300 mx-auto mb-2" />
+                            <p className="text-sm text-gray-500">Noch keine Schüler/innen beigetreten.</p>
+                            <p className="text-xs text-gray-400 mt-1">Teilen Sie den Code <span className="font-mono font-bold text-blue-600">{classDetailData.join_code}</span> mit Ihren Schülern.</p>
+                          </div>
+                        ) : (
+                          <div className="overflow-x-auto">
+                            <table className="w-full">
+                              <thead><tr className="border-b border-gray-200">
+                                <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Name</th>
+                                <th className="px-3 py-2 text-center text-xs font-semibold text-gray-600">Niveau</th>
+                                <th className="px-3 py-2 text-center text-xs font-semibold text-gray-600">XP</th>
+                                <th className="px-3 py-2 text-center text-xs font-semibold text-gray-600">Level</th>
+                                <th className="px-3 py-2 text-center text-xs font-semibold text-gray-600">Streak</th>
+                                <th className="px-3 py-2 text-center text-xs font-semibold text-gray-600">Ø Note</th>
+                                <th className="px-3 py-2 text-center text-xs font-semibold text-gray-600">Prüfungen</th>
+                                <th className="px-3 py-2 text-right text-xs font-semibold text-gray-600"></th>
+                              </tr></thead>
+                              <tbody>
+                                {(classDetailData.enrolled_students || []).map((s, i) => (
+                                  <tr key={s.student_id} className="border-b last:border-0 hover:bg-gray-50/50">
+                                    <td className="px-3 py-2.5 text-sm font-medium text-gray-900">{s.display_name}</td>
+                                    <td className="px-3 py-2.5 text-center">
+                                      <div className="flex items-center justify-center gap-1">
+                                        {['A', 'B', 'C'].map(n => (
+                                          <button key={n} onClick={() => updateStudentNiveau(classDetailData.id, s.student_id, n)}
+                                            className={`w-7 h-7 rounded-lg text-xs font-bold transition-colors ${
+                                              s.niveau === n
+                                                ? n === 'A' ? 'bg-green-500 text-white' : n === 'B' ? 'bg-blue-500 text-white' : 'bg-purple-500 text-white'
+                                                : 'bg-white border border-gray-300 hover:border-blue-400 text-gray-500'
+                                            }`}>
+                                            {n}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </td>
+                                    <td className="px-3 py-2.5 text-center text-sm font-bold text-amber-600">{s.xp || 0}</td>
+                                    <td className="px-3 py-2.5 text-center text-sm">{s.level || 1}</td>
+                                    <td className="px-3 py-2.5 text-center text-sm">{s.streak || 0} 🔥</td>
+                                    <td className={`px-3 py-2.5 text-center text-sm font-bold ${s.avg_grade ? gradeColor(s.avg_grade) : 'text-gray-400'}`}>
+                                      {s.avg_grade || '–'}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-center text-sm text-gray-600">{s.total_quizzes || 0}</td>
+                                    <td className="px-3 py-2.5 text-right">
+                                      <button onClick={() => removeStudentFromClass(classDetailData.id, s.student_id)}
+                                        className="text-gray-300 hover:text-red-500 transition-colors p-1" title="Aus Klasse entfernen">
+                                        <UserMinus className="h-3.5 w-3.5" />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+
+                    {/* Class-wide statistics */}
+                    {classStats?.classStats && (
+                      <Card className="glass-card border-0 mt-4">
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm flex items-center gap-2"><BarChart3 className="h-4 w-4 text-blue-500" /> Klassenstatistik (alle Aufgaben)</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                            <div className="bg-blue-50 rounded-xl p-3 text-center">
+                              <p className="text-xl font-bold text-blue-600">{classStats.classStats.totalAssignments}</p>
+                              <p className="text-[10px] text-gray-500">Aufgaben</p>
+                            </div>
+                            <div className="bg-green-50 rounded-xl p-3 text-center">
+                              <p className={`text-xl font-bold ${gradeColor(classStats.classStats.avgGrade)}`}>{classStats.classStats.avgGrade}</p>
+                              <p className="text-[10px] text-gray-500">Ø Note</p>
+                            </div>
+                            <div className="bg-emerald-50 rounded-xl p-3 text-center">
+                              <p className="text-xl font-bold text-emerald-600">{classStats.classStats.passRate}%</p>
+                              <p className="text-[10px] text-gray-500">Bestehensquote</p>
+                            </div>
+                            <div className="bg-purple-50 rounded-xl p-3 text-center">
+                              <p className="text-xl font-bold text-purple-600">{classStats.classStats.totalSubmissions}</p>
+                              <p className="text-[10px] text-gray-500">Abgaben total</p>
+                            </div>
+                          </div>
+
+                          {/* Niveau breakdown */}
+                          <div className="space-y-2">
+                            <p className="text-xs font-semibold text-gray-600">Durchschnitt nach Niveau:</p>
+                            {['A', 'B', 'C'].map(n => {
+                              const students = classStats.classStats.niveauStats?.[n] || []
+                              const withGrades = students.filter(s => s.avg_grade)
+                              const avg = withGrades.length > 0 ? Math.round(withGrades.reduce((sum, s) => sum + s.avg_grade, 0) / withGrades.length * 10) / 10 : null
+                              return (
+                                <div key={n} className="flex items-center gap-3">
+                                  <span className={`text-xs font-bold w-6 h-6 flex items-center justify-center rounded-lg ${
+                                    n === 'A' ? 'bg-green-100 text-green-700' : n === 'B' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
+                                  }`}>{n}</span>
+                                  <div className="flex-1 h-2 bg-gray-100 rounded-full">
+                                    <div className={`h-full rounded-full ${n === 'A' ? 'bg-green-400' : n === 'B' ? 'bg-blue-400' : 'bg-purple-400'}`}
+                                      style={{ width: avg ? `${Math.min((avg / 6) * 100, 100)}%` : '0%' }} />
+                                  </div>
+                                  <span className="text-xs font-bold text-gray-700 w-10 text-right">{avg || '–'}</span>
+                                  <span className="text-[10px] text-gray-400 w-16 text-right">{students.length} SuS</span>
+                                </div>
+                              )
+                            })}
+                          </div>
+
+                          {/* Assignments overview */}
+                          {classStats.assignments?.length > 0 && (
+                            <div className="mt-4">
+                              <p className="text-xs font-semibold text-gray-600 mb-2">Aufgaben-Übersicht:</p>
+                              <div className="space-y-1.5">
+                                {classStats.assignments.map(a => (
+                                  <div key={a.id} className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg">
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-xs font-medium text-gray-900 truncate">{a.title}</p>
+                                      <p className="text-[10px] text-gray-400">{a.submission_count} Abgaben{a.target_niveau ? ` · Niveau ${a.target_niveau}` : ''}</p>
+                                    </div>
+                                    <span className={`text-sm font-bold ${a.avg_grade ? gradeColor(a.avg_grade) : 'text-gray-300'}`}>
+                                      {a.avg_grade || '–'}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
+                    </>
+                  ) : (
+                    <Card className="glass-card border-0">
+                      <CardContent className="py-16 text-center">
+                        <Users className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                        <h3 className="text-lg font-semibold text-gray-700 mb-1">Klasse auswählen</h3>
+                        <p className="text-sm text-gray-400">Wählen Sie links eine Klasse, um die Schülerliste und Niveaus zu verwalten.</p>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              </div>
             </motion.div>
           )}
 

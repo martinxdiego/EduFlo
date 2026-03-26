@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { BookOpen, CheckCircle2, ArrowRight, Clock, Send, ArrowLeft, Star, Trophy, Loader2, XCircle, AlertCircle, Sparkles, ChevronDown, ChevronUp, LogOut, User, BarChart3, Award, TrendingUp, Hash } from 'lucide-react'
+import { BookOpen, CheckCircle2, ArrowRight, Clock, Send, ArrowLeft, Star, Trophy, Loader2, XCircle, AlertCircle, Sparkles, ChevronDown, ChevronUp, LogOut, User, BarChart3, Award, TrendingUp, Hash, Trash2, Users, Zap, Target, Crown, Flame } from 'lucide-react'
 
 export default function SchuelerPage() {
   // Auth state
@@ -30,6 +30,21 @@ export default function SchuelerPage() {
   const [error, setError] = useState('')
   const [results, setResults] = useState(null)
   const [showDetails, setShowDetails] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState(null) // submission id to confirm delete
+
+  // Gamification state
+  const [gamification, setGamification] = useState(null)
+  const [dashboardTab, setDashboardTab] = useState('results') // 'results' | 'gamification' | 'classes'
+
+  // Classes state
+  const [myClasses, setMyClasses] = useState([])
+  const [joinCode, setJoinCode] = useState('')
+  const [joinLoading, setJoinLoading] = useState(false)
+  const [joinMessage, setJoinMessage] = useState('')
+  const [classAssignments, setClassAssignments] = useState([])
+
+  // XP animation after quiz
+  const [xpGained, setXpGained] = useState(null)
 
   // Check for saved token on mount
   useEffect(() => {
@@ -66,6 +81,9 @@ export default function SchuelerPage() {
         setStudent(data)
         setStudentName(data.display_name)
         loadMyResults(token)
+        loadGamification(token)
+        loadMyClasses(token)
+        loadClassAssignments(token)
       } else {
         localStorage.removeItem('eduflow_student_token')
         setStudentToken(null)
@@ -100,6 +118,9 @@ export default function SchuelerPage() {
         setStudentName(data.student.display_name)
         localStorage.setItem('eduflow_student_token', data.token)
         loadMyResults(data.token)
+        loadGamification(data.token)
+        loadMyClasses(data.token)
+        loadClassAssignments(data.token)
       }
     } catch (e) {
       setAuthError('Verbindungsfehler.')
@@ -132,6 +153,87 @@ export default function SchuelerPage() {
       }
     } catch (e) { console.error('Results error:', e) }
     setResultsLoading(false)
+  }
+
+  const deleteSubmission = async (submissionId) => {
+    try {
+      const res = await fetch(`/api/student/submissions/${submissionId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${studentToken}` }
+      })
+      if (res.ok) {
+        setMyResults(prev => {
+          if (!prev) return prev
+          const updated = prev.submissions.filter(s => s.id !== submissionId)
+          const totalQuizzes = updated.length
+          const avgScore = totalQuizzes > 0 ? Math.round(updated.reduce((sum, s) => sum + (s.score_percentage || 0), 0) / totalQuizzes) : 0
+          const avgGrade = totalQuizzes > 0 ? Math.round(updated.reduce((sum, s) => sum + (s.swiss_grade || 1), 0) / totalQuizzes * 10) / 10 : 0
+          const bestGrade = totalQuizzes > 0 ? Math.max(...updated.map(s => s.swiss_grade || 1)) : 0
+          const totalPoints = updated.reduce((sum, s) => sum + (s.earned_points || 0), 0)
+          return { submissions: updated, stats: { totalQuizzes, totalPoints, avgScore, avgGrade, bestGrade } }
+        })
+        setDeleteConfirm(null)
+      }
+    } catch (e) { console.error('Delete error:', e) }
+  }
+
+  // Gamification
+  const loadGamification = async (tkn) => {
+    try {
+      const res = await fetch('/api/student/gamification', { headers: { 'Authorization': `Bearer ${tkn || studentToken}` } })
+      if (res.ok) setGamification(await res.json())
+    } catch (e) { console.error('Gamification error:', e) }
+  }
+
+  // Classes
+  const loadMyClasses = async (tkn) => {
+    try {
+      const res = await fetch('/api/student/my-classes', { headers: { 'Authorization': `Bearer ${tkn || studentToken}` } })
+      if (res.ok) setMyClasses(await res.json())
+    } catch (e) { console.error('Classes error:', e) }
+  }
+
+  const joinClass = async () => {
+    if (!joinCode.trim()) return
+    setJoinLoading(true)
+    setJoinMessage('')
+    try {
+      const res = await fetch('/api/student/join-class', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${studentToken}` },
+        body: JSON.stringify({ joinCode: joinCode.trim() })
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setJoinMessage(`Erfolgreich der Klasse "${data.className}" beigetreten!`)
+        setJoinCode('')
+        loadMyClasses()
+      } else {
+        setJoinMessage(data.error || 'Beitritt fehlgeschlagen.')
+      }
+    } catch (e) { setJoinMessage('Verbindungsfehler.') }
+    setJoinLoading(false)
+  }
+
+  const leaveClass = async (classId) => {
+    try {
+      const res = await fetch('/api/student/leave-class', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${studentToken}` },
+        body: JSON.stringify({ classId })
+      })
+      if (res.ok) {
+        setMyClasses(prev => prev.filter(c => c.class_id !== classId))
+      }
+    } catch (e) { console.error('Leave class error:', e) }
+  }
+
+  // Class assignments
+  const loadClassAssignments = async (tkn) => {
+    try {
+      const res = await fetch('/api/student/class-assignments', { headers: { 'Authorization': `Bearer ${tkn || studentToken}` } })
+      if (res.ok) setClassAssignments(await res.json())
+    } catch (e) { console.error('Class assignments error:', e) }
   }
 
   const gradeColor = (grade) => {
@@ -216,8 +318,17 @@ export default function SchuelerPage() {
       }
       setResults(data)
       setSubmitted(true)
+      // Calculate XP earned for animation
+      if (studentToken && studentToken !== 'guest') {
+        let xp = 10 + (data.earnedPoints || 0)
+        if (data.swissGrade >= 5.5) xp += 20
+        else if (data.swissGrade >= 4.5) xp += 10
+        if (data.scorePercentage === 100) xp += 25
+        setXpGained(xp)
+        setTimeout(() => setXpGained(null), 4000) // fade after 4s
+      }
       // Refresh dashboard results
-      if (studentToken && studentToken !== 'guest') loadMyResults(studentToken)
+      if (studentToken && studentToken !== 'guest') { loadMyResults(studentToken); loadGamification(studentToken); loadClassAssignments(studentToken) }
     } catch (err) {
       console.error('[EduFlow] Submit error:', err)
       setError('Verbindungsfehler: ' + err.message)
@@ -387,6 +498,22 @@ export default function SchuelerPage() {
                 <motion.div initial={{ width: 0 }} animate={{ width: `${percentage}%` }} transition={{ duration: 1, delay: 0.5 }}
                   className={`h-full rounded-full ${percentage >= 80 ? 'bg-green-500' : percentage >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`} />
               </div>
+
+              {/* XP gained animation */}
+              {xpGained && (
+                <motion.div initial={{ opacity: 0, scale: 0.5, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} transition={{ type: 'spring', delay: 0.8 }}
+                  className="flex items-center gap-3 justify-center bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200 p-4 rounded-xl">
+                  <motion.div initial={{ rotate: -20 }} animate={{ rotate: [0, 15, -15, 0] }} transition={{ delay: 1.2, duration: 0.5 }}>
+                    <Zap className="h-6 w-6 text-amber-500" />
+                  </motion.div>
+                  <div>
+                    <p className="text-lg font-bold text-amber-700">+{xpGained} XP</p>
+                    <p className="text-xs text-amber-600">
+                      {xpGained >= 50 ? 'Wahnsinn! Tolle Leistung!' : xpGained >= 30 ? 'Gut gemacht!' : 'Weiter so!'}
+                    </p>
+                  </div>
+                </motion.div>
+              )}
 
               {percentage >= 80 && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1 }}
@@ -869,9 +996,97 @@ export default function SchuelerPage() {
           </div>
         </motion.div>
 
+        {/* Pending class assignments */}
+        {studentToken !== 'guest' && classAssignments.filter(a => !a.already_submitted).length > 0 && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
+            <div className="bg-white rounded-2xl shadow-lg p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <BookOpen className="h-5 w-5 text-blue-600" />
+                <h3 className="font-bold text-gray-900">Offene Aufgaben</h3>
+                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{classAssignments.filter(a => !a.already_submitted).length}</span>
+              </div>
+              <div className="grid gap-2">
+                {classAssignments.filter(a => !a.already_submitted).map(a => (
+                  <div key={a.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl hover:bg-blue-50 transition-colors cursor-pointer"
+                    onClick={() => { setAccessCode(a.code); setError('') }}>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{a.title}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-xs text-gray-400">{a.class_name}</span>
+                        {a.target_niveau && (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                            a.target_niveau === 'A' ? 'bg-green-100 text-green-700' :
+                            a.target_niveau === 'C' ? 'bg-purple-100 text-purple-700' :
+                            'bg-blue-100 text-blue-700'
+                          }`}>Niveau {a.target_niveau}</span>
+                        )}
+                        {a.deadline && (
+                          <span className={`text-[10px] ${new Date(a.deadline) < new Date() ? 'text-red-500' : 'text-gray-400'}`}>
+                            bis {new Date(a.deadline).toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button className="px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 transition-colors flex-shrink-0">
+                      Starten
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         {/* Dashboard content (only for logged-in students) */}
         {studentToken !== 'guest' && (
           <>
+            {/* Gamification hero bar */}
+            {gamification && (
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
+                <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl shadow-lg p-5 text-white">
+                  <div className="flex items-center justify-between flex-wrap gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center">
+                        <span className="text-2xl font-bold">{gamification.level}</span>
+                      </div>
+                      <div>
+                        <p className="text-sm opacity-80">Level {gamification.level}</p>
+                        <div className="w-40 h-2.5 bg-white/20 rounded-full mt-1">
+                          <div className="h-full bg-white rounded-full transition-all" style={{ width: `${(gamification.xpInLevel / gamification.xpForNext) * 100}%` }} />
+                        </div>
+                        <p className="text-[10px] opacity-60 mt-0.5">{gamification.xpInLevel} / {gamification.xpForNext} XP</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-6">
+                      <div className="text-center">
+                        <p className="text-2xl font-bold">{gamification.xp}</p>
+                        <p className="text-[10px] opacity-70">Total XP</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-2xl font-bold">{gamification.streak} <span className="text-base">🔥</span></p>
+                        <p className="text-[10px] opacity-70">Streak</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-2xl font-bold">{gamification.badges?.length || 0}</p>
+                        <p className="text-[10px] opacity-70">Badges</p>
+                      </div>
+                    </div>
+                  </div>
+                  {/* New badges notification */}
+                  {gamification.newBadges?.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-white/20">
+                      <p className="text-xs font-semibold mb-2">Neue Badges freigeschaltet!</p>
+                      <div className="flex gap-2">
+                        {gamification.newBadges.map(b => (
+                          <span key={b.id} className="bg-white/20 px-3 py-1 rounded-full text-xs">{b.icon} {b.name}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+
             {/* Stats cards */}
             {myResults?.stats && (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
@@ -908,6 +1123,27 @@ export default function SchuelerPage() {
               </motion.div>
             )}
 
+            {/* Tab navigation */}
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+              <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+                {[
+                  { id: 'results', label: 'Ergebnisse', icon: BarChart3 },
+                  { id: 'gamification', label: 'Badges & XP', icon: Trophy },
+                  { id: 'classes', label: 'Meine Klassen', icon: Users }
+                ].map(tab => (
+                  <button key={tab.id} onClick={() => setDashboardTab(tab.id)}
+                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
+                      dashboardTab === tab.id ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'
+                    }`}>
+                    <tab.icon className="h-3.5 w-3.5" /> {tab.label}
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+
+            {/* ====== TAB: Results ====== */}
+            {dashboardTab === 'results' && (
+            <>
             {/* Results history */}
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
               <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
@@ -955,7 +1191,33 @@ export default function SchuelerPage() {
                                 <CheckCircle2 className="h-4 w-4 text-green-500" />
                               )}
                             </div>
+                            <button
+                              onClick={() => setDeleteConfirm(sub.id)}
+                              className="flex-shrink-0 p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+                              title="Ergebnis löschen"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
                           </div>
+                          {/* Delete confirmation */}
+                          {deleteConfirm === sub.id && (
+                            <div className="mt-3 flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+                              <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
+                              <p className="text-xs text-red-700 flex-1">Dieses Ergebnis unwiderruflich löschen?</p>
+                              <button
+                                onClick={() => deleteSubmission(sub.id)}
+                                className="text-xs font-semibold text-white bg-red-500 hover:bg-red-600 px-3 py-1.5 rounded-lg transition-colors"
+                              >
+                                Löschen
+                              </button>
+                              <button
+                                onClick={() => setDeleteConfirm(null)}
+                                className="text-xs text-gray-500 hover:text-gray-700"
+                              >
+                                Abbrechen
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )
                     })}
@@ -971,6 +1233,128 @@ export default function SchuelerPage() {
                 )}
               </div>
             </motion.div>
+            </>
+            )}
+
+            {/* ====== TAB: Gamification ====== */}
+            {dashboardTab === 'gamification' && gamification && (
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+                <div className="space-y-4">
+                  {/* All Badges grid */}
+                  <div className="bg-white rounded-2xl shadow-lg p-6">
+                    <h3 className="font-bold text-gray-900 mb-4">Alle Badges</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {(gamification.allBadgeDefs || []).map(b => (
+                        <div key={b.id} className={`p-4 rounded-xl text-center transition-all ${
+                          b.earned ? 'bg-amber-50 border-2 border-amber-200' : 'bg-gray-50 border-2 border-gray-100 opacity-50'
+                        }`}>
+                          <span className="text-3xl">{b.icon}</span>
+                          <p className="text-sm font-bold text-gray-900 mt-2">{b.name}</p>
+                          <p className="text-[10px] text-gray-500 mt-0.5">{b.desc}</p>
+                          {b.earned && <span className="inline-block mt-2 text-[10px] bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full">Freigeschaltet</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Leaderboard */}
+                  {gamification.leaderboard?.length > 0 && (
+                    <div className="bg-white rounded-2xl shadow-lg p-6">
+                      <h3 className="font-bold text-gray-900 mb-4">Rangliste</h3>
+                      <div className="space-y-2">
+                        {gamification.leaderboard.map((entry, i) => (
+                          <div key={entry.id} className={`flex items-center gap-3 p-3 rounded-xl ${
+                            entry.id === student?.id ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50'
+                          }`}>
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm ${
+                              i === 0 ? 'bg-amber-400 text-white' : i === 1 ? 'bg-gray-300 text-white' : i === 2 ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-600'
+                            }`}>
+                              {i + 1}
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-gray-900">{entry.name} {entry.id === student?.id && <span className="text-xs text-blue-500">(Du)</span>}</p>
+                              <p className="text-[10px] text-gray-500">Level {entry.level} · {entry.streak} 🔥</p>
+                            </div>
+                            <p className="text-sm font-bold text-amber-600">{entry.xp} XP</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+
+            {/* ====== TAB: Classes ====== */}
+            {dashboardTab === 'classes' && (
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+                <div className="space-y-4">
+                  {/* Join class */}
+                  <div className="bg-white rounded-2xl shadow-lg p-6">
+                    <h3 className="font-bold text-gray-900 mb-2">Klasse beitreten</h3>
+                    <p className="text-xs text-gray-500 mb-3">Gib den Beitritts-Code ein, den du von deiner Lehrperson erhalten hast.</p>
+                    <div className="flex gap-3">
+                      <input
+                        type="text"
+                        value={joinCode}
+                        onChange={(e) => setJoinCode(e.target.value.toUpperCase().trim())}
+                        placeholder="Klassen-Code"
+                        className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-mono text-center tracking-widest focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none"
+                        maxLength={8}
+                        onKeyDown={(e) => e.key === 'Enter' && joinClass()}
+                      />
+                      <button onClick={joinClass} disabled={!joinCode.trim() || joinLoading}
+                        className="px-5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-all">
+                        {joinLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Beitreten'}
+                      </button>
+                    </div>
+                    {joinMessage && (
+                      <p className={`text-xs mt-2 ${joinMessage.includes('Erfolgreich') ? 'text-green-600' : 'text-red-600'}`}>{joinMessage}</p>
+                    )}
+                  </div>
+
+                  {/* My classes list */}
+                  <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+                    <div className="px-6 py-4 border-b border-gray-100">
+                      <h3 className="font-bold text-gray-900">Meine Klassen</h3>
+                    </div>
+                    {myClasses.length > 0 ? (
+                      <div className="divide-y divide-gray-50">
+                        {myClasses.map((cls) => (
+                          <div key={cls.class_id} className="px-6 py-4 flex items-center gap-4">
+                            <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                              <Users className="h-6 w-6 text-blue-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-gray-900 text-sm">{cls.class_name}</p>
+                              <div className="flex items-center gap-3 mt-0.5">
+                                <span className="text-xs text-gray-400">{cls.teacher_name}</span>
+                                <span className="text-xs text-gray-400">{cls.student_count} Schüler/innen</span>
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                  cls.niveau === 'A' ? 'bg-green-100 text-green-700' :
+                                  cls.niveau === 'C' ? 'bg-purple-100 text-purple-700' :
+                                  'bg-blue-100 text-blue-700'
+                                }`}>Niveau {cls.niveau}</span>
+                              </div>
+                            </div>
+                            <button onClick={() => { if (confirm('Klasse wirklich verlassen?')) leaveClass(cls.class_id) }}
+                              className="text-xs text-gray-400 hover:text-red-500 transition-colors">
+                              Verlassen
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-12 text-center">
+                        <Users className="h-8 w-8 text-gray-300 mx-auto mb-2" />
+                        <p className="text-gray-500 font-medium mb-1">Noch in keiner Klasse</p>
+                        <p className="text-sm text-gray-400">Gib oben einen Klassen-Code ein, um beizutreten.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            )}
           </>
         )}
 

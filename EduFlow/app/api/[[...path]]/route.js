@@ -377,6 +377,325 @@ async function handleRoute(request, { params }) {
       }))
     }
 
+    // ========== SCHÜLER ↔ KLASSE VERKNÜPFUNG ==========
+
+    // Join a class by code - POST /api/student/join-class
+    if (route === '/student/join-class' && method === 'POST') {
+      const decoded = await verifyToken(request)
+      if (!decoded || decoded.role !== 'student') {
+        return handleCORS(NextResponse.json({ error: 'Nicht eingeloggt.' }, { status: 401 }))
+      }
+      const body = await request.json()
+      const { joinCode } = body
+      if (!joinCode) return handleCORS(NextResponse.json({ error: 'Klassencode erforderlich.' }, { status: 400 }))
+      const cls = await db.collection('classes').findOne({ join_code: joinCode.toUpperCase().trim() })
+      if (!cls) return handleCORS(NextResponse.json({ error: 'Klasse nicht gefunden. Prüfe den Code.' }, { status: 404 }))
+      // Check if already enrolled
+      const alreadyEnrolled = (cls.enrolled_students || []).some(s => s.student_id === decoded.studentId)
+      if (alreadyEnrolled) return handleCORS(NextResponse.json({ error: 'Du bist bereits in dieser Klasse.' }, { status: 400 }))
+      const student = await db.collection('students').findOne({ id: decoded.studentId })
+      // Add to class
+      const enrollment = { student_id: decoded.studentId, display_name: student?.display_name || 'Unbekannt', joined_at: new Date(), niveau: 'B' }
+      await db.collection('classes').updateOne({ id: cls.id }, { $push: { enrolled_students: enrollment }, $set: { updated_at: new Date() } })
+      // Add to student's enrolled_classes
+      const classRef = { class_id: cls.id, class_name: cls.name, teacher_id: cls.teacher_id, joined_at: new Date() }
+      await db.collection('students').updateOne({ id: decoded.studentId }, { $push: { enrolled_classes: classRef } })
+      return handleCORS(NextResponse.json({ success: true, className: cls.name }))
+    }
+
+    // Leave a class - POST /api/student/leave-class
+    if (route === '/student/leave-class' && method === 'POST') {
+      const decoded = await verifyToken(request)
+      if (!decoded || decoded.role !== 'student') {
+        return handleCORS(NextResponse.json({ error: 'Nicht eingeloggt.' }, { status: 401 }))
+      }
+      const body = await request.json()
+      const { classId } = body
+      await db.collection('classes').updateOne({ id: classId }, {
+        $pull: { enrolled_students: { student_id: decoded.studentId } },
+        $set: { updated_at: new Date() }
+      })
+      await db.collection('students').updateOne({ id: decoded.studentId }, { $pull: { enrolled_classes: { class_id: classId } } })
+      return handleCORS(NextResponse.json({ success: true }))
+    }
+
+    // Get student's enrolled classes - GET /api/student/my-classes
+    if (route === '/student/my-classes' && method === 'GET') {
+      const decoded = await verifyToken(request)
+      if (!decoded || decoded.role !== 'student') {
+        return handleCORS(NextResponse.json({ error: 'Nicht eingeloggt.' }, { status: 401 }))
+      }
+      const student = await db.collection('students').findOne({ id: decoded.studentId })
+      const enrolledClasses = student?.enrolled_classes || []
+      // Enrich with teacher name and class details
+      const enriched = await Promise.all(enrolledClasses.map(async (ec) => {
+        const cls = await db.collection('classes').findOne({ id: ec.class_id })
+        const teacher = await db.collection('users').findOne({ id: ec.teacher_id })
+        const myEnrollment = (cls?.enrolled_students || []).find(s => s.student_id === decoded.studentId)
+        return {
+          ...ec,
+          class_name: cls?.name || ec.class_name,
+          teacher_name: teacher?.name || 'Lehrperson',
+          student_count: (cls?.enrolled_students || []).length,
+          niveau: myEnrollment?.niveau || 'B'
+        }
+      }))
+      return handleCORS(NextResponse.json(enriched))
+    }
+
+    // ========== GAMIFICATION ==========
+
+    // Get student gamification profile - GET /api/student/gamification
+    if (route === '/student/gamification' && method === 'GET') {
+      const decoded = await verifyToken(request)
+      if (!decoded || decoded.role !== 'student') {
+        return handleCORS(NextResponse.json({ error: 'Nicht eingeloggt.' }, { status: 401 }))
+      }
+      const student = await db.collection('students').findOne({ id: decoded.studentId })
+      if (!student) return handleCORS(NextResponse.json({ error: 'Schüler nicht gefunden.' }, { status: 404 }))
+
+      const xp = student.xp || 0
+      const level = Math.floor(xp / 100) + 1
+      const xpInLevel = xp % 100
+      const xpForNext = 100
+
+      // Calculate streak
+      const submissions = await db.collection('submissions').find({ student_id: decoded.studentId }).sort({ submitted_at: -1 }).toArray()
+      let streak = 0
+      if (submissions.length > 0) {
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        const dates = [...new Set(submissions.map(s => {
+          const d = new Date(s.submitted_at)
+          d.setHours(0, 0, 0, 0)
+          return d.getTime()
+        }))].sort((a, b) => b - a)
+        // Check if today or yesterday has activity
+        const dayMs = 86400000
+        if (dates[0] >= today.getTime() - dayMs) {
+          streak = 1
+          for (let i = 1; i < dates.length; i++) {
+            if (dates[i - 1] - dates[i] <= dayMs) streak++
+            else break
+          }
+        }
+      }
+
+      // Check & award badges
+      const badges = student.badges || []
+      const badgeDefs = [
+        { id: 'first_quiz', name: 'Erste Schritte', desc: 'Erste Prüfung abgeschlossen', icon: '🎯', check: () => submissions.length >= 1 },
+        { id: 'five_quizzes', name: 'Fleissig', desc: '5 Prüfungen abgeschlossen', icon: '📚', check: () => submissions.length >= 5 },
+        { id: 'ten_quizzes', name: 'Quiz-Meister', desc: '10 Prüfungen abgeschlossen', icon: '🏆', check: () => submissions.length >= 10 },
+        { id: 'perfect_score', name: 'Perfekt!', desc: 'Eine Prüfung mit 100% abgeschlossen', icon: '⭐', check: () => submissions.some(s => s.score_percentage === 100) },
+        { id: 'grade_6', name: 'Bestnote', desc: 'Note 6 erreicht', icon: '🌟', check: () => submissions.some(s => s.swiss_grade === 6) },
+        { id: 'streak_3', name: 'Am Ball', desc: '3 Tage Streak', icon: '🔥', check: () => streak >= 3 },
+        { id: 'streak_7', name: 'Wochenstreak', desc: '7 Tage Streak', icon: '💪', check: () => streak >= 7 },
+        { id: 'streak_30', name: 'Monatsstreak', desc: '30 Tage Streak', icon: '🏅', check: () => streak >= 30 },
+        { id: 'points_500', name: 'Punktesammler', desc: '500 Punkte gesammelt', icon: '💎', check: () => (student.total_points || 0) >= 500 },
+        { id: 'points_1000', name: 'Punktekönig', desc: '1000 Punkte gesammelt', icon: '👑', check: () => (student.total_points || 0) >= 1000 },
+        { id: 'fast_finish', name: 'Blitzschnell', desc: 'Prüfung in unter 2 Min. abgeschlossen', icon: '⚡', check: () => submissions.some(s => s.duration && s.duration < 120) },
+        { id: 'improver', name: 'Aufsteiger', desc: 'Note verbessert gegenüber letztem Versuch', icon: '📈', check: () => {
+          if (submissions.length < 2) return false
+          return submissions[0].swiss_grade > submissions[1].swiss_grade
+        }}
+      ]
+      const newBadges = []
+      badgeDefs.forEach(bd => {
+        if (!badges.find(b => b.id === bd.id) && bd.check()) {
+          newBadges.push({ id: bd.id, name: bd.name, desc: bd.desc, icon: bd.icon, earned_at: new Date() })
+        }
+      })
+      const allBadges = [...badges, ...newBadges]
+
+      // Update student with computed gamification data
+      await db.collection('students').updateOne({ id: decoded.studentId }, {
+        $set: { xp, level, streak, badges: allBadges, last_activity: new Date() }
+      })
+
+      // Class leaderboard (all classes the student is in)
+      let leaderboard = []
+      const enrolledClasses = student.enrolled_classes || []
+      if (enrolledClasses.length > 0) {
+        const classIds = enrolledClasses.map(c => c.class_id)
+        const classes = await db.collection('classes').find({ id: { $in: classIds } }).toArray()
+        const allStudentIds = [...new Set(classes.flatMap(c => (c.enrolled_students || []).map(s => s.student_id)))]
+        const allStudents = await db.collection('students').find({ id: { $in: allStudentIds } }).toArray()
+        leaderboard = allStudents
+          .map(s => ({ id: s.id, name: s.display_name, xp: s.xp || 0, level: Math.floor((s.xp || 0) / 100) + 1, streak: s.streak || 0 }))
+          .sort((a, b) => b.xp - a.xp)
+          .slice(0, 20)
+      }
+
+      return handleCORS(NextResponse.json({
+        xp, level, xpInLevel, xpForNext, streak,
+        badges: allBadges,
+        allBadgeDefs: badgeDefs.map(b => ({ id: b.id, name: b.name, desc: b.desc, icon: b.icon, earned: allBadges.some(ab => ab.id === b.id) })),
+        newBadges,
+        leaderboard,
+        totalQuizzes: student.total_quizzes || 0,
+        totalPoints: student.total_points || 0
+      }))
+    }
+
+    // Delete a student's own submission - DELETE /api/student/submissions/:id
+    if (route.match(/^\/student\/submissions\/[^/]+$/) && method === 'DELETE') {
+      const decoded = await verifyToken(request)
+      if (!decoded || decoded.role !== 'student') {
+        return handleCORS(NextResponse.json({ error: 'Nicht eingeloggt.' }, { status: 401 }))
+      }
+      const submissionId = path[2] // path = ['student', 'submissions', ':id']
+      const submission = await db.collection('submissions').findOne({ id: submissionId })
+      if (!submission) {
+        return handleCORS(NextResponse.json({ error: 'Abgabe nicht gefunden.' }, { status: 404 }))
+      }
+      // Only allow deleting own submissions
+      if (submission.student_id !== decoded.studentId) {
+        return handleCORS(NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 403 }))
+      }
+      await db.collection('submissions').deleteOne({ id: submissionId })
+      return handleCORS(NextResponse.json({ success: true }))
+    }
+
+    // Get assignments for student's enrolled classes - GET /api/student/class-assignments
+    if (route === '/student/class-assignments' && method === 'GET') {
+      const decoded = await verifyToken(request)
+      if (!decoded || decoded.role !== 'student') {
+        return handleCORS(NextResponse.json({ error: 'Nicht eingeloggt.' }, { status: 401 }))
+      }
+      const student = await db.collection('students').findOne({ id: decoded.studentId })
+      const enrolledClasses = student?.enrolled_classes || []
+      if (enrolledClasses.length === 0) return handleCORS(NextResponse.json([]))
+
+      const classIds = enrolledClasses.map(c => c.class_id)
+      // Find all active assignments for these classes
+      const assignments = await db.collection('assignments').find({
+        class_id: { $in: classIds },
+        status: 'active'
+      }).sort({ created_at: -1 }).toArray()
+
+      // Check which ones the student already submitted
+      const mySubmissions = await db.collection('submissions').find({ student_id: decoded.studentId }).toArray()
+      const submittedAssignmentIds = new Set(mySubmissions.map(s => s.assignment_id))
+
+      // Get student's niveau per class
+      const classes = await db.collection('classes').find({ id: { $in: classIds } }).toArray()
+      const niveauMap = {}
+      classes.forEach(cls => {
+        const enrolled = (cls.enrolled_students || []).find(s => s.student_id === decoded.studentId)
+        if (enrolled) niveauMap[cls.id] = enrolled.niveau || 'B'
+      })
+
+      const enriched = assignments
+        .filter(a => {
+          // Filter by niveau: show if no target_niveau set, or if student's niveau matches
+          if (!a.target_niveau) return true
+          const studentNiveau = niveauMap[a.class_id] || 'B'
+          return a.target_niveau === studentNiveau
+        })
+        .map(a => {
+          const cls = classes.find(c => c.id === a.class_id)
+          return {
+            id: a.id,
+            code: a.code,
+            title: a.worksheet_title,
+            class_name: cls?.name || a.class_name,
+            class_id: a.class_id,
+            target_niveau: a.target_niveau,
+            deadline: a.deadline,
+            created_at: a.created_at,
+            already_submitted: submittedAssignmentIds.has(a.id),
+            access_url: a.access_url
+          }
+        })
+
+      return handleCORS(NextResponse.json(enriched))
+    }
+
+    // Get class-wide stats across all assignments - GET /api/classes/:id/stats
+    if (route.match(/^\/classes\/[^/]+\/stats$/) && method === 'GET') {
+      const decoded = await verifyToken(request)
+      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+      const classId = path[1]
+      const cls = await db.collection('classes').findOne({ id: classId, teacher_id: decoded.userId })
+      if (!cls) return handleCORS(NextResponse.json({ error: 'Klasse nicht gefunden.' }, { status: 404 }))
+
+      // Get all assignments for this class
+      const assignments = await db.collection('assignments').find({ class_id: classId }).toArray()
+      if (assignments.length === 0) return handleCORS(NextResponse.json({ assignments: [], studentStats: [], classStats: null }))
+
+      const assignmentIds = assignments.map(a => a.id)
+      const submissions = await db.collection('submissions').find({ assignment_id: { $in: assignmentIds } }).toArray()
+
+      // Per-student aggregation
+      const studentMap = {}
+      const enrolled = cls.enrolled_students || []
+      enrolled.forEach(s => {
+        studentMap[s.student_id] = {
+          student_id: s.student_id,
+          display_name: s.display_name,
+          niveau: s.niveau || 'B',
+          submissions: 0,
+          total_earned: 0,
+          total_possible: 0,
+          grades: [],
+          avg_grade: null,
+          avg_score: null
+        }
+      })
+
+      submissions.forEach(sub => {
+        if (sub.student_id && studentMap[sub.student_id]) {
+          const sm = studentMap[sub.student_id]
+          sm.submissions++
+          sm.total_earned += sub.earned_points || 0
+          sm.total_possible += sub.total_points || 0
+          sm.grades.push(sub.swiss_grade || 1)
+        }
+      })
+
+      const studentStats = Object.values(studentMap).map(sm => {
+        if (sm.grades.length > 0) {
+          sm.avg_grade = Math.round(sm.grades.reduce((a, b) => a + b, 0) / sm.grades.length * 10) / 10
+          sm.avg_score = sm.total_possible > 0 ? Math.round((sm.total_earned / sm.total_possible) * 100) : 0
+        }
+        return sm
+      })
+
+      // Class-wide stats
+      const allGrades = submissions.map(s => s.swiss_grade || 1)
+      const classStats = allGrades.length > 0 ? {
+        totalAssignments: assignments.length,
+        totalSubmissions: submissions.length,
+        avgGrade: Math.round(allGrades.reduce((a, b) => a + b, 0) / allGrades.length * 10) / 10,
+        bestGrade: Math.max(...allGrades),
+        worstGrade: Math.min(...allGrades),
+        passing: allGrades.filter(g => g >= 4).length,
+        failing: allGrades.filter(g => g < 4).length,
+        passRate: Math.round((allGrades.filter(g => g >= 4).length / allGrades.length) * 100),
+        niveauStats: {
+          A: studentStats.filter(s => s.niveau === 'A'),
+          B: studentStats.filter(s => s.niveau === 'B'),
+          C: studentStats.filter(s => s.niveau === 'C')
+        }
+      } : null
+
+      const assignmentSummaries = assignments.map(a => {
+        const subs = submissions.filter(s => s.assignment_id === a.id)
+        const grades = subs.map(s => s.swiss_grade || 1)
+        return {
+          id: a.id,
+          title: a.worksheet_title,
+          target_niveau: a.target_niveau,
+          created_at: a.created_at,
+          submission_count: subs.length,
+          avg_grade: grades.length > 0 ? Math.round(grades.reduce((x, y) => x + y, 0) / grades.length * 10) / 10 : null
+        }
+      })
+
+      return handleCORS(NextResponse.json({ assignments: assignmentSummaries, studentStats, classStats }))
+    }
+
     // ========== WORKSHEET GENERATION ==========
 
     // Generate worksheet - POST /api/generate-worksheet
@@ -1164,18 +1483,24 @@ Aktion: ${actionPrompt}`
       const existingClass = await db.collection('classes').findOne({ name, teacher_id: decoded.userId })
       if (existingClass) {
         await db.collection('classes').updateOne({ id: existingClass.id }, { $set: { students: students || existingClass.students, updated_at: new Date() } })
-        return handleCORS(NextResponse.json({ ...existingClass, students: students || existingClass.students }))
+        const updated = await db.collection('classes').findOne({ id: existingClass.id })
+        const { _id, ...clean } = updated
+        return handleCORS(NextResponse.json(clean))
       }
+      const joinCode = Math.random().toString(36).substring(2, 8).toUpperCase()
       const newClass = {
         id: uuidv4(),
         name,
         teacher_id: decoded.userId,
+        join_code: joinCode,
         students: students || [],
+        enrolled_students: [], // { student_id, display_name, joined_at, niveau }
         created_at: new Date(),
         updated_at: new Date()
       }
       await db.collection('classes').insertOne(newClass)
-      return handleCORS(NextResponse.json(newClass))
+      const { _id, ...clean } = newClass
+      return handleCORS(NextResponse.json(clean))
     }
 
     // Get teacher's classes - GET /api/classes
@@ -1187,11 +1512,86 @@ Aktion: ${actionPrompt}`
       return handleCORS(NextResponse.json(cleaned))
     }
 
+    // Get class details with enrolled students - GET /api/classes/:id
+    if (route.match(/^\/classes\/[^/]+$/) && method === 'GET') {
+      const decoded = await verifyToken(request)
+      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+      const classId = path[1]
+      const cls = await db.collection('classes').findOne({ id: classId, teacher_id: decoded.userId })
+      if (!cls) return handleCORS(NextResponse.json({ error: 'Klasse nicht gefunden.' }, { status: 404 }))
+      // Enrich enrolled students with latest stats
+      const enriched = await Promise.all((cls.enrolled_students || []).map(async (es) => {
+        const student = await db.collection('students').findOne({ id: es.student_id })
+        const submissions = await db.collection('submissions').find({ student_id: es.student_id }).toArray()
+        const avgGrade = submissions.length > 0
+          ? Math.round(submissions.reduce((s, sub) => s + (sub.swiss_grade || 1), 0) / submissions.length * 10) / 10
+          : null
+        return {
+          ...es,
+          display_name: student?.display_name || es.display_name,
+          total_quizzes: student?.total_quizzes || 0,
+          total_points: student?.total_points || 0,
+          xp: student?.xp || 0,
+          level: student?.level || 1,
+          streak: student?.streak || 0,
+          avg_grade: avgGrade
+        }
+      }))
+      const { _id, ...clean } = cls
+      clean.enrolled_students = enriched
+      return handleCORS(NextResponse.json(clean))
+    }
+
+    // Update student niveau in class - PUT /api/classes/:id/students/:studentId/niveau
+    if (route.match(/^\/classes\/[^/]+\/students\/[^/]+\/niveau$/) && method === 'PUT') {
+      const decoded = await verifyToken(request)
+      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+      const classId = path[1]
+      const studentId = path[3]
+      const body = await request.json()
+      const { niveau } = body // 'A' | 'B' | 'C'
+      if (!['A', 'B', 'C'].includes(niveau)) return handleCORS(NextResponse.json({ error: 'Ungültiges Niveau. Erlaubt: A, B, C' }, { status: 400 }))
+      const cls = await db.collection('classes').findOne({ id: classId, teacher_id: decoded.userId })
+      if (!cls) return handleCORS(NextResponse.json({ error: 'Klasse nicht gefunden.' }, { status: 404 }))
+      const enrolled = cls.enrolled_students || []
+      const idx = enrolled.findIndex(s => s.student_id === studentId)
+      if (idx === -1) return handleCORS(NextResponse.json({ error: 'Schüler nicht in dieser Klasse.' }, { status: 404 }))
+      enrolled[idx].niveau = niveau
+      await db.collection('classes').updateOne({ id: classId }, { $set: { enrolled_students: enrolled, updated_at: new Date() } })
+      return handleCORS(NextResponse.json({ success: true, niveau }))
+    }
+
+    // Remove student from class - DELETE /api/classes/:id/students/:studentId
+    if (route.match(/^\/classes\/[^/]+\/students\/[^/]+$/) && method === 'DELETE') {
+      const decoded = await verifyToken(request)
+      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+      const classId = path[1]
+      const studentId = path[3]
+      const cls = await db.collection('classes').findOne({ id: classId, teacher_id: decoded.userId })
+      if (!cls) return handleCORS(NextResponse.json({ error: 'Klasse nicht gefunden.' }, { status: 404 }))
+      const updated = (cls.enrolled_students || []).filter(s => s.student_id !== studentId)
+      await db.collection('classes').updateOne({ id: classId }, { $set: { enrolled_students: updated, updated_at: new Date() } })
+      // Also remove from student's enrolled_classes
+      await db.collection('students').updateOne({ id: studentId }, { $pull: { enrolled_classes: { class_id: classId } } })
+      return handleCORS(NextResponse.json({ success: true }))
+    }
+
     // Delete class - DELETE /api/classes/:id
     if (route.match(/^\/classes\/[^/]+$/) && method === 'DELETE') {
       const decoded = await verifyToken(request)
       if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
       const classId = path[1]
+      // Remove class from all enrolled students
+      const cls = await db.collection('classes').findOne({ id: classId, teacher_id: decoded.userId })
+      if (cls) {
+        const studentIds = (cls.enrolled_students || []).map(s => s.student_id)
+        if (studentIds.length > 0) {
+          await db.collection('students').updateMany(
+            { id: { $in: studentIds } },
+            { $pull: { enrolled_classes: { class_id: classId } } }
+          )
+        }
+      }
       await db.collection('classes').deleteOne({ id: classId, teacher_id: decoded.userId })
       return handleCORS(NextResponse.json({ success: true }))
     }
@@ -1201,19 +1601,27 @@ Aktion: ${actionPrompt}`
       const decoded = await verifyToken(request)
       if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
       const body = await request.json()
-      const { worksheetId, className, deadline, status: assignmentStatus, studentNames } = body
+      const { worksheetId, className, classId, deadline, status: assignmentStatus, studentNames, targetNiveau } = body
       if (!worksheetId) return handleCORS(NextResponse.json({ error: "Material-ID erforderlich" }, { status: 400 }))
       const worksheet = await db.collection('worksheets').findOne({ id: worksheetId })
       if (!worksheet) return handleCORS(NextResponse.json({ error: "Material nicht gefunden" }, { status: 404 }))
       const code = Math.random().toString(36).substring(2, 8).toUpperCase()
+      // If classId provided, resolve class name
+      let resolvedClassName = className || ''
+      if (classId) {
+        const cls = await db.collection('classes').findOne({ id: classId, teacher_id: decoded.userId })
+        if (cls) resolvedClassName = cls.name
+      }
       const assignment = {
         id: uuidv4(),
         code,
         worksheet_id: worksheetId,
         worksheet_title: worksheet.title || 'Unbenannt',
         teacher_id: decoded.userId,
-        class_name: className || '',
+        class_id: classId || null,
+        class_name: resolvedClassName,
         student_names: studentNames || [],
+        target_niveau: targetNiveau || null, // null = all, 'A'|'B'|'C' = specific
         deadline: deadline || null,
         created_at: new Date(),
         status: assignmentStatus || 'active',
@@ -1462,12 +1870,17 @@ Regeln:
       }
       await db.collection('submissions').insertOne(submission)
 
-      // Update student stats if logged in
+      // Update student stats + gamification XP if logged in
       if (studentId) {
+        // XP calculation: base 10 + earned points + bonus for grade + perfect bonus
+        let xpEarned = 10 + earnedPoints
+        if (swissGrade >= 5.5) xpEarned += 20
+        else if (swissGrade >= 4.5) xpEarned += 10
+        if (scorePercentage === 100) xpEarned += 25 // perfect bonus
         await db.collection('students').updateOne(
           { id: studentId },
           {
-            $inc: { total_quizzes: 1, total_points: earnedPoints },
+            $inc: { total_quizzes: 1, total_points: earnedPoints, xp: xpEarned },
             $set: { last_activity: new Date() }
           }
         )
