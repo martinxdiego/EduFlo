@@ -66,6 +66,7 @@ class WorksheetGenerateRequest(BaseModel):
     difficulty: str
     questionCount: Optional[int] = 10
     mode: Optional[str] = 'worksheet'
+    theme: Optional[str] = 'classic'
 
 class RegenerateRequest(BaseModel):
     worksheetId: str
@@ -86,6 +87,7 @@ class WorksheetUpdateRequest(BaseModel):
     worksheetId: str
     title: Optional[str] = None
     questions: Optional[List[Dict[str, Any]]] = None
+    theme: Optional[str] = None
 
 class ExportRequest(BaseModel):
     worksheetId: str
@@ -298,18 +300,19 @@ async def generate_worksheet(data: WorksheetGenerateRequest, user = Depends(get_
         'difficulty': data.difficulty,
         'question_count': data.questionCount,
         'mode': data.mode,
+        'theme': data.theme or 'classic',
         'content': worksheet_content,
         'created_at': datetime.now(timezone.utc),
         'updated_at': datetime.now(timezone.utc)
     }
-    
+
     await db.worksheets.insert_one(worksheet)
-    
+
     await db.users.update_one(
         {'id': user['id']},
         {'$inc': {'worksheets_used_this_month': 1}}
     )
-    
+
     worksheet.pop('_id', None)
     return worksheet
 
@@ -399,11 +402,12 @@ async def generate_worksheet_stream(data: WorksheetGenerateRequest, user = Depen
                 'difficulty': data.difficulty,
                 'question_count': data.questionCount,
                 'mode': data.mode,
+                'theme': data.theme or 'classic',
                 'content': worksheet_content,
                 'created_at': datetime.now(timezone.utc),
                 'updated_at': datetime.now(timezone.utc)
             }
-            
+
             await db.worksheets.insert_one(worksheet)
             
             await db.users.update_one(
@@ -473,7 +477,10 @@ async def update_worksheet(worksheet_id: str, data: WorksheetUpdateRequest, user
     if data.title:
         update_data['title'] = data.title
         update_data['content.title'] = data.title
-    
+
+    if data.theme:
+        update_data['theme'] = data.theme
+
     if data.questions is not None:
         # Ensure all questions have IDs
         for i, q in enumerate(data.questions):

@@ -38,6 +38,7 @@ import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, Width
 import { saveAs } from 'file-saver'
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/ui/command'
 import { LEHRPLAN_CYCLES, searchCompetencies, getAllSubjects, getSubjectsForCycle, getCompetenciesForSubject, getTotalCompetencyCount } from '@/data/lehrplan21'
+import { WORKSHEET_THEMES, THEME_CATEGORIES, getThemeById, getQuestionDecoration, getThemeDivider } from '@/data/worksheetThemes'
 
 // ============================================================
 // CONSTANTS
@@ -291,7 +292,8 @@ const Home = () => {
     questionCount: 10,
     resourceType: 'worksheet',
     dyslexiaFont: false,
-    competencyCode: ''
+    competencyCode: '',
+    theme: 'classic'
   })
 
   // Edit mode state
@@ -629,24 +631,57 @@ const Home = () => {
     const isExam = worksheet.resourceType === 'exam' || worksheet.content?.resourceType === 'exam'
     const isQuiz = worksheet.resourceType === 'quiz' || worksheet.content?.resourceType === 'quiz'
     const isVocab = worksheet.resourceType === 'vocabulary' || worksheet.content?.resourceType === 'vocabulary'
-    const showPoints = isExam // Only exams show points
+    const showPoints = isExam
+    const pdfTheme = getThemeById(worksheet.theme || form.theme || 'classic')
+    const tc = pdfTheme.colors
+    const tp_pdf = pdfTheme.pdf
     let yPosition = 20
 
+    // Helper: parse hex to RGB
+    const hexToRgb = (hex) => {
+      const r = parseInt(hex.slice(1, 3), 16)
+      const g = parseInt(hex.slice(3, 5), 16)
+      const b = parseInt(hex.slice(5, 7), 16)
+      return [r, g, b]
+    }
+    const setColor = (hex) => { const [r, g, b] = hexToRgb(hex); doc.setTextColor(r, g, b) }
+    const setDrawHex = (hex) => { const [r, g, b] = hexToRgb(hex); doc.setDrawColor(r, g, b) }
+    const setFillHex = (hex) => { const [r, g, b] = hexToRgb(hex); doc.setFillColor(r, g, b) }
+
     const checkPage = (needed = 40) => {
-      if (yPosition > pageHeight - needed) { doc.addPage(); yPosition = 20 }
+      if (yPosition > pageHeight - needed) {
+        doc.addPage()
+        yPosition = 20
+        // Re-draw theme accent line at top of new page
+        setFillHex(tc.accent)
+        doc.rect(0, 0, pageWidth, 2, 'F')
+      }
+    }
+
+    // Theme accent bar at top
+    setFillHex(tc.accent)
+    doc.rect(0, 0, pageWidth, 2.5, 'F')
+    yPosition = 14
+
+    // Decorative header icon (emoji as text)
+    if (pdfTheme.decorations?.headerIcon) {
+      doc.setFontSize(16)
+      doc.text(pdfTheme.decorations.headerIcon, pageWidth / 2, yPosition, { align: 'center' })
+      yPosition += 8
     }
 
     // ---- EXAM HEADER ----
     if (isExam) {
-      // Formal exam header
       doc.setFontSize(10)
       doc.setFont('helvetica', 'normal')
+      doc.setTextColor(100, 100, 100)
       doc.text('Schule: ___________________________________________', 20, yPosition)
       doc.text(`Datum: ______________`, pageWidth - 70, yPosition)
       yPosition += 10
 
       doc.setFontSize(18)
       doc.setFont('helvetica', 'bold')
+      setColor(tc.primary)
       doc.text('PRÜFUNG', pageWidth / 2, yPosition, { align: 'center' })
       yPosition += 10
 
@@ -658,19 +693,23 @@ const Home = () => {
 
       doc.setFontSize(10)
       doc.setFont('helvetica', 'normal')
+      doc.setTextColor(100, 100, 100)
       doc.text(`Klasse: ${worksheet.grade} | Fach: ${worksheet.subject} | Schwierigkeit: ${DIFFICULTY_LABELS[worksheet.difficulty] || worksheet.difficulty}`, pageWidth / 2, yPosition, { align: 'center' })
       yPosition += 7
 
       if (version === 'student') {
+        doc.setTextColor(0, 0, 0)
         doc.setFontSize(11)
         doc.text('Vorname / Name: ______________________________________', 20, yPosition)
         yPosition += 8
-        // Exam info box
-        doc.setDrawColor(0, 0, 0)
-        doc.setLineWidth(0.5)
-        doc.rect(20, yPosition, pageWidth - 40, 22)
+        // Exam info box with theme color
+        setDrawHex(tc.accent)
+        doc.setLineWidth(0.8)
+        setFillHex(tc.primaryLight)
+        doc.roundedRect(20, yPosition, pageWidth - 40, 22, 2, 2, 'FD')
         doc.setFontSize(9)
         doc.setFont('helvetica', 'normal')
+        doc.setTextColor(60, 60, 60)
         doc.text(`Anzahl Aufgaben: ${worksheet.content?.questions?.length || '–'}`, 25, yPosition + 7)
         doc.text(`Maximale Punktzahl: ${worksheet.content?.total_points || '–'}`, 25, yPosition + 14)
         doc.text(`Zeit: ${worksheet.content?.estimated_time || '–'}`, pageWidth / 2, yPosition + 7)
@@ -680,6 +719,7 @@ const Home = () => {
         // Grading scale
         doc.setFontSize(8)
         doc.setFont('helvetica', 'italic')
+        doc.setTextColor(120, 120, 120)
         const tp = worksheet.content?.total_points || 0
         if (tp > 0) {
           doc.text(`Notenskala: 6 = ${Math.round(tp * 0.92)}–${tp}P | 5.5 = ${Math.round(tp * 0.84)}–${Math.round(tp * 0.91)}P | 5 = ${Math.round(tp * 0.76)}–${Math.round(tp * 0.83)}P | 4.5 = ${Math.round(tp * 0.68)}–${Math.round(tp * 0.75)}P | 4 = ${Math.round(tp * 0.5)}–${Math.round(tp * 0.67)}P`, 20, yPosition)
@@ -698,6 +738,7 @@ const Home = () => {
       // ---- WORKSHEET / QUIZ / VOCAB HEADER ----
       doc.setFontSize(18)
       doc.setFont('helvetica', 'bold')
+      setColor(tc.primary)
       const titleText = worksheet.title || worksheet.content?.title || 'Material'
       const titleLines = doc.splitTextToSize(titleText, pageWidth - 40)
       doc.text(titleLines, pageWidth / 2, yPosition, { align: 'center' })
@@ -705,11 +746,13 @@ const Home = () => {
 
       doc.setFontSize(10)
       doc.setFont('helvetica', 'normal')
+      doc.setTextColor(100, 100, 100)
       doc.text(`Klasse: ${worksheet.grade} | Fach: ${worksheet.subject} | Schwierigkeit: ${DIFFICULTY_LABELS[worksheet.difficulty] || worksheet.difficulty}`, pageWidth / 2, yPosition, { align: 'center' })
       yPosition += 5
 
       if (version === 'student') {
         yPosition += 5
+        doc.setTextColor(0, 0, 0)
         doc.setFontSize(11)
         doc.text('Name: ____________________________________________     Datum: ______________', 20, yPosition)
         yPosition += 10
@@ -725,18 +768,28 @@ const Home = () => {
       }
     }
 
-    doc.setDrawColor(200, 200, 200)
+    // Themed divider line
+    setDrawHex(tc.accent)
+    doc.setLineWidth(tp_pdf.headerLineWidth)
     doc.line(20, yPosition, pageWidth - 20, yPosition)
+    doc.setLineWidth(0.2)
     yPosition += 10
 
-    // Questions - type-specific rendering
-    worksheet.content?.questions?.forEach((q) => {
+    // Questions - type-specific rendering with theme
+    worksheet.content?.questions?.forEach((q, qIdx) => {
       checkPage(60)
       const qType = q.type || (q.options ? 'multiple_choice' : 'open')
+      const qEmoji = getQuestionDecoration(pdfTheme, qIdx)
+
+      // Themed left border for question
+      setFillHex(tc.questionBorder)
+      doc.rect(15, yPosition - 4, tp_pdf.questionBorderWidth, 10, 'F')
 
       doc.setFontSize(11)
       doc.setFont('helvetica', 'bold')
-      const questionText = sanitizePdfText(`${q.number}. ${q.question}`)
+      doc.setTextColor(30, 30, 30)
+      const prefix = qEmoji ? `${qEmoji} ` : ''
+      const questionText = sanitizePdfText(`${prefix}${q.number}. ${q.question}`)
       const questionLines = doc.splitTextToSize(questionText, showPoints ? pageWidth - 55 : pageWidth - 40)
       doc.text(questionLines, 20, yPosition)
 
@@ -744,7 +797,12 @@ const Home = () => {
       if (showPoints) {
         doc.setFontSize(8)
         doc.setFont('helvetica', 'normal')
-        doc.text(`${q.points || 1}P`, pageWidth - 25, yPosition)
+        setColor(tc.primary)
+        setFillHex(tc.primaryLight)
+        const ptText = `${q.points || 1}P`
+        doc.roundedRect(pageWidth - 30, yPosition - 4, 12, 6, 1, 1, 'F')
+        doc.text(ptText, pageWidth - 24, yPosition, { align: 'center' })
+        doc.setTextColor(0, 0, 0)
       }
 
       yPosition += questionLines.length * 6 + 3
@@ -753,32 +811,34 @@ const Home = () => {
       if (['multiple_choice', 'true_false', 'either_or'].includes(qType) && q.options) {
         doc.setFont('helvetica', 'normal')
         doc.setFontSize(10)
+        doc.setTextColor(50, 50, 50)
         yPosition += 1
         q.options.forEach((option, oi) => {
           checkPage(10)
           const letter = String.fromCharCode(65 + oi)
           const cleanOption = sanitizePdfText(option.replace(/^[A-Z]\)\s*/, ''))
           if (isExam) {
-            // Exam: checkbox style
-            doc.setDrawColor(80, 80, 80)
+            setDrawHex(tc.accent)
             doc.setLineWidth(0.4)
             doc.rect(28, yPosition - 3.5, 3.5, 3.5)
             doc.setLineWidth(0.2)
+            doc.setTextColor(50, 50, 50)
             doc.text(`${letter})`, 34, yPosition)
             const optionLines = doc.splitTextToSize(cleanOption, pageWidth - 65)
             doc.text(optionLines, 42, yPosition)
             yPosition += optionLines.length * 5 + 3
           } else {
-            // Worksheet: circle indicator
-            doc.setDrawColor(160, 160, 160)
+            setDrawHex(tc.accent)
             doc.setLineWidth(0.3)
             doc.circle(30, yPosition - 1.2, 2)
             doc.setLineWidth(0.2)
             doc.setFont('helvetica', 'bold')
             doc.setFontSize(8)
+            setColor(tc.accent)
             doc.text(letter, 28.8, yPosition)
             doc.setFont('helvetica', 'normal')
             doc.setFontSize(10)
+            doc.setTextColor(50, 50, 50)
             const optionLines = doc.splitTextToSize(cleanOption, pageWidth - 60)
             doc.text(optionLines, 37, yPosition)
             yPosition += optionLines.length * 5 + 3
@@ -792,7 +852,7 @@ const Home = () => {
         checkPage(25)
         doc.setFont('helvetica', 'normal')
         doc.setFontSize(10)
-        // Rebuild the sentence with blanks as a single text
+        doc.setTextColor(50, 50, 50)
         const blankedText = sanitizePdfText(q.question).replace(/___+/g, ' ________________ ')
         const fullLines = doc.splitTextToSize(blankedText, pageWidth - 50)
         fullLines.forEach(line => {
@@ -800,10 +860,9 @@ const Home = () => {
           doc.text(line, 25, yPosition)
           yPosition += 6
         })
-        // For student version, add extra writing space
         if (version === 'student') {
           yPosition += 4
-          doc.setDrawColor(180, 180, 180)
+          setDrawHex(tp_pdf.lineColor)
           for (let i = 0; i < 2; i++) {
             checkPage(8)
             doc.line(25, yPosition, pageWidth - 25, yPosition)
@@ -818,20 +877,24 @@ const Home = () => {
         checkPage(30)
         doc.setFont('helvetica', 'normal')
         doc.setFontSize(10)
+        doc.setTextColor(50, 50, 50)
         const pairs = (q.answer || '').split(',').filter(Boolean)
         const colLeft = 25
         const colRight = pageWidth / 2 + 10
-        // Draw headers
         doc.setFont('helvetica', 'bold')
         doc.setFontSize(9)
+        setColor(tc.primary)
         doc.text('Begriff', colLeft, yPosition)
         doc.text('Zuordnung', colRight, yPosition)
         yPosition += 3
-        doc.setDrawColor(180, 180, 180)
+        setDrawHex(tc.accent)
+        doc.setLineWidth(0.4)
         doc.line(colLeft, yPosition, pageWidth - 25, yPosition)
+        doc.setLineWidth(0.2)
         yPosition += 5
         doc.setFont('helvetica', 'normal')
         doc.setFontSize(10)
+        doc.setTextColor(50, 50, 50)
         const shuffledRight = version === 'student' ? [...pairs].sort(() => 0.5 - Math.random()) : pairs
         pairs.forEach((pair, pi) => {
           checkPage(10)
@@ -854,8 +917,8 @@ const Home = () => {
         checkPage(30)
         doc.setFont('helvetica', 'normal')
         doc.setFontSize(10)
+        doc.setTextColor(50, 50, 50)
         const items = (q.answer || '').split(',').filter(Boolean).map((s, i) => ({ text: s.trim(), origIdx: i }))
-        // Deterministic shuffle for student
         const seed = (q.number || 1) * 13 + items.length
         const displayItems = version === 'student'
           ? [...items].sort((a, b) => ((a.origIdx * 37 + seed) % 89) - ((b.origIdx * 37 + seed) % 89))
@@ -863,16 +926,19 @@ const Home = () => {
         displayItems.forEach((item, ii) => {
           checkPage(12)
           if (version === 'student') {
-            // Draw a small box for numbering
-            doc.setDrawColor(120, 120, 120)
+            setDrawHex(tc.accent)
+            setFillHex(tc.primaryLight)
             doc.setLineWidth(0.3)
-            doc.rect(28, yPosition - 4, 8, 5)
+            doc.roundedRect(28, yPosition - 4, 8, 5, 1, 1, 'FD')
             doc.setLineWidth(0.2)
+            doc.setTextColor(50, 50, 50)
             doc.text(sanitizePdfText(item.text), 40, yPosition)
           } else {
             doc.setFont('helvetica', 'bold')
+            setColor(tc.primary)
             doc.text(`${ii + 1}.`, 28, yPosition)
             doc.setFont('helvetica', 'normal')
+            doc.setTextColor(50, 50, 50)
             doc.text(sanitizePdfText(item.text), 36, yPosition)
           }
           yPosition += 8
@@ -886,7 +952,6 @@ const Home = () => {
         doc.setFont('helvetica', 'normal')
         doc.setFontSize(10)
         if (version === 'student') {
-          // Computation area with grid-like lines
           doc.setFontSize(9)
           doc.setFont('helvetica', 'italic')
           doc.setTextColor(120, 120, 120)
@@ -894,21 +959,23 @@ const Home = () => {
           doc.setTextColor(0, 0, 0)
           doc.setFont('helvetica', 'normal')
           yPosition += 6
-          doc.setDrawColor(200, 200, 200)
+          setDrawHex(tp_pdf.lineColor)
           for (let i = 0; i < 5; i++) {
             checkPage(8)
             doc.line(25, yPosition, pageWidth - 25, yPosition)
             yPosition += 8
           }
           yPosition += 2
-          // Answer box
-          doc.setDrawColor(100, 100, 100)
+          setDrawHex(tc.accent)
+          setFillHex(tc.primaryLight)
           doc.setLineWidth(0.5)
-          doc.rect(25, yPosition - 1, pageWidth - 50, 10)
+          doc.roundedRect(25, yPosition - 1, pageWidth - 50, 10, 2, 2, 'FD')
           doc.setLineWidth(0.2)
           doc.setFont('helvetica', 'bold')
           doc.setFontSize(10)
+          setColor(tc.primary)
           doc.text('Antwort:', 28, yPosition + 6)
+          doc.setTextColor(0, 0, 0)
           yPosition += 14
         }
       }
@@ -916,15 +983,14 @@ const Home = () => {
       // === Image: placeholder box with better styling ===
       if (qType === 'image') {
         checkPage(60)
-        // Dashed border image placeholder
-        doc.setDrawColor(180, 180, 180)
-        doc.setFillColor(248, 248, 252)
+        setDrawHex(tc.accent + '80')
+        setFillHex(tc.primaryLight)
         doc.setLineWidth(0.3)
         const imgBoxWidth = Math.min(pageWidth - 60, 120)
         const imgBoxX = (pageWidth - imgBoxWidth) / 2
-        doc.rect(imgBoxX, yPosition, imgBoxWidth, 40, 'FD')
+        doc.roundedRect(imgBoxX, yPosition, imgBoxWidth, 40, 3, 3, 'FD')
         // Cross lines to indicate image area
-        doc.setDrawColor(210, 210, 220)
+        setDrawHex(tp_pdf.lineColor)
         doc.line(imgBoxX, yPosition, imgBoxX + imgBoxWidth, yPosition + 40)
         doc.line(imgBoxX + imgBoxWidth, yPosition, imgBoxX, yPosition + 40)
         doc.setFontSize(9)
@@ -943,7 +1009,7 @@ const Home = () => {
           doc.setTextColor(0, 0, 0)
           doc.setFont('helvetica', 'normal')
           yPosition += 4
-          doc.setDrawColor(180, 180, 180)
+          setDrawHex(tp_pdf.lineColor)
           for (let i = 0; i < 3; i++) {
             checkPage(8)
             doc.line(25, yPosition, pageWidth - 25, yPosition)
@@ -956,7 +1022,7 @@ const Home = () => {
       if (qType === 'open' && version === 'student') {
         const pts = q.points || 1
         const lineCount = pts >= 3 ? 5 : pts >= 2 ? 3 : 2
-        doc.setDrawColor(180, 180, 180)
+        setDrawHex(tp_pdf.lineColor)
         for (let i = 0; i < lineCount; i++) {
           checkPage(10)
           yPosition += 8
@@ -969,7 +1035,7 @@ const Home = () => {
       if (!['multiple_choice', 'true_false', 'either_or', 'fill_blank', 'matching', 'ordering', 'math', 'image', 'open'].includes(qType) && version === 'student' && !q.options) {
         const pts = q.points || 1
         const lineCount = pts >= 3 ? 5 : pts >= 2 ? 3 : 2
-        doc.setDrawColor(180, 180, 180)
+        setDrawHex(tp_pdf.lineColor)
         for (let i = 0; i < lineCount; i++) {
           checkPage(10)
           yPosition += 8
@@ -981,7 +1047,6 @@ const Home = () => {
       // For teacher version: show answer with clean formatting
       if (version === 'teacher' && q.answer) {
         checkPage(20)
-        // Draw a subtle green background box
         const answerLabel = qType === 'fill_blank' ? 'Lücken' : qType === 'matching' ? 'Zuordnung' : qType === 'ordering' ? 'Reihenfolge' : 'Lösung'
         const answerText = sanitizePdfText(`${answerLabel}: ${q.answer}`)
         const answerLines = doc.splitTextToSize(answerText, pageWidth - 55)
@@ -1004,10 +1069,10 @@ const Home = () => {
 
       yPosition += 6
 
-      // Separator line between exam questions for professional look
+      // Themed separator between questions
       if (isExam) {
         checkPage(10)
-        doc.setDrawColor(220, 220, 220)
+        setDrawHex(tp_pdf.lineColor)
         doc.setLineWidth(0.3)
         doc.line(20, yPosition, pageWidth - 20, yPosition)
         doc.setLineWidth(0.2)
@@ -1036,19 +1101,23 @@ const Home = () => {
       })
     }
 
-    // Footer
+    // Footer with theme
     checkPage(20)
     yPosition += 10
-    doc.setDrawColor(200, 200, 200)
+    setDrawHex(tc.accent)
+    doc.setLineWidth(tp_pdf.headerLineWidth)
     doc.line(20, yPosition, pageWidth - 20, yPosition)
+    doc.setLineWidth(0.2)
     yPosition += 8
     doc.setFontSize(10)
     doc.setFont('helvetica', 'bold')
+    setColor(tc.primary)
     if (showPoints) {
       doc.text(`Total: ${worksheet.content?.total_points || '–'} Punkte | Geschätzte Zeit: ${worksheet.content?.estimated_time || '–'}`, 20, yPosition)
     } else {
       doc.text(`Geschätzte Zeit: ${worksheet.content?.estimated_time || '–'}`, 20, yPosition)
     }
+    doc.setTextColor(0, 0, 0)
 
     // Exam: add note signature line at bottom
     if (isExam && version === 'student') {
@@ -3320,43 +3389,57 @@ const Home = () => {
                       const isQuiz = selectedWorksheet.resourceType === 'quiz' || selectedWorksheet.content?.resourceType === 'quiz'
                       const showPts = isExam
                       const questions = editMode ? editedQuestions : (selectedWorksheet.content?.questions || [])
+                      const wsTheme = getThemeById(selectedWorksheet.theme || form.theme || 'classic')
 
                       return (
-                    <div className="bg-white rounded-lg shadow-lg p-6 sm:p-10">
+                    <div className={`bg-white ${wsTheme.styles.rounded} shadow-lg p-6 sm:p-10 relative overflow-hidden`}>
+                      {/* Theme decorative top border */}
+                      <div className="absolute top-0 left-0 right-0 h-1.5" style={{ background: `linear-gradient(90deg, ${wsTheme.colors.primary}, ${wsTheme.colors.accent})` }} />
+
                       {/* Header - different for exams */}
                       {isExam ? (
-                        <div className="mb-6">
+                        <div className="mb-6 mt-2">
                           <div className="text-center mb-4">
-                            <p className="text-xs uppercase tracking-widest text-gray-400 mb-2">Prüfung</p>
-                            <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">{selectedWorksheet.title}</h2>
+                            <p className="text-xs uppercase tracking-widest mb-2" style={{ color: wsTheme.colors.secondary }}>
+                              {wsTheme.decorations?.headerIcon && <span className="mr-1">{wsTheme.decorations.headerIcon}</span>}Prüfung
+                            </p>
+                            <h2 className={`${wsTheme.styles.titleSize} sm:text-3xl font-bold mb-2 ${wsTheme.styles.fontFamily}`} style={{ color: wsTheme.colors.primary }}>{selectedWorksheet.title}</h2>
                             <div className="flex gap-2 justify-center flex-wrap">
-                              <Badge variant="outline">{selectedWorksheet.grade}. Klasse</Badge>
-                              <Badge variant="outline">{selectedWorksheet.subject}</Badge>
-                              <Badge variant="outline">{DIFFICULTY_LABELS[selectedWorksheet.difficulty] || selectedWorksheet.difficulty}</Badge>
+                              <Badge className="border" style={{ backgroundColor: wsTheme.colors.badgeBg, color: wsTheme.colors.badgeText, borderColor: wsTheme.colors.accent + '40' }}>{selectedWorksheet.grade}. Klasse</Badge>
+                              <Badge className="border" style={{ backgroundColor: wsTheme.colors.badgeBg, color: wsTheme.colors.badgeText, borderColor: wsTheme.colors.accent + '40' }}>{selectedWorksheet.subject}</Badge>
+                              <Badge className="border" style={{ backgroundColor: wsTheme.colors.badgeBg, color: wsTheme.colors.badgeText, borderColor: wsTheme.colors.accent + '40' }}>{DIFFICULTY_LABELS[selectedWorksheet.difficulty] || selectedWorksheet.difficulty}</Badge>
                             </div>
                           </div>
-                          <div className="bg-gray-50 border rounded-xl p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center text-sm">
-                            <div><p className="text-xs text-gray-500">Aufgaben</p><p className="font-bold text-gray-900">{questions.length}</p></div>
-                            <div><p className="text-xs text-gray-500">Punkte</p><p className="font-bold text-gray-900">{selectedWorksheet.content?.total_points || '–'}</p></div>
-                            <div><p className="text-xs text-gray-500">Zeit</p><p className="font-bold text-gray-900">{selectedWorksheet.content?.estimated_time || '–'}</p></div>
-                            <div><p className="text-xs text-gray-500">Notenskala</p><p className="font-bold text-gray-900">1–6</p></div>
+                          <div className="border rounded-xl p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center text-sm" style={{ backgroundColor: wsTheme.colors.headerBg, borderColor: wsTheme.colors.accent + '30' }}>
+                            <div><p className="text-xs" style={{ color: wsTheme.colors.secondary }}>Aufgaben</p><p className="font-bold" style={{ color: wsTheme.colors.primary }}>{questions.length}</p></div>
+                            <div><p className="text-xs" style={{ color: wsTheme.colors.secondary }}>Punkte</p><p className="font-bold" style={{ color: wsTheme.colors.primary }}>{selectedWorksheet.content?.total_points || '–'}</p></div>
+                            <div><p className="text-xs" style={{ color: wsTheme.colors.secondary }}>Zeit</p><p className="font-bold" style={{ color: wsTheme.colors.primary }}>{selectedWorksheet.content?.estimated_time || '–'}</p></div>
+                            <div><p className="text-xs" style={{ color: wsTheme.colors.secondary }}>Notenskala</p><p className="font-bold" style={{ color: wsTheme.colors.primary }}>1–6</p></div>
                           </div>
-                          <div className="mt-4 border-b border-gray-200 pb-2">
+                          <div className="mt-4 pb-2" style={{ borderBottom: `1px solid ${wsTheme.colors.accent}30` }}>
                             <p className="text-sm text-gray-500">Name: _______________________________ Datum: _______________</p>
                           </div>
                         </div>
                       ) : (
-                        <div className="mb-6 text-center">
-                          <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-3">{selectedWorksheet.title}</h2>
+                        <div className="mb-6 text-center mt-2">
+                          {wsTheme.decorations?.headerIcon && (
+                            <p className="text-2xl mb-2">{wsTheme.decorations.headerIcon}</p>
+                          )}
+                          <h2 className={`${wsTheme.styles.titleSize} sm:text-3xl font-bold mb-3 ${wsTheme.styles.fontFamily}`} style={{ color: wsTheme.colors.primary }}>{selectedWorksheet.title}</h2>
                           <div className="flex gap-2 justify-center flex-wrap">
-                            <Badge variant="outline">{selectedWorksheet.grade}. Klasse</Badge>
-                            <Badge variant="outline">{selectedWorksheet.subject}</Badge>
-                            <Badge variant="outline">{DIFFICULTY_LABELS[selectedWorksheet.difficulty] || selectedWorksheet.difficulty}</Badge>
-                            <Badge variant="outline" className="text-blue-600">{questions.length} Fragen</Badge>
+                            <Badge className="border" style={{ backgroundColor: wsTheme.colors.badgeBg, color: wsTheme.colors.badgeText, borderColor: wsTheme.colors.accent + '40' }}>{selectedWorksheet.grade}. Klasse</Badge>
+                            <Badge className="border" style={{ backgroundColor: wsTheme.colors.badgeBg, color: wsTheme.colors.badgeText, borderColor: wsTheme.colors.accent + '40' }}>{selectedWorksheet.subject}</Badge>
+                            <Badge className="border" style={{ backgroundColor: wsTheme.colors.badgeBg, color: wsTheme.colors.badgeText, borderColor: wsTheme.colors.accent + '40' }}>{DIFFICULTY_LABELS[selectedWorksheet.difficulty] || selectedWorksheet.difficulty}</Badge>
+                            <Badge className="border" style={{ backgroundColor: wsTheme.colors.badgeBg, color: wsTheme.colors.badgeText, borderColor: wsTheme.colors.accent + '40' }}>{questions.length} Fragen</Badge>
                           </div>
                         </div>
                       )}
-                      <Separator className="mb-6" />
+                      {/* Themed divider */}
+                      {wsTheme.decorations?.divider ? (
+                        <div className="text-center text-xs py-3 select-none" style={{ color: wsTheme.colors.accent + '80' }}>{wsTheme.decorations.divider}</div>
+                      ) : (
+                        <Separator className="mb-6" style={{ backgroundColor: wsTheme.colors.accent + '25' }} />
+                      )}
 
                       {/* EDIT MODE */}
                       {editMode ? (
@@ -3774,14 +3857,24 @@ const Home = () => {
                         </div>
                       ) : (
                         /* PREVIEW MODE */
-                        <div className="space-y-5">
-                          {questions.map((q, index) => (
+                        <div className={wsTheme.styles.questionSpacing}>
+                          {questions.map((q, index) => {
+                            const qDecoration = getQuestionDecoration(wsTheme, index)
+                            return (
                             <motion.div key={index} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: index * 0.04 }}
-                              className={`border-l-4 ${isExam ? 'border-red-400' : isQuiz ? 'border-green-400' : 'border-blue-500'} pl-5 py-3 hover:bg-blue-50/50 transition-smooth rounded-r`}>
+                              className={`${wsTheme.styles.questionStyle.includes('border-l') ? 'pl-5' : 'p-4'} py-3 transition-smooth ${wsTheme.styles.rounded}`}
+                              style={{
+                                borderLeftColor: wsTheme.styles.questionStyle.includes('border-l') ? wsTheme.colors.questionBorder : undefined,
+                                borderColor: wsTheme.styles.questionStyle.includes('border-2') ? wsTheme.colors.questionBorder : undefined,
+                                backgroundColor: wsTheme.colors.questionBg + '60',
+                                borderLeftWidth: wsTheme.styles.questionStyle.includes('border-l-4') ? '4px' : undefined,
+                                borderStyle: wsTheme.styles.questionStyle.includes('dashed') ? 'dashed' : undefined,
+                              }}>
                               <div className="flex items-start justify-between gap-2 mb-2">
-                                <p className="font-semibold text-base text-gray-900 flex-1">
+                                <p className={`font-semibold text-base text-gray-900 flex-1 ${wsTheme.styles.fontFamily}`}>
+                                  {qDecoration && <span className="mr-1.5">{qDecoration}</span>}
                                   {q.number}. {q.question}
-                                  {showPts && <Badge variant="secondary" className="ml-2 text-xs">{q.points || 1}P</Badge>}
+                                  {showPts && <Badge className="ml-2 text-xs" style={{ backgroundColor: wsTheme.colors.badgeBg, color: wsTheme.colors.badgeText }}>{q.points || 1}P</Badge>}
                                   {q.type && <Badge variant="outline" className="ml-2 text-[10px] text-gray-400">{QUESTION_TYPES.find(t => t.id === q.type)?.label || q.type}</Badge>}
                                 </p>
                                 <button onClick={() => speakText(q.question)} className="flex-shrink-0 p-1.5 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors" title="Frage vorlesen">
@@ -3795,9 +3888,9 @@ const Home = () => {
                                   {q.options.map((option, i) => (
                                     <div key={i} className="text-gray-700 text-sm flex items-center gap-2.5">
                                       {isExam ? (
-                                        <span className="w-4 h-4 border-2 border-gray-400 rounded-sm inline-block flex-shrink-0" />
+                                        <span className="w-4 h-4 border-2 rounded-sm inline-block flex-shrink-0" style={{ borderColor: wsTheme.colors.accent }} />
                                       ) : (
-                                        <span className="w-5 h-5 rounded-full border-2 border-gray-300 inline-flex items-center justify-center flex-shrink-0 text-[10px] font-bold text-gray-500">{String.fromCharCode(65 + i)}</span>
+                                        <span className="w-5 h-5 rounded-full border-2 inline-flex items-center justify-center flex-shrink-0 text-[10px] font-bold" style={{ borderColor: wsTheme.colors.accent + '80', color: wsTheme.colors.accent }}>{String.fromCharCode(65 + i)}</span>
                                       )}
                                       <span>{option.replace(/^[A-Z]\)\s*/, '')}</span>
                                     </div>
@@ -3807,14 +3900,14 @@ const Home = () => {
 
                               {/* Fill in the blank preview */}
                               {q.type === 'fill_blank' && (
-                                <div className="mt-2 ml-1 bg-amber-50/50 rounded-lg p-3 border border-amber-100">
+                                <div className="mt-2 ml-1 rounded-lg p-3 border" style={{ backgroundColor: wsTheme.colors.primaryLight + '30', borderColor: wsTheme.colors.accent + '30' }}>
                                   <p className="text-sm text-gray-700 leading-loose">
                                     {q.question.split(/___+/).map((part, pi, arr) => (
                                       <span key={pi}>
                                         {part}
                                         {pi < arr.length - 1 && (
-                                          <span className="inline-block mx-1 min-w-[80px] border-b-2 border-amber-400 text-center align-bottom">
-                                            <span className="text-[10px] text-amber-300 select-none">{pi + 1}</span>
+                                          <span className="inline-block mx-1 min-w-[80px] border-b-2 text-center align-bottom" style={{ borderColor: wsTheme.colors.accent }}>
+                                            <span className="text-[10px] select-none" style={{ color: wsTheme.colors.accent + '60' }}>{pi + 1}</span>
                                           </span>
                                         )}
                                       </span>
@@ -3834,7 +3927,7 @@ const Home = () => {
                                 <div className="mt-3 ml-1 grid grid-cols-2 gap-2">
                                   <div className="space-y-1.5">
                                     {pairs.map((pair, pi) => (
-                                      <div key={pi} className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 text-sm text-gray-700">
+                                      <div key={pi} className="border rounded-lg px-3 py-1.5 text-sm text-gray-700" style={{ backgroundColor: wsTheme.colors.primaryLight + '50', borderColor: wsTheme.colors.accent + '40' }}>
                                         {pair.split('→')[0]?.trim()}
                                       </div>
                                     ))}
@@ -3858,8 +3951,8 @@ const Home = () => {
                                 return (
                                 <div className="mt-3 ml-1 space-y-1.5">
                                   {shuffled.map((item, ii) => (
-                                    <div key={ii} className="flex items-center gap-2 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5">
-                                      <span className="w-5 h-5 rounded bg-indigo-200 flex items-center justify-center text-[10px] font-bold text-indigo-700 flex-shrink-0">?</span>
+                                    <div key={ii} className="flex items-center gap-2 border rounded-lg px-3 py-1.5" style={{ backgroundColor: wsTheme.colors.primaryLight + '40', borderColor: wsTheme.colors.accent + '30' }}>
+                                      <span className="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold flex-shrink-0" style={{ backgroundColor: wsTheme.colors.accent + '30', color: wsTheme.colors.primary }}>?</span>
                                       <span className="text-sm text-gray-700">{item.text}</span>
                                     </div>
                                   ))}
@@ -3870,12 +3963,12 @@ const Home = () => {
                               {/* Math preview */}
                               {q.type === 'math' && (
                                 <div className="mt-3 ml-1">
-                                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 text-center">
+                                  <div className="border rounded-lg p-4 text-center" style={{ backgroundColor: wsTheme.colors.primaryLight + '40', borderColor: wsTheme.colors.accent + '30' }}>
                                     <p className="text-lg font-mono font-bold text-gray-800">{q.question.replace(/^Berechne:\s*/i, '')}</p>
                                   </div>
                                   <div className="mt-3 space-y-3">
                                     {Array.from({ length: 3 }).map((_, i) => (
-                                      <div key={i} className="border-b border-gray-300 h-6" />
+                                      <div key={i} className="h-6" style={{ borderBottom: `1px solid ${wsTheme.colors.accent}40` }} />
                                     ))}
                                   </div>
                                 </div>
@@ -3887,14 +3980,14 @@ const Home = () => {
                                   {q.imageUrl ? (
                                     <img src={q.imageUrl} alt="Aufgabenbild" className="max-h-48 rounded-lg object-contain border" />
                                   ) : (
-                                    <div className="bg-pink-50 border-2 border-dashed border-pink-300 rounded-lg p-6 text-center">
-                                      <Image className="h-8 w-8 mx-auto text-pink-400 mb-1" />
-                                      <p className="text-xs text-pink-500">Bild wird hier angezeigt</p>
+                                    <div className="border-2 border-dashed rounded-lg p-6 text-center" style={{ backgroundColor: wsTheme.colors.primaryLight + '30', borderColor: wsTheme.colors.accent + '50' }}>
+                                      <Image className="h-8 w-8 mx-auto mb-1" style={{ color: wsTheme.colors.accent }} />
+                                      <p className="text-xs" style={{ color: wsTheme.colors.accent }}>Bild wird hier angezeigt</p>
                                     </div>
                                   )}
                                   <div className="mt-3 space-y-3">
                                     {Array.from({ length: 3 }).map((_, i) => (
-                                      <div key={i} className="border-b border-gray-300 h-6" />
+                                      <div key={i} className="h-6" style={{ borderBottom: `1px solid ${wsTheme.colors.accent}40` }} />
                                     ))}
                                   </div>
                                 </div>
@@ -3904,43 +3997,53 @@ const Home = () => {
                               {(q.type === 'open' || (!q.options && !['fill_blank', 'matching', 'ordering', 'math', 'image'].includes(q.type))) && (
                                 <div className="mt-3 ml-1 space-y-3">
                                   {Array.from({ length: (q.points || 1) >= 3 ? 4 : (q.points || 1) >= 2 ? 3 : 2 }).map((_, i) => (
-                                    <div key={i} className="border-b border-gray-300 h-6" />
+                                    <div key={i} className="h-6" style={{ borderBottom: `1px solid ${wsTheme.colors.accent}40` }} />
                                   ))}
                                 </div>
                               )}
+
+                              {/* Theme divider between questions */}
+                              {wsTheme.decorations?.divider && index < questions.length - 1 && (
+                                <div className="text-center text-[10px] mt-3 select-none" style={{ color: wsTheme.colors.accent + '50' }}>{wsTheme.decorations.divider}</div>
+                              )}
                             </motion.div>
-                          ))}
+                          )})}
                         </div>
                       )}
 
                       {/* Stats */}
-                      <div className="mt-10 pt-6 border-t">
+                      <div className="mt-10 pt-6" style={{ borderTop: `2px solid ${wsTheme.colors.accent}20` }}>
                         {showPts ? (
                           <div className="grid grid-cols-2 gap-4 text-center">
-                            <div className="bg-gray-50 p-4 rounded-xl">
-                              <p className="text-xs text-gray-500 mb-1">Gesamtpunkte</p>
-                              <p className="text-2xl font-bold text-blue-600">{selectedWorksheet.content?.total_points}</p>
+                            <div className="p-4 rounded-xl" style={{ backgroundColor: wsTheme.colors.headerBg }}>
+                              <p className="text-xs mb-1" style={{ color: wsTheme.colors.secondary }}>Gesamtpunkte</p>
+                              <p className="text-2xl font-bold" style={{ color: wsTheme.colors.primary }}>{selectedWorksheet.content?.total_points}</p>
                             </div>
-                            <div className="bg-gray-50 p-4 rounded-xl">
-                              <p className="text-xs text-gray-500 mb-1">Geschätzte Zeit</p>
-                              <p className="text-2xl font-bold text-blue-600">{selectedWorksheet.content?.estimated_time}</p>
+                            <div className="p-4 rounded-xl" style={{ backgroundColor: wsTheme.colors.headerBg }}>
+                              <p className="text-xs mb-1" style={{ color: wsTheme.colors.secondary }}>Geschätzte Zeit</p>
+                              <p className="text-2xl font-bold" style={{ color: wsTheme.colors.primary }}>{selectedWorksheet.content?.estimated_time}</p>
                             </div>
                           </div>
                         ) : (
-                          <div className="text-center bg-gray-50 p-4 rounded-xl">
-                            <p className="text-xs text-gray-500 mb-1">Geschätzte Bearbeitungszeit</p>
-                            <p className="text-2xl font-bold text-blue-600">{selectedWorksheet.content?.estimated_time}</p>
+                          <div className="text-center p-4 rounded-xl" style={{ backgroundColor: wsTheme.colors.headerBg }}>
+                            <p className="text-xs mb-1" style={{ color: wsTheme.colors.secondary }}>Geschätzte Bearbeitungszeit</p>
+                            <p className="text-2xl font-bold" style={{ color: wsTheme.colors.primary }}>{selectedWorksheet.content?.estimated_time}</p>
                           </div>
                         )}
                       </div>
 
+                      {/* Theme footer decoration */}
+                      {wsTheme.decorations?.divider && (
+                        <div className="text-center text-xs mt-4 select-none" style={{ color: wsTheme.colors.accent + '60' }}>{wsTheme.decorations.divider}</div>
+                      )}
+
                       {/* Teacher Notes */}
                       {selectedWorksheet.content?.teacher_notes && (
-                        <div className="mt-6 bg-yellow-50 p-5 rounded-xl border border-yellow-200">
-                          <h4 className="font-semibold text-sm mb-2 text-yellow-900 flex items-center gap-2">
+                        <div className="mt-6 p-5 rounded-xl border" style={{ backgroundColor: wsTheme.colors.primaryLight + '30', borderColor: wsTheme.colors.accent + '30' }}>
+                          <h4 className="font-semibold text-sm mb-2 flex items-center gap-2" style={{ color: wsTheme.colors.primary }}>
                             <Lightbulb className="h-4 w-4" /> Lehrernotizen
                           </h4>
-                          <p className="text-sm text-yellow-800 leading-relaxed">{selectedWorksheet.content.teacher_notes}</p>
+                          <p className="text-sm text-gray-700 leading-relaxed">{selectedWorksheet.content.teacher_notes}</p>
                         </div>
                       )}
                     </div>
@@ -3969,6 +4072,35 @@ const Home = () => {
                                   {DIFFICULTY_LABELS[level]}
                                 </Button>
                               ))}
+                            </div>
+                          </div>
+                          <Separator />
+
+                          {/* Theme Picker for existing worksheets */}
+                          <div className="space-y-2">
+                            <Label className="text-sm font-medium flex items-center gap-2"><Palette className="h-4 w-4" /> Design-Vorlage</Label>
+                            <p className="text-xs text-gray-500">Ändert das visuelle Design und den PDF-Export.</p>
+                            <div className="grid grid-cols-5 gap-1.5">
+                              {WORKSHEET_THEMES.map(theme => {
+                                const isActive = (selectedWorksheet.theme || form.theme || 'classic') === theme.id
+                                return (
+                                  <button key={theme.id} onClick={() => {
+                                    setSelectedWorksheet(prev => ({ ...prev, theme: theme.id }))
+                                    // Persist to backend
+                                    fetch(`/api/worksheets/${selectedWorksheet.id}`, {
+                                      method: 'PUT',
+                                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                      body: JSON.stringify({ worksheetId: selectedWorksheet.id, theme: theme.id })
+                                    }).catch(() => {})
+                                  }}
+                                    className={`p-1.5 rounded-lg border text-center transition-all ${isActive ? 'ring-2 ring-offset-1 shadow-sm' : 'border-gray-200 hover:border-gray-300'}`}
+                                    style={isActive ? { borderColor: theme.colors.accent, ringColor: theme.colors.accent } : {}}
+                                    title={theme.name}>
+                                    <span className="text-sm block">{theme.icon}</span>
+                                    <span className="text-[9px] text-gray-500 block leading-tight">{theme.name}</span>
+                                  </button>
+                                )
+                              })}
                             </div>
                           </div>
                           <Separator />
@@ -4183,6 +4315,38 @@ const Home = () => {
                           {selectedQuestionTypes.length > 0 && (
                             <p className="text-xs text-blue-600 mt-2">{selectedQuestionTypes.length} Fragetyp{selectedQuestionTypes.length > 1 ? 'en' : ''} ausgewählt – KI erstellt passende Aufgaben</p>
                           )}
+                        </div>
+
+                        {/* Theme Selector */}
+                        <div>
+                          <Label className="text-sm font-medium mb-3 block flex items-center gap-2">
+                            <Palette className="h-4 w-4" /> Design-Vorlage
+                          </Label>
+                          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                            {WORKSHEET_THEMES.map(theme => {
+                              const isSelected = form.theme === theme.id
+                              return (
+                                <button key={theme.id} type="button" onClick={() => setForm({ ...form, theme: theme.id })}
+                                  className={`group relative p-3 rounded-xl border-2 text-center transition-all duration-200 hover:shadow-md ${isSelected ? 'shadow-sm scale-[1.02]' : 'border-gray-200 bg-white hover:border-gray-300'}`}
+                                  style={isSelected ? { borderColor: theme.colors.accent, backgroundColor: theme.colors.primaryLight + '40' } : {}}>
+                                  <span className="text-xl block mb-1">{theme.icon}</span>
+                                  <span className={`text-[11px] font-medium block ${isSelected ? 'text-gray-900' : 'text-gray-600'}`}>{theme.name}</span>
+                                  {isSelected && (
+                                    <div className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center" style={{ backgroundColor: theme.colors.accent }}>
+                                      <CheckCircle2 className="h-3.5 w-3.5 text-white" />
+                                    </div>
+                                  )}
+                                  {/* Color preview bar */}
+                                  <div className="flex gap-0.5 justify-center mt-1.5">
+                                    <div className="w-3 h-1.5 rounded-full" style={{ backgroundColor: theme.colors.primary }} />
+                                    <div className="w-3 h-1.5 rounded-full" style={{ backgroundColor: theme.colors.accent }} />
+                                    <div className="w-3 h-1.5 rounded-full" style={{ backgroundColor: theme.colors.primaryLight }} />
+                                  </div>
+                                </button>
+                              )
+                            })}
+                          </div>
+                          <p className="text-xs text-gray-500 mt-2">{getThemeById(form.theme).description} — druckfreundlich optimiert</p>
                         </div>
 
                         {/* Question Count */}
