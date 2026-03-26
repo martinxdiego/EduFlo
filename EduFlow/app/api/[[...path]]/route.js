@@ -1382,6 +1382,187 @@ Regeln:
       return handleCORS(NextResponse.json({ ...(updated || {}), _id: undefined }))
     }
 
+    // ========== LEHRER-KORREKTUR (Teacher Override) ==========
+
+    // Update a submission's question result (teacher override) - PUT /api/submissions/:id/grade
+    if (route.match(/^\/submissions\/[^/]+\/grade$/) && method === 'PUT') {
+      const decoded = await verifyToken(request)
+      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+      const submissionId = path[1]
+      const body = await request.json()
+      const { questionIndex, pointsAwarded, feedback, teacherComment } = body
+
+      const submission = await db.collection('submissions').findOne({ id: submissionId })
+      if (!submission) return handleCORS(NextResponse.json({ error: 'Abgabe nicht gefunden.' }, { status: 404 }))
+
+      // Verify teacher owns the assignment
+      const assignment = await db.collection('assignments').findOne({ id: submission.assignment_id, teacher_id: decoded.userId })
+      if (!assignment) return handleCORS(NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 403 }))
+
+      const questionResults = submission.question_results || []
+      if (questionIndex < 0 || questionIndex >= questionResults.length) {
+        return handleCORS(NextResponse.json({ error: 'Ungültiger Fragenindex.' }, { status: 400 }))
+      }
+
+      // Update the specific question result
+      const qr = questionResults[questionIndex]
+      if (pointsAwarded !== undefined) {
+        const maxPts = qr.maxPoints || 1
+        qr.pointsAwarded = Math.min(Math.max(0, pointsAwarded), maxPts)
+        qr.isCorrect = qr.pointsAwarded === maxPts ? true : qr.pointsAwarded === 0 ? false : 'partial'
+      }
+      if (feedback !== undefined) qr.feedback = feedback
+      if (teacherComment !== undefined) qr.teacherComment = teacherComment
+      qr.teacherOverride = true
+      qr.needsManualReview = false
+
+      questionResults[questionIndex] = qr
+
+      // Recalculate totals
+      const totalPoints = questionResults.reduce((sum, r) => sum + (r.maxPoints || 1), 0)
+      const earnedPoints = questionResults.reduce((sum, r) => sum + (r.pointsAwarded ?? 0), 0)
+      const needsReview = questionResults.some(r => r.needsManualReview || r.isCorrect === null)
+
+      // Calculate Swiss grade (1-6)
+      const scorePercentage = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0
+      const swissGrade = totalPoints > 0 ? Math.round((earnedPoints / totalPoints * 5 + 1) * 2) / 2 : 1
+
+      await db.collection('submissions').updateOne(
+        { id: submissionId },
+        { $set: {
+          question_results: questionResults,
+          earned_points: earnedPoints,
+          total_points: totalPoints,
+          score_percentage: scorePercentage,
+          needs_review: needsReview,
+          swiss_grade: swissGrade,
+          teacher_reviewed: true,
+          reviewed_at: new Date()
+        }}
+      )
+
+      return handleCORS(NextResponse.json({
+        questionResults: questionResults.map(r => ({
+          questionNumber: r.questionNumber, question: r.question, type: r.type,
+          studentAnswer: r.studentAnswer, isCorrect: r.isCorrect, feedback: r.feedback,
+          pointsAwarded: r.pointsAwarded, maxPoints: r.maxPoints, aiGraded: r.aiGraded,
+          teacherOverride: r.teacherOverride, teacherComment: r.teacherComment,
+          needsManualReview: r.needsManualReview
+        })),
+        earnedPoints, totalPoints, scorePercentage, swissGrade, needsReview
+      }))
+    }
+
+    // Batch finalize grading for a submission - PUT /api/submissions/:id/finalize
+    if (route.match(/^\/submissions\/[^/]+\/finalize$/) && method === 'PUT') {
+      const decoded = await verifyToken(request)
+      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+      const submissionId = path[1]
+
+      const submission = await db.collection('submissions').findOne({ id: submissionId })
+      if (!submission) return handleCORS(NextResponse.json({ error: 'Abgabe nicht gefunden.' }, { status: 404 }))
+
+      const assignment = await db.collection('assignments').findOne({ id: submission.assignment_id, teacher_id: decoded.userId })
+      if (!assignment) return handleCORS(NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 403 }))
+
+      const questionResults = submission.question_results || []
+      const totalPoints = questionResults.reduce((sum, r) => sum + (r.maxPoints || 1), 0)
+      const earnedPoints = questionResults.reduce((sum, r) => sum + (r.pointsAwarded ?? 0), 0)
+      const scorePercentage = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0
+      const swissGrade = totalPoints > 0 ? Math.round((earnedPoints / totalPoints * 5 + 1) * 2) / 2 : 1
+
+      await db.collection('submissions').updateOne(
+        { id: submissionId },
+        { $set: {
+          needs_review: false,
+          swiss_grade: swissGrade,
+          score_percentage: scorePercentage,
+          earned_points: earnedPoints,
+          teacher_reviewed: true,
+          reviewed_at: new Date()
+        }}
+      )
+
+      return handleCORS(NextResponse.json({ swissGrade, scorePercentage, earnedPoints, totalPoints }))
+    }
+
+    // ========== ASSIGNMENT DELETE ==========
+
+    // Delete an assignment and its submissions - DELETE /api/assignments/:id
+    if (route.match(/^\/assignments\/[^/]+$/) && method === 'DELETE') {
+      const decoded = await verifyToken(request)
+      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+      const assignmentId = path[1]
+
+      const assignment = await db.collection('assignments').findOne({ id: assignmentId, teacher_id: decoded.userId })
+      if (!assignment) return handleCORS(NextResponse.json({ error: 'Aufgabe nicht gefunden.' }, { status: 404 }))
+
+      await db.collection('submissions').deleteMany({ assignment_id: assignmentId })
+      await db.collection('assignments').deleteOne({ id: assignmentId })
+
+      return handleCORS(NextResponse.json({ message: 'Aufgabe und alle Abgaben gelöscht.' }))
+    }
+
+    // ========== KLASSENÜBERSICHT (Class Overview) ==========
+
+    // Get class overview with grade distribution - GET /api/assignments/:id/overview
+    if (route.match(/^\/assignments\/[^/]+\/overview$/) && method === 'GET') {
+      const decoded = await verifyToken(request)
+      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+      const assignmentId = path[1]
+
+      const assignment = await db.collection('assignments').findOne({ id: assignmentId, teacher_id: decoded.userId })
+      if (!assignment) return handleCORS(NextResponse.json({ error: 'Aufgabe nicht gefunden.' }, { status: 404 }))
+
+      const submissions = await db.collection('submissions').find({ assignment_id: assignmentId }).sort({ submitted_at: -1 }).toArray()
+      if (submissions.length === 0) return handleCORS(NextResponse.json({ submissions: [], stats: null }))
+
+      // Calculate Swiss grades for all submissions
+      const gradesData = submissions.map(s => {
+        const tp = s.total_points || 1
+        const ep = s.earned_points || 0
+        const grade = s.swiss_grade || (Math.round((ep / tp * 5 + 1) * 2) / 2)
+        return {
+          name: s.student_name,
+          earnedPoints: ep,
+          totalPoints: tp,
+          scorePercentage: s.score_percentage || 0,
+          swissGrade: grade,
+          duration: s.duration,
+          submittedAt: s.submitted_at,
+          needsReview: s.needs_review,
+          teacherReviewed: s.teacher_reviewed
+        }
+      })
+
+      const grades = gradesData.map(g => g.swissGrade)
+      const scores = gradesData.map(g => g.scorePercentage)
+
+      // Grade distribution (1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6)
+      const gradeDistribution = {}
+      for (let g = 1; g <= 6; g += 0.5) { gradeDistribution[g] = 0 }
+      grades.forEach(g => { if (gradeDistribution[g] !== undefined) gradeDistribution[g]++ })
+
+      // Pass/fail (>= 4 is passing in Swiss system)
+      const passing = grades.filter(g => g >= 4).length
+      const failing = grades.filter(g => g < 4).length
+
+      const stats = {
+        count: submissions.length,
+        averageGrade: Math.round(grades.reduce((a, b) => a + b, 0) / grades.length * 10) / 10,
+        medianGrade: grades.sort((a, b) => a - b)[Math.floor(grades.length / 2)],
+        bestGrade: Math.max(...grades),
+        worstGrade: Math.min(...grades),
+        averageScore: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length),
+        passing,
+        failing,
+        passRate: Math.round((passing / submissions.length) * 100),
+        gradeDistribution
+      }
+
+      return handleCORS(NextResponse.json({ students: gradesData, stats }))
+    }
+
     // ========== FEHLERANALYSE (Error Analysis) ==========
 
     // Analyze submissions for patterns - POST /api/analyze-errors
