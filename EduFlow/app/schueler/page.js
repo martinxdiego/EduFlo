@@ -178,32 +178,49 @@ export default function SchuelerPage() {
 
   const submitAnswers = async () => {
     setLoading(true)
+    setError('')
     const duration = Math.round((Date.now() - startTime) / 1000)
+
+    // Convert answers object to array for API
+    const answersArray = []
+    for (let i = 0; i < questions.length; i++) {
+      answersArray.push(answers[i] !== undefined ? answers[i] : null)
+    }
+
     try {
       const payload = {
         assignmentCode: accessCode,
         studentName: studentName || student?.display_name || 'Unbekannt',
-        answers,
+        answers: answersArray,
         duration,
         studentToken: studentToken !== 'guest' ? studentToken : null,
       }
+      console.log('[EduFlow] Submitting quiz:', { code: accessCode, name: payload.studentName, answerCount: answersArray.length })
       const res = await fetch('/api/student/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })
-      const data = await res.json()
+      const text = await res.text()
+      console.log('[EduFlow] Submit response:', res.status, text.substring(0, 200))
+      let data
+      try { data = JSON.parse(text) } catch (e) {
+        setError('Serverfehler: Ungültige Antwort.')
+        setLoading(false)
+        return
+      }
       if (!res.ok) {
-        setError(data.error || 'Abgabe fehlgeschlagen.')
+        setError(data.error || `Abgabe fehlgeschlagen (${res.status}).`)
         setLoading(false)
         return
       }
       setResults(data)
       setSubmitted(true)
       // Refresh dashboard results
-      if (studentToken) loadMyResults(studentToken)
+      if (studentToken && studentToken !== 'guest') loadMyResults(studentToken)
     } catch (err) {
-      setError('Abgabe fehlgeschlagen. Bitte versuche es erneut.')
+      console.error('[EduFlow] Submit error:', err)
+      setError('Verbindungsfehler: ' + err.message)
     }
     setLoading(false)
   }
@@ -733,6 +750,20 @@ export default function SchuelerPage() {
               {renderQuestion()}
             </motion.div>
           </AnimatePresence>
+
+          {/* Error display */}
+          {error && (
+            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mt-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium">Fehler bei der Abgabe</p>
+                <p className="text-xs mt-0.5">{error}</p>
+              </div>
+              <button onClick={() => setError('')} className="ml-auto text-red-400 hover:text-red-600">
+                <XCircle className="h-4 w-4" />
+              </button>
+            </motion.div>
+          )}
 
           <div className="flex items-center justify-between mt-8 pt-6 border-t">
             <button onClick={() => setCurrentQuestion(prev => Math.max(0, prev - 1))} disabled={currentQuestion === 0}
