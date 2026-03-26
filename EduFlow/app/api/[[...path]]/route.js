@@ -557,6 +557,337 @@ async function handleRoute(request, { params }) {
       return handleCORS(NextResponse.json({ success: true }))
     }
 
+    // ========== AI-LERNCOACH ==========
+
+    // Analyze student weaknesses and generate practice exercises - POST /api/student/learning-coach
+    if (route === '/student/learning-coach' && method === 'POST') {
+      const decoded = await verifyToken(request)
+      if (!decoded || decoded.role !== 'student') {
+        return handleCORS(NextResponse.json({ error: 'Nicht eingeloggt.' }, { status: 401 }))
+      }
+
+      // Get all student submissions with worksheet data
+      const submissions = await db.collection('submissions').find({ student_id: decoded.studentId }).sort({ submitted_at: -1 }).toArray()
+      if (submissions.length === 0) return handleCORS(NextResponse.json({ weaknesses: [], exercises: [], competencyMap: {}, message: 'Noch keine Prüfungen abgeschlossen. Starte eine Aufgabe um deinen Lerncoach zu aktivieren!' }))
+
+      // Enrich submissions with worksheet data
+      const assignmentIds = [...new Set(submissions.map(s => s.assignment_id))]
+      const assignments = await db.collection('assignments').find({ id: { $in: assignmentIds } }).toArray()
+      const worksheetIds = [...new Set(assignments.map(a => a.worksheet_id))]
+      const worksheets = await db.collection('worksheets').find({ id: { $in: worksheetIds } }).toArray()
+      const wsMap = {}; worksheets.forEach(w => { wsMap[w.id] = w })
+      const aMap = {}; assignments.forEach(a => { aMap[a.id] = a })
+
+      // Analyze weaknesses per topic/question-type
+      const topicErrors = {} // { topic: { total, wrong, questions[], subject, grade } }
+      const typeErrors = {}  // { questionType: { total, wrong } }
+
+      submissions.forEach(sub => {
+        const assignment = aMap[sub.assignment_id]
+        const worksheet = assignment ? wsMap[assignment.worksheet_id] : null
+        const topic = worksheet?.topic || 'Unbekannt'
+        const subject = worksheet?.subject || 'Unbekannt'
+        const grade = worksheet?.grade || ''
+
+        ;(sub.question_results || []).forEach(qr => {
+          // Topic analysis
+          if (!topicErrors[topic]) topicErrors[topic] = { total: 0, wrong: 0, partial: 0, questions: [], subject, grade }
+          topicErrors[topic].total++
+          if (qr.isCorrect === false) {
+            topicErrors[topic].wrong++
+            topicErrors[topic].questions.push({ question: qr.question, studentAnswer: qr.studentAnswer, correctAnswer: qr.correctAnswer, feedback: qr.feedback, type: qr.type })
+          } else if (qr.isCorrect === 'partial') {
+            topicErrors[topic].partial++
+          }
+
+          // Type analysis
+          const t = qr.type || 'unknown'
+          if (!typeErrors[t]) typeErrors[t] = { total: 0, wrong: 0 }
+          typeErrors[t].total++
+          if (qr.isCorrect === false) typeErrors[t].wrong++
+        })
+      })
+
+      // Rank weaknesses by error rate (min 2 questions answered)
+      const weaknesses = Object.entries(topicErrors)
+        .filter(([_, v]) => v.total >= 2)
+        .map(([topic, v]) => ({
+          topic,
+          subject: v.subject,
+          grade: v.grade,
+          errorRate: Math.round(((v.wrong + v.partial * 0.5) / v.total) * 100),
+          totalQuestions: v.total,
+          wrongAnswers: v.wrong,
+          sampleErrors: v.questions.slice(0, 3) // top 3 example errors
+        }))
+        .sort((a, b) => b.errorRate - a.errorRate)
+        .slice(0, 5) // top 5 weaknesses
+
+      // Build competency progress map from submissions
+      const competencyMap = {}
+      submissions.forEach(sub => {
+        const assignment = aMap[sub.assignment_id]
+        const worksheet = assignment ? wsMap[assignment.worksheet_id] : null
+        if (!worksheet) return
+        const key = `${worksheet.subject}|${worksheet.topic}`
+        if (!competencyMap[key]) {
+          competencyMap[key] = { subject: worksheet.subject, topic: worksheet.topic, grade: worksheet.grade, attempts: 0, totalScore: 0, bestGrade: 0, latestGrade: 0, trend: 'stable' }
+        }
+        competencyMap[key].attempts++
+        competencyMap[key].totalScore += sub.score_percentage || 0
+        competencyMap[key].bestGrade = Math.max(competencyMap[key].bestGrade, sub.swiss_grade || 1)
+        competencyMap[key].latestGrade = sub.swiss_grade || 1
+      })
+      // Calculate trends
+      Object.values(competencyMap).forEach(cm => {
+        cm.avgScore = Math.round(cm.totalScore / cm.attempts)
+        if (cm.attempts >= 2) {
+          cm.trend = cm.latestGrade > cm.bestGrade - 0.5 ? 'improving' : cm.latestGrade < cm.bestGrade - 1 ? 'declining' : 'stable'
+        }
+      })
+
+      // Generate AI exercises for top weaknesses
+      let exercises = []
+      if (weaknesses.length > 0) {
+        try {
+          const weaknessPrompt = weaknesses.slice(0, 3).map(w =>
+            `Thema: "${w.topic}" (${w.subject}, ${w.grade}. Klasse) — ${w.errorRate}% Fehlerquote\nBeispiel-Fehler:\n${w.sampleErrors.map(e => `  Frage: "${e.question}"\n  Schüler-Antwort: "${e.studentAnswer}"\n  Korrekt: "${e.correctAnswer}"`).join('\n')}`
+          ).join('\n\n')
+
+          const exerciseRes = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            temperature: 0.7,
+            messages: [
+              {
+                role: 'system',
+                content: `Du bist ein erfahrener Schweizer Lerncoach. Erstelle personalisierte Übungsaufgaben basierend auf den Schwächen eines Schülers.
+
+Antworte NUR mit validem JSON in diesem Format:
+{
+  "exercises": [
+    {
+      "topic": "Themenname",
+      "subject": "Fach",
+      "difficulty": "leicht|mittel|schwer",
+      "question": "Die Übungsfrage",
+      "type": "multiple_choice|open|true_false|fill_blank",
+      "options": ["A", "B", "C", "D"] oder null,
+      "answer": "Die korrekte Antwort",
+      "hint": "Ein hilfreicher Tipp für den Schüler",
+      "explanation": "Erklärung warum die Antwort richtig ist"
+    }
+  ],
+  "encouragement": "Eine persönliche, ermutigende Nachricht an den Schüler",
+  "focusAreas": ["Bereich 1", "Bereich 2"]
+}
+
+Regeln:
+- Erstelle 3-5 Übungen pro Schwäche, aufsteigend im Schwierigkeitsgrad
+- Beginne mit einfacheren Aufgaben um Erfolgserlebnisse zu schaffen
+- Hints sollen helfen ohne die Antwort zu verraten
+- Feedback soll ermutigend und altersgerecht sein (Schweizer Schulsystem)
+- Sprache: Deutsch (Schweizer Hochdeutsch)`
+              },
+              {
+                role: 'user',
+                content: `Erstelle Übungsaufgaben für folgende Schwächen:\n\n${weaknessPrompt}`
+              }
+            ],
+            max_tokens: 2000
+          })
+
+          const aiText = exerciseRes.choices[0]?.message?.content || ''
+          const jsonMatch = aiText.match(/\{[\s\S]*\}/)
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0])
+            exercises = parsed.exercises || []
+            // Store generated exercises in DB for later access
+            await db.collection('learning_coach').updateOne(
+              { student_id: decoded.studentId },
+              { $set: {
+                student_id: decoded.studentId,
+                exercises,
+                weaknesses,
+                competencyMap: Object.values(competencyMap),
+                encouragement: parsed.encouragement || '',
+                focusAreas: parsed.focusAreas || [],
+                generated_at: new Date()
+              }},
+              { upsert: true }
+            )
+          }
+        } catch (aiErr) {
+          console.error('Learning coach AI error:', aiErr)
+        }
+      }
+
+      // If no new exercises generated, try to return cached ones
+      if (exercises.length === 0) {
+        const cached = await db.collection('learning_coach').findOne({ student_id: decoded.studentId })
+        if (cached) exercises = cached.exercises || []
+      }
+
+      return handleCORS(NextResponse.json({
+        weaknesses,
+        exercises,
+        competencyMap: Object.values(competencyMap),
+        typeErrors: Object.entries(typeErrors).map(([type, v]) => ({ type, total: v.total, wrong: v.wrong, errorRate: v.total > 0 ? Math.round((v.wrong / v.total) * 100) : 0 })),
+        totalSubmissions: submissions.length,
+        overallAvg: Math.round(submissions.reduce((s, sub) => s + (sub.score_percentage || 0), 0) / submissions.length)
+      }))
+    }
+
+    // Mark a learning coach exercise as completed - POST /api/student/learning-coach/complete
+    if (route === '/student/learning-coach/complete' && method === 'POST') {
+      const decoded = await verifyToken(request)
+      if (!decoded || decoded.role !== 'student') {
+        return handleCORS(NextResponse.json({ error: 'Nicht eingeloggt.' }, { status: 401 }))
+      }
+      const body = await request.json()
+      const { exerciseIndex, studentAnswer, isCorrect } = body
+
+      // Award XP for practice
+      const xpEarned = isCorrect ? 8 : 3 // XP for trying, bonus for correct
+      await db.collection('students').updateOne(
+        { id: decoded.studentId },
+        { $inc: { xp: xpEarned, practice_count: 1 }, $set: { last_activity: new Date() } }
+      )
+
+      // Track completed exercises
+      await db.collection('learning_coach').updateOne(
+        { student_id: decoded.studentId },
+        { $push: { completed_exercises: { index: exerciseIndex, answer: studentAnswer, correct: isCorrect, completed_at: new Date() } } }
+      )
+
+      return handleCORS(NextResponse.json({ success: true, xpEarned }))
+    }
+
+    // Teacher: Get class-wide learning insights - GET /api/classes/:id/insights
+    if (route.match(/^\/classes\/[^/]+\/insights$/) && method === 'GET') {
+      const decoded = await verifyToken(request)
+      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+      const classId = path[1]
+      const cls = await db.collection('classes').findOne({ id: classId, teacher_id: decoded.userId })
+      if (!cls) return handleCORS(NextResponse.json({ error: 'Klasse nicht gefunden.' }, { status: 404 }))
+
+      const studentIds = (cls.enrolled_students || []).map(s => s.student_id)
+      if (studentIds.length === 0) return handleCORS(NextResponse.json({ students: [], topicWeaknesses: [], recommendations: '' }))
+
+      // Get all submissions from class students
+      const submissions = await db.collection('submissions').find({ student_id: { $in: studentIds } }).toArray()
+      const assignmentIds = [...new Set(submissions.map(s => s.assignment_id))]
+      const assignments = await db.collection('assignments').find({ id: { $in: assignmentIds } }).toArray()
+      const worksheetIds = [...new Set(assignments.map(a => a.worksheet_id))]
+      const worksheets = await db.collection('worksheets').find({ id: { $in: worksheetIds } }).toArray()
+      const wsMap = {}; worksheets.forEach(w => { wsMap[w.id] = w })
+      const aMap = {}; assignments.forEach(a => { aMap[a.id] = a })
+
+      // Per-student weakness analysis
+      const studentInsights = {}
+      studentIds.forEach(sid => { studentInsights[sid] = { topics: {}, totalWrong: 0, totalQuestions: 0 } })
+
+      // Class-wide topic analysis
+      const classTopicErrors = {}
+
+      submissions.forEach(sub => {
+        if (!sub.student_id || !studentInsights[sub.student_id]) return
+        const assignment = aMap[sub.assignment_id]
+        const worksheet = assignment ? wsMap[assignment.worksheet_id] : null
+        const topic = worksheet?.topic || 'Unbekannt'
+        const subject = worksheet?.subject || ''
+
+        ;(sub.question_results || []).forEach(qr => {
+          studentInsights[sub.student_id].totalQuestions++
+          if (!classTopicErrors[topic]) classTopicErrors[topic] = { total: 0, wrong: 0, subject, studentsWrong: new Set() }
+          classTopicErrors[topic].total++
+
+          if (qr.isCorrect === false) {
+            studentInsights[sub.student_id].totalWrong++
+            if (!studentInsights[sub.student_id].topics[topic]) studentInsights[sub.student_id].topics[topic] = { wrong: 0, total: 0 }
+            studentInsights[sub.student_id].topics[topic].wrong++
+            studentInsights[sub.student_id].topics[topic].total++
+            classTopicErrors[topic].wrong++
+            classTopicErrors[topic].studentsWrong.add(sub.student_id)
+          } else {
+            if (!studentInsights[sub.student_id].topics[topic]) studentInsights[sub.student_id].topics[topic] = { wrong: 0, total: 0 }
+            studentInsights[sub.student_id].topics[topic].total++
+          }
+        })
+      })
+
+      // Format student insights
+      const enrolled = cls.enrolled_students || []
+      const students = enrolled.map(es => {
+        const si = studentInsights[es.student_id] || { topics: {}, totalWrong: 0, totalQuestions: 0 }
+        const weakTopics = Object.entries(si.topics)
+          .filter(([_, v]) => v.total >= 2 && (v.wrong / v.total) > 0.3)
+          .sort((a, b) => (b[1].wrong / b[1].total) - (a[1].wrong / a[1].total))
+          .slice(0, 3)
+          .map(([topic, v]) => ({ topic, errorRate: Math.round((v.wrong / v.total) * 100), wrong: v.wrong, total: v.total }))
+
+        return {
+          student_id: es.student_id,
+          display_name: es.display_name,
+          niveau: es.niveau || 'B',
+          totalQuestions: si.totalQuestions,
+          totalWrong: si.totalWrong,
+          errorRate: si.totalQuestions > 0 ? Math.round((si.totalWrong / si.totalQuestions) * 100) : 0,
+          weakTopics,
+          needsHelp: weakTopics.length > 0
+        }
+      })
+
+      // Class-wide topic weaknesses
+      const topicWeaknesses = Object.entries(classTopicErrors)
+        .filter(([_, v]) => v.total >= 3)
+        .map(([topic, v]) => ({
+          topic,
+          subject: v.subject,
+          errorRate: Math.round((v.wrong / v.total) * 100),
+          affectedStudents: v.studentsWrong.size,
+          totalStudents: studentIds.length,
+          total: v.total,
+          wrong: v.wrong
+        }))
+        .sort((a, b) => b.affectedStudents - a.affectedStudents || b.errorRate - a.errorRate)
+
+      // AI recommendations for teacher
+      let recommendations = ''
+      if (topicWeaknesses.length > 0) {
+        try {
+          const insightPrompt = `Du bist ein erfahrener Schweizer Schulberater. Analysiere diese Klassendaten und gib der Lehrperson konkrete Handlungsempfehlungen auf Deutsch:
+
+Klasse: ${cls.name}
+Schüleranzahl: ${studentIds.length}
+
+Schwache Themen der Klasse:
+${topicWeaknesses.slice(0, 5).map(tw => `- "${tw.topic}" (${tw.subject}): ${tw.errorRate}% Fehlerquote, ${tw.affectedStudents}/${tw.totalStudents} Schüler betroffen`).join('\n')}
+
+Schüler die besondere Förderung brauchen:
+${students.filter(s => s.needsHelp).map(s => `- ${s.display_name} (Niveau ${s.niveau}): Schwächen in ${s.weakTopics.map(t => t.topic).join(', ')}`).join('\n') || 'Keine auffälligen Schwächen'}
+
+Gib:
+1. Top 3 Massnahmen für den Unterricht (konkret und umsetzbar)
+2. Differenzierungsvorschläge nach Niveau A/B/C
+3. Empfohlene Übungsformate`
+
+          const aiRes = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [{ role: 'user', content: insightPrompt }],
+            max_tokens: 800
+          })
+          recommendations = aiRes.choices[0]?.message?.content || ''
+        } catch (e) { console.error('Insights AI error:', e) }
+      }
+
+      return handleCORS(NextResponse.json({
+        students: students.sort((a, b) => b.errorRate - a.errorRate),
+        topicWeaknesses,
+        recommendations,
+        totalSubmissions: submissions.length
+      }))
+    }
+
     // Get assignments for student's enrolled classes - GET /api/student/class-assignments
     if (route === '/student/class-assignments' && method === 'GET') {
       const decoded = await verifyToken(request)

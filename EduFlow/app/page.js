@@ -279,6 +279,8 @@ const Home = () => {
   const [newClassName, setNewClassName] = useState('')
   const [classLoading, setClassLoading] = useState(false)
   const [classStats, setClassStats] = useState(null)
+  const [classInsights, setClassInsights] = useState(null)
+  const [insightsLoading, setInsightsLoading] = useState(false)
 
   // Collaboration
   const [comments, setComments] = useState([])
@@ -2407,6 +2409,16 @@ const Home = () => {
       const res = await fetch(`/api/classes/${classId}/stats`, { headers: { 'Authorization': `Bearer ${token}` } })
       if (res.ok) setClassStats(await res.json())
     } catch (e) { console.error('Class stats error:', e) }
+  }
+
+  const loadClassInsights = async (classId) => {
+    setInsightsLoading(true)
+    setClassInsights(null)
+    try {
+      const res = await fetch(`/api/classes/${classId}/insights`, { headers: { 'Authorization': `Bearer ${token}` } })
+      if (res.ok) setClassInsights(await res.json())
+    } catch (e) { console.error('Class insights error:', e) }
+    setInsightsLoading(false)
   }
 
   // Load class overview
@@ -5577,6 +5589,79 @@ const Home = () => {
                         </CardContent>
                       </Card>
                     )}
+
+                    {/* AI Learning Insights */}
+                    <Card className="glass-card border-0 mt-4">
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-sm flex items-center gap-2"><Sparkles className="h-4 w-4 text-emerald-500" /> AI-Lerncoach Insights</CardTitle>
+                          <Button variant="outline" size="sm" className="text-xs" onClick={() => loadClassInsights(classDetailData.id)} disabled={insightsLoading}>
+                            {insightsLoading ? <><RefreshCw className="h-3 w-3 mr-1 animate-spin" /> Analysiert...</> : <><Sparkles className="h-3 w-3 mr-1" /> Klasse analysieren</>}
+                          </Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        {!classInsights && !insightsLoading && (
+                          <p className="text-xs text-gray-400 text-center py-4">Klicken Sie "Klasse analysieren" für KI-gestützte Empfehlungen zu Schwächen und Fördermassnahmen.</p>
+                        )}
+
+                        {classInsights && (
+                          <div className="space-y-4">
+                            {/* Students needing help */}
+                            {classInsights.students?.filter(s => s.needsHelp).length > 0 && (
+                              <div>
+                                <p className="text-xs font-semibold text-red-600 mb-2">⚠️ Schüler/innen mit Förderbedarf:</p>
+                                <div className="space-y-2">
+                                  {classInsights.students.filter(s => s.needsHelp).map(s => (
+                                    <div key={s.student_id} className="flex items-center gap-3 p-2.5 bg-red-50 rounded-xl">
+                                      <div className="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                                        <span className="text-xs font-bold text-red-600">{s.errorRate}%</span>
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-medium text-gray-900">{s.display_name} <span className={`text-[10px] px-1 py-0.5 rounded ${s.niveau === 'A' ? 'bg-green-100 text-green-700' : s.niveau === 'C' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>Niveau {s.niveau}</span></p>
+                                        <p className="text-[10px] text-gray-500 truncate">Schwächen: {s.weakTopics.map(t => t.topic).join(', ')}</p>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Topic weaknesses across class */}
+                            {classInsights.topicWeaknesses?.length > 0 && (
+                              <div>
+                                <p className="text-xs font-semibold text-amber-600 mb-2">📊 Schwache Themen der Klasse:</p>
+                                <div className="space-y-1.5">
+                                  {classInsights.topicWeaknesses.slice(0, 5).map((tw, i) => (
+                                    <div key={i} className="flex items-center gap-3 p-2 bg-amber-50 rounded-lg">
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-medium text-gray-900">{tw.topic} <span className="text-[10px] text-gray-400">({tw.subject})</span></p>
+                                        <p className="text-[10px] text-gray-500">{tw.affectedStudents}/{tw.totalStudents} Schüler betroffen · {tw.errorRate}% Fehler</p>
+                                      </div>
+                                      <div className="w-16 h-1.5 bg-amber-200 rounded-full flex-shrink-0">
+                                        <div className="h-full bg-amber-500 rounded-full" style={{ width: `${tw.errorRate}%` }} />
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* AI Recommendations */}
+                            {classInsights.recommendations && (
+                              <div>
+                                <p className="text-xs font-semibold text-emerald-600 mb-2">💡 KI-Empfehlungen:</p>
+                                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+                                  <div className="prose prose-xs max-w-none text-xs text-gray-700 whitespace-pre-line leading-relaxed">
+                                    {classInsights.recommendations}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
                     </>
                   ) : (
                     <Card className="glass-card border-0">
