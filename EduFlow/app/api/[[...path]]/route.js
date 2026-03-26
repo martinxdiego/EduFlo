@@ -245,6 +245,138 @@ async function handleRoute(request, { params }) {
       return handleCORS(NextResponse.json(userWithoutPassword))
     }
 
+    // ========== STUDENT AUTH ==========
+
+    // Register student - POST /api/student/register
+    if (route === '/student/register' && method === 'POST') {
+      const body = await request.json()
+      const { username, password, displayName } = body
+
+      if (!username || !password || !displayName) {
+        return handleCORS(NextResponse.json({ error: 'Benutzername, Passwort und Anzeigename sind erforderlich.' }, { status: 400 }))
+      }
+
+      if (username.length < 3) {
+        return handleCORS(NextResponse.json({ error: 'Benutzername muss mindestens 3 Zeichen lang sein.' }, { status: 400 }))
+      }
+
+      if (password.length < 4) {
+        return handleCORS(NextResponse.json({ error: 'Passwort muss mindestens 4 Zeichen lang sein.' }, { status: 400 }))
+      }
+
+      const existing = await db.collection('students').findOne({ username: username.toLowerCase() })
+      if (existing) {
+        return handleCORS(NextResponse.json({ error: 'Dieser Benutzername ist bereits vergeben.' }, { status: 400 }))
+      }
+
+      const password_hash = await bcrypt.hash(password, 10)
+      const student = {
+        id: uuidv4(),
+        username: username.toLowerCase(),
+        display_name: displayName,
+        password_hash,
+        created_at: new Date(),
+        total_quizzes: 0,
+        total_points: 0,
+        streak: 0,
+        last_activity: new Date()
+      }
+
+      await db.collection('students').insertOne(student)
+
+      const token = jwt.sign(
+        { studentId: student.id, username: student.username, role: 'student' },
+        process.env.JWT_SECRET,
+        { expiresIn: '30d' }
+      )
+
+      const { password_hash: _, ...safe } = student
+      return handleCORS(NextResponse.json({ student: { ...safe, _id: undefined }, token }))
+    }
+
+    // Login student - POST /api/student/login
+    if (route === '/student/login' && method === 'POST') {
+      const body = await request.json()
+      const { username, password } = body
+
+      if (!username || !password) {
+        return handleCORS(NextResponse.json({ error: 'Benutzername und Passwort sind erforderlich.' }, { status: 400 }))
+      }
+
+      const student = await db.collection('students').findOne({ username: username.toLowerCase() })
+      if (!student) {
+        return handleCORS(NextResponse.json({ error: 'Benutzername oder Passwort falsch.' }, { status: 401 }))
+      }
+
+      const valid = await bcrypt.compare(password, student.password_hash)
+      if (!valid) {
+        return handleCORS(NextResponse.json({ error: 'Benutzername oder Passwort falsch.' }, { status: 401 }))
+      }
+
+      const token = jwt.sign(
+        { studentId: student.id, username: student.username, role: 'student' },
+        process.env.JWT_SECRET,
+        { expiresIn: '30d' }
+      )
+
+      // Update last activity
+      await db.collection('students').updateOne({ id: student.id }, { $set: { last_activity: new Date() } })
+
+      const { password_hash: _, ...safe } = student
+      return handleCORS(NextResponse.json({ student: { ...safe, _id: undefined }, token }))
+    }
+
+    // Get current student - GET /api/student/me
+    if (route === '/student/me' && method === 'GET') {
+      const decoded = await verifyToken(request)
+      if (!decoded || decoded.role !== 'student') {
+        return handleCORS(NextResponse.json({ error: 'Nicht eingeloggt.' }, { status: 401 }))
+      }
+
+      const student = await db.collection('students').findOne({ id: decoded.studentId })
+      if (!student) {
+        return handleCORS(NextResponse.json({ error: 'Schüler nicht gefunden.' }, { status: 404 }))
+      }
+
+      const { password_hash: _, ...safe } = student
+      return handleCORS(NextResponse.json({ ...safe, _id: undefined }))
+    }
+
+    // Get student's submissions history - GET /api/student/my-results
+    if (route === '/student/my-results' && method === 'GET') {
+      const decoded = await verifyToken(request)
+      if (!decoded || decoded.role !== 'student') {
+        return handleCORS(NextResponse.json({ error: 'Nicht eingeloggt.' }, { status: 401 }))
+      }
+
+      const submissions = await db.collection('submissions').find({ student_id: decoded.studentId }).sort({ submitted_at: -1 }).toArray()
+
+      // Enrich with assignment info
+      const enriched = await Promise.all(submissions.map(async (sub) => {
+        const { _id, ...clean } = sub
+        const assignment = await db.collection('assignments').findOne({ id: clean.assignment_id })
+        clean.assignment_title = assignment?.worksheet_title || 'Unbenannt'
+        clean.class_name = assignment?.class_name || ''
+        // Calculate Swiss grade
+        if (!clean.swiss_grade && clean.total_points > 0) {
+          clean.swiss_grade = Math.round((clean.earned_points / clean.total_points * 5 + 1) * 2) / 2
+        }
+        return clean
+      }))
+
+      // Calculate stats
+      const totalQuizzes = enriched.length
+      const totalPoints = enriched.reduce((sum, s) => sum + (s.earned_points || 0), 0)
+      const avgScore = totalQuizzes > 0 ? Math.round(enriched.reduce((sum, s) => sum + (s.score_percentage || 0), 0) / totalQuizzes) : 0
+      const avgGrade = totalQuizzes > 0 ? Math.round(enriched.reduce((sum, s) => sum + (s.swiss_grade || 1), 0) / totalQuizzes * 10) / 10 : 0
+      const bestGrade = totalQuizzes > 0 ? Math.max(...enriched.map(s => s.swiss_grade || 1)) : 0
+
+      return handleCORS(NextResponse.json({
+        submissions: enriched,
+        stats: { totalQuizzes, totalPoints, avgScore, avgGrade, bestGrade }
+      }))
+    }
+
     // ========== WORKSHEET GENERATION ==========
 
     // Generate worksheet - POST /api/generate-worksheet
@@ -1137,7 +1269,16 @@ Aktion: ${actionPrompt}`
     // Submit student answers - POST /api/student/submit
     if (route === '/student/submit' && method === 'POST') {
       const body = await request.json()
-      const { assignmentCode, studentName, answers, duration } = body
+      const { assignmentCode, studentName, answers, duration, studentToken } = body
+
+      // Try to identify logged-in student
+      let studentId = null
+      if (studentToken) {
+        try {
+          const decoded = jwt.verify(studentToken, process.env.JWT_SECRET)
+          if (decoded.role === 'student') studentId = decoded.studentId
+        } catch (e) { /* guest mode */ }
+      }
       const assignment = await db.collection('assignments').findOne({ code: assignmentCode, status: 'active' })
       if (!assignment) return handleCORS(NextResponse.json({ error: 'Aufgabe nicht gefunden.' }, { status: 404 }))
       const worksheet = await db.collection('worksheets').findOne({ id: assignment.worksheet_id })
@@ -1294,9 +1435,13 @@ Regeln:
       const earnedPoints = questionResults.reduce((sum, r) => sum + (r.pointsAwarded ?? 0), 0)
       const needsReview = questionResults.some(r => r.needsManualReview || r.isCorrect === null)
 
+      const scorePercentage = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0
+      const swissGrade = totalPoints > 0 ? Math.round((earnedPoints / totalPoints * 5 + 1) * 2) / 2 : 1
+
       const submission = {
         id: uuidv4(),
         assignment_id: assignment.id,
+        student_id: studentId || null,
         student_name: studentName,
         answers,
         question_results: questionResults,
@@ -1304,12 +1449,24 @@ Regeln:
         total_questions: questions.length,
         total_points: totalPoints,
         earned_points: earnedPoints,
-        score_percentage: totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0,
+        score_percentage: scorePercentage,
+        swiss_grade: swissGrade,
         needs_review: needsReview,
         duration,
         submitted_at: new Date()
       }
       await db.collection('submissions').insertOne(submission)
+
+      // Update student stats if logged in
+      if (studentId) {
+        await db.collection('students').updateOne(
+          { id: studentId },
+          {
+            $inc: { total_quizzes: 1, total_points: earnedPoints },
+            $set: { last_activity: new Date() }
+          }
+        )
+      }
       return handleCORS(NextResponse.json({
         correctCount: Math.round(correctCount),
         totalQuestions: questions.length,
@@ -1329,6 +1486,7 @@ Regeln:
           maxPoints: r.maxPoints,
           aiGraded: r.aiGraded
         })),
+        swissGrade,
         needsReview
       }))
     }
