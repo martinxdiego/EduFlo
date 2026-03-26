@@ -40,6 +40,13 @@ export default function SchuelerPage() {
     }
   }, [])
 
+  // Keep studentName in sync with student profile
+  useEffect(() => {
+    if (student && student.display_name && !studentName) {
+      setStudentName(student.display_name)
+    }
+  }, [student])
+
   // Check URL for code parameter
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -173,18 +180,24 @@ export default function SchuelerPage() {
     setLoading(true)
     const duration = Math.round((Date.now() - startTime) / 1000)
     try {
+      const payload = {
+        assignmentCode: accessCode,
+        studentName: studentName || student?.display_name || 'Unbekannt',
+        answers,
+        duration,
+        studentToken: studentToken !== 'guest' ? studentToken : null,
+      }
       const res = await fetch('/api/student/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          assignmentCode: accessCode,
-          studentName,
-          answers,
-          duration,
-          studentToken: studentToken || null,
-        })
+        body: JSON.stringify(payload)
       })
       const data = await res.json()
+      if (!res.ok) {
+        setError(data.error || 'Abgabe fehlgeschlagen.')
+        setLoading(false)
+        return
+      }
       setResults(data)
       setSubmitted(true)
       // Refresh dashboard results
@@ -792,8 +805,6 @@ export default function SchuelerPage() {
           <div className="bg-white rounded-2xl shadow-lg p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-1">Aufgabe starten</h2>
             <p className="text-sm text-gray-500 mb-4">Gib den Zugangscode deiner Lehrperson ein.</p>
-
-            {studentToken !== 'guest' && !studentName && student && setStudentName(student.display_name)}
 
             <div className="flex gap-3">
               {studentToken === 'guest' && (
