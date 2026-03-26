@@ -28,7 +28,7 @@ import {
   ArrowLeftRight, Type, ListOrdered, GitBranch,
   ChevronUp, Wand2, Save, GripVertical, ArrowUp, ArrowDown,
   RotateCcw, Shuffle, Bot, CircleDot, Palette,
-  AlignLeft, Pen, SquarePen, Users, UserMinus
+  AlignLeft, Pen, SquarePen, Users, UserMinus, LayoutDashboard, Brain, TrendingDown, Rocket
 } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import jsPDF from 'jspdf'
@@ -151,7 +151,7 @@ const Home = () => {
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
-  const [activeView, setActiveView] = useState('create')
+  const [activeView, setActiveView] = useState('home')
   const [showEditorPanel, setShowEditorPanel] = useState(false)
   const [hoveredCard, setHoveredCard] = useState(null)
 
@@ -368,6 +368,7 @@ const Home = () => {
         setUser(userData)
         fetchWorksheets(authToken)
         loadAssignments(authToken)
+        loadTeacherClasses(authToken)
       } else {
         localStorage.removeItem('teachertime_token')
         setToken(null)
@@ -2318,9 +2319,9 @@ const Home = () => {
 
   // ========== KLASSENVERWALTUNG ==========
 
-  const loadTeacherClasses = async () => {
+  const loadTeacherClasses = async (authToken) => {
     try {
-      const res = await fetch('/api/classes', { headers: { 'Authorization': `Bearer ${token}` } })
+      const res = await fetch('/api/classes', { headers: { 'Authorization': `Bearer ${authToken || token}` } })
       if (res.ok) setTeacherClasses(await res.json())
     } catch (e) { console.error('Classes error:', e) }
   }
@@ -2742,6 +2743,7 @@ const Home = () => {
   ]
 
   const navItems = [
+    { id: 'home', label: 'Start', icon: LayoutDashboard },
     { id: 'create', label: 'Erstellen', icon: PlusCircle },
     { id: 'library', label: 'Bibliothek', icon: FolderOpen },
     { id: 'upload', label: 'Hochladen', icon: Upload },
@@ -2843,7 +2845,7 @@ const Home = () => {
       <motion.header className="fixed top-0 left-0 right-0 z-50" initial={{ y: -100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ type: "spring", stiffness: 200, damping: 25 }}>
         <div className="glass px-4 sm:px-6 py-3 flex items-center justify-between shadow-lg border-b border-white/20">
           <div className="flex items-center gap-4 sm:gap-6">
-            <button onClick={() => { setActiveView('create'); setSelectedWorksheet(null); setShowEditorPanel(false) }} className="flex items-center gap-2 hover:opacity-80 transition-opacity cursor-pointer" title="Zur Startseite">
+            <button onClick={() => { setActiveView('home'); setSelectedWorksheet(null); setShowEditorPanel(false) }} className="flex items-center gap-2 hover:opacity-80 transition-opacity cursor-pointer" title="Zur Startseite">
               <BookOpen className="h-6 w-6 text-blue-500" />
               <h1 className="text-xl font-bold text-gradient">EduFlow</h1>
             </button>
@@ -2906,6 +2908,244 @@ const Home = () => {
       {/* MAIN CONTENT */}
       <main className="container mx-auto px-4 pt-20 pb-32" role="main">
         <AnimatePresence mode="wait">
+
+          {/* ============ HOME VIEW ============ */}
+          {activeView === 'home' && (
+            <motion.div key="home" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.4 }} className="max-w-6xl mx-auto">
+
+              {/* Hero greeting */}
+              <div className="mb-8">
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+                  <h2 className="text-4xl font-bold text-gradient mb-2">
+                    {(() => { const h = new Date().getHours(); return h < 12 ? 'Guten Morgen' : h < 17 ? 'Guten Nachmittag' : 'Guten Abend' })()}{user?.name ? `, ${user.name.split(' ')[0]}` : ''} 👋
+                  </h2>
+                  <p className="text-gray-500 text-lg">Willkommen zurück bei EduFlow. Was möchten Sie heute machen?</p>
+                </motion.div>
+              </div>
+
+              {/* Quick Actions */}
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+                  <button onClick={() => { setActiveView('create'); setSelectedWorksheet(null); setShowEditorPanel(false) }}
+                    className="group p-5 bg-white rounded-2xl shadow-sm hover:shadow-lg border-2 border-transparent hover:border-blue-200 transition-all text-left">
+                    <div className="w-12 h-12 bg-blue-100 rounded-2xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                      <PlusCircle className="h-6 w-6 text-blue-600" />
+                    </div>
+                    <p className="font-semibold text-gray-900 text-sm">Material erstellen</p>
+                    <p className="text-xs text-gray-400 mt-0.5">KI-gestützt generieren</p>
+                  </button>
+                  <button onClick={() => { setActiveView('students'); loadAssignments() }}
+                    className="group p-5 bg-white rounded-2xl shadow-sm hover:shadow-lg border-2 border-transparent hover:border-purple-200 transition-all text-left">
+                    <div className="w-12 h-12 bg-purple-100 rounded-2xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                      <Send className="h-6 w-6 text-purple-600" />
+                    </div>
+                    <p className="font-semibold text-gray-900 text-sm">Aufgabe freigeben</p>
+                    <p className="text-xs text-gray-400 mt-0.5">An Schüler verteilen</p>
+                  </button>
+                  <button onClick={() => { setActiveView('classes'); loadTeacherClasses() }}
+                    className="group p-5 bg-white rounded-2xl shadow-sm hover:shadow-lg border-2 border-transparent hover:border-emerald-200 transition-all text-left">
+                    <div className="w-12 h-12 bg-emerald-100 rounded-2xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                      <Users className="h-6 w-6 text-emerald-600" />
+                    </div>
+                    <p className="font-semibold text-gray-900 text-sm">Klassen verwalten</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Roster & Niveaus</p>
+                  </button>
+                  <button onClick={() => setActiveView('curriculum')}
+                    className="group p-5 bg-white rounded-2xl shadow-sm hover:shadow-lg border-2 border-transparent hover:border-amber-200 transition-all text-left">
+                    <div className="w-12 h-12 bg-amber-100 rounded-2xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                      <GraduationCap className="h-6 w-6 text-amber-600" />
+                    </div>
+                    <p className="font-semibold text-gray-900 text-sm">Lehrplan 21</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Kompetenzen & Material</p>
+                  </button>
+                </div>
+              </motion.div>
+
+              <div className="grid lg:grid-cols-3 gap-6">
+                {/* Left column: Stats + Recent materials */}
+                <div className="lg:col-span-2 space-y-6">
+
+                  {/* Stats overview */}
+                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div className="bg-white rounded-2xl shadow-sm p-4 text-center">
+                        <p className="text-3xl font-bold text-blue-600">{worksheets.length}</p>
+                        <p className="text-xs text-gray-500 mt-1">Materialien</p>
+                      </div>
+                      <div className="bg-white rounded-2xl shadow-sm p-4 text-center">
+                        <p className="text-3xl font-bold text-purple-600">{assignments.length}</p>
+                        <p className="text-xs text-gray-500 mt-1">Aufgaben</p>
+                      </div>
+                      <div className="bg-white rounded-2xl shadow-sm p-4 text-center">
+                        <p className="text-3xl font-bold text-emerald-600">{teacherClasses.length}</p>
+                        <p className="text-xs text-gray-500 mt-1">Klassen</p>
+                      </div>
+                      <div className="bg-white rounded-2xl shadow-sm p-4 text-center">
+                        <p className="text-3xl font-bold text-amber-600">{teacherClasses.reduce((sum, c) => sum + (c.enrolled_students?.length || 0), 0)}</p>
+                        <p className="text-xs text-gray-500 mt-1">Schüler/innen</p>
+                      </div>
+                    </div>
+                  </motion.div>
+
+                  {/* Recent materials */}
+                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}>
+                    <Card className="glass-card border-0">
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-sm">Letzte Materialien</CardTitle>
+                          <Button variant="ghost" size="sm" className="text-xs" onClick={() => setActiveView('library')}>Alle anzeigen <ChevronRight className="h-3 w-3 ml-1" /></Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        {worksheets.length === 0 ? (
+                          <div className="text-center py-8">
+                            <FileText className="h-8 w-8 text-gray-300 mx-auto mb-2" />
+                            <p className="text-sm text-gray-500">Noch keine Materialien erstellt.</p>
+                            <Button size="sm" className="btn-premium mt-3 text-xs" onClick={() => setActiveView('create')}><PlusCircle className="h-3 w-3 mr-1" /> Erstes Material</Button>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {worksheets.slice(0, 5).map(ws => (
+                              <div key={ws.id} className="flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 cursor-pointer transition-colors"
+                                onClick={() => { setSelectedWorksheet(ws); setShowEditorPanel(true); setActiveView('create') }}>
+                                <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center flex-shrink-0">
+                                  <FileText className="h-5 w-5 text-blue-500" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-gray-900 truncate">{ws.title}</p>
+                                  <p className="text-xs text-gray-400">{ws.subject} · {ws.grade}. Klasse · {ws.content?.questions?.length || 0} Fragen</p>
+                                </div>
+                                <ChevronRight className="h-4 w-4 text-gray-300 flex-shrink-0" />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+
+                  {/* Active assignments */}
+                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
+                    <Card className="glass-card border-0">
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-sm">Aktive Aufgaben</CardTitle>
+                          <Button variant="ghost" size="sm" className="text-xs" onClick={() => { setActiveView('students'); loadAssignments() }}>Alle anzeigen <ChevronRight className="h-3 w-3 ml-1" /></Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        {assignments.length === 0 ? (
+                          <div className="text-center py-6">
+                            <Send className="h-8 w-8 text-gray-300 mx-auto mb-2" />
+                            <p className="text-sm text-gray-500">Noch keine Aufgaben freigegeben.</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {assignments.filter(a => a.status === 'active').slice(0, 4).map(a => (
+                              <div key={a.id} className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 hover:bg-blue-50/50 cursor-pointer transition-colors"
+                                onClick={() => { setActiveView('students'); loadSubmissions(a.id) }}>
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${a.submission_count > 0 ? 'bg-green-100' : 'bg-amber-100'}`}>
+                                  <span className={`text-sm font-bold ${a.submission_count > 0 ? 'text-green-600' : 'text-amber-600'}`}>{a.submission_count || 0}</span>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-gray-900 truncate">{a.worksheet_title}</p>
+                                  <p className="text-xs text-gray-400">{a.class_name || 'Ohne Klasse'} · Code: <span className="font-mono">{a.code}</span></p>
+                                </div>
+                                <span className="text-xs text-gray-400">{a.submission_count || 0} Abgaben</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                </div>
+
+                {/* Right column: Classes + Tips */}
+                <div className="space-y-6">
+
+                  {/* My classes */}
+                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
+                    <Card className="glass-card border-0">
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-sm">Meine Klassen</CardTitle>
+                          <Button variant="ghost" size="sm" className="text-xs" onClick={() => setActiveView('classes')}>Verwalten <ChevronRight className="h-3 w-3 ml-1" /></Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        {teacherClasses.length === 0 ? (
+                          <div className="text-center py-6">
+                            <Users className="h-8 w-8 text-gray-300 mx-auto mb-2" />
+                            <p className="text-sm text-gray-500">Noch keine Klassen.</p>
+                            <Button size="sm" className="btn-premium mt-3 text-xs" onClick={() => setActiveView('classes')}><PlusCircle className="h-3 w-3 mr-1" /> Klasse erstellen</Button>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {teacherClasses.slice(0, 5).map(cls => (
+                              <div key={cls.id} className="flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 cursor-pointer transition-colors"
+                                onClick={() => { setActiveView('classes'); setTimeout(() => loadClassDetail(cls.id), 100) }}>
+                                <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center flex-shrink-0">
+                                  <Users className="h-5 w-5 text-emerald-500" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-gray-900">{cls.name}</p>
+                                  <p className="text-xs text-gray-400">{(cls.enrolled_students?.length || 0)} Schüler/innen</p>
+                                </div>
+                                <span className="text-xs font-mono bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg">{cls.join_code}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+
+                  {/* AI Coach tip */}
+                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}>
+                    <div className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl shadow-lg p-5 text-white">
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                          <Brain className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <p className="font-bold text-sm">AI-Lerncoach</p>
+                          <p className="text-xs opacity-80">Neu in EduFlow</p>
+                        </div>
+                      </div>
+                      <p className="text-xs opacity-90 leading-relaxed mb-3">Schüler/innen erhalten jetzt personalisierte Übungen basierend auf ihren Schwächen. Die KI analysiert Fehler und generiert massgeschneiderte Aufgaben.</p>
+                      <button onClick={() => setActiveView('classes')} className="text-xs font-semibold bg-white/20 hover:bg-white/30 px-4 py-2 rounded-xl transition-colors">
+                        Klassen-Insights ansehen →
+                      </button>
+                    </div>
+                  </motion.div>
+
+                  {/* Quick links */}
+                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
+                    <Card className="glass-card border-0">
+                      <CardContent className="py-4">
+                        <p className="text-xs font-semibold text-gray-600 mb-2">Schnellzugriff</p>
+                        <div className="space-y-1">
+                          {[
+                            { label: 'Vorlagen durchstöbern', icon: LayoutTemplate, view: 'templates' },
+                            { label: 'Material hochladen', icon: Upload, view: 'upload' },
+                            { label: 'Jahresplaner', icon: Calendar, view: 'planner' },
+                            { label: 'Export-Historie', icon: Clock, view: 'exports' },
+                          ].map(item => (
+                            <button key={item.view} onClick={() => setActiveView(item.view)}
+                              className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-gray-50 text-left transition-colors">
+                              <item.icon className="h-4 w-4 text-gray-400" />
+                              <span className="text-xs text-gray-700">{item.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                </div>
+              </div>
+            </motion.div>
+          )}
 
           {/* ============ CREATE VIEW ============ */}
           {activeView === 'create' && (
