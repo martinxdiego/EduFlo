@@ -696,7 +696,7 @@ export default function DossierEditor({
     if (!onExportPDF) return
     setExporting(true)
     try {
-      await onExportPDF(editedDossier.id, version)
+      await onExportPDF(editedDossier, version)
     } finally {
       setExporting(false)
     }
