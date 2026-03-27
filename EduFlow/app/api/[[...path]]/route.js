@@ -2709,6 +2709,633 @@ Bitte gib:
       }
     }
 
+    // ========== DOSSIER ROUTES ==========
+
+    // Generate dossier (streaming) - POST /api/generate-dossier-stream
+    if (route === '/generate-dossier-stream' && method === 'POST') {
+      const decoded = await verifyToken(request)
+      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+
+      const user = await db.collection('users').findOne({ id: decoded.userId })
+      if (user.subscription_tier === 'free' && user.worksheets_used_this_month >= 5) {
+        return handleCORS(NextResponse.json({ error: "Monatliches Limit erreicht. Bitte auf Premium upgraden." }, { status: 403 }))
+      }
+
+      const body = await request.json()
+      const { topic, grade, subject, difficulty, theme, competency_codes } = body
+
+      if (!topic || !grade || !subject) {
+        return handleCORS(NextResponse.json({ error: "Thema, Klasse und Fach sind erforderlich." }, { status: 400 }))
+      }
+
+      const encoder = new TextEncoder()
+      const stream = new ReadableStream({
+        async start(controller) {
+          try {
+            // STEP 1: Planning
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'status', message: 'Dossier wird geplant...', progress: 5 })}\n\n`))
+
+            const competenciesText = competency_codes?.length
+              ? `\n\nLehrplan 21 Kompetenzen die abgedeckt werden sollen:\n${competency_codes.map(c => `- ${c}`).join('\n')}`
+              : ''
+
+            const planningPrompt = `Du bist ein erfahrener Schweizer Primarschullehrer. Erstelle einen detaillierten Strukturplan für ein Lerndossier.
+
+Thema: ${topic}
+Klassenstufe: ${grade}. Klasse (Primarschule Schweiz)
+Fach: ${subject}
+Schwierigkeit: ${difficulty || 'medium'}${competenciesText}
+
+Erstelle einen JSON-Strukturplan mit 7-10 Sektionen. Das Dossier soll 15-20 Seiten umfassen.
+
+ANTWORTFORMAT (JSON):
+{
+  "title": "Dossier-Titel",
+  "sections": [
+    {
+      "type": "objectives",
+      "title": "Lernziele",
+      "description": "Kurze Beschreibung was in dieser Sektion generiert werden soll",
+      "estimated_pages": 1
+    },
+    {
+      "type": "theory",
+      "title": "Einführung: [Thema]",
+      "description": "Einführungstext mit Infokästen zum Thema...",
+      "estimated_pages": 3
+    },
+    {
+      "type": "exercises",
+      "title": "Übungen Teil 1",
+      "description": "Multiple Choice, Lückentext und Zuordnungsaufgaben zu...",
+      "estimated_pages": 3
+    }
+  ],
+  "learning_objectives": [
+    "Die Schülerinnen und Schüler können...",
+    "Die Schülerinnen und Schüler verstehen..."
+  ]
+}
+
+Sektionstypen: "objectives", "theory", "exercises", "source_text", "creative", "summary", "glossary"
+
+WICHTIG:
+- Plane ein abwechslungsreiches, pädagogisch sinnvolles Dossier
+- Beginne immer mit Lernzielen
+- Wechsle zwischen Theorie und Übungen ab
+- Ende mit Zusammenfassung/Reflexion
+- Schweizer Kontext und Lehrplan 21`
+
+            let outline
+            try {
+              const planningResponse = await openai.chat.completions.create({
+                model: 'gpt-4o',
+                messages: [
+                  { role: 'system', content: planningPrompt },
+                  { role: 'user', content: `Erstelle einen Strukturplan für ein Lerndossier zum Thema: ${topic}` }
+                ],
+                temperature: 0.7,
+                response_format: { type: 'json_object' }
+              })
+              outline = JSON.parse(planningResponse.choices[0].message.content)
+            } catch (e) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: `Planungsfehler: ${e.message}` })}\n\n`))
+              controller.close()
+              return
+            }
+
+            const dossierTitle = outline.title || `${subject}: ${topic}`
+            const plannedSections = outline.sections || []
+            const learningObjectives = outline.learning_objectives || []
+            const totalSections = plannedSections.length
+
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'plan_complete', title: dossierTitle, sections: plannedSections, totalSections, progress: 15 })}\n\n`))
+
+            // STEP 2: Generate sections one by one
+            const generatedSections = []
+            const previousSummaries = []
+            const allQuestions = []
+
+            const blockInstructions = {
+              objectives: `Erstelle eine Lernziel-Checkliste. Verwende diese Block-Typen:
+- "heading": Überschriften
+- "objectives_checklist": Liste der Lernziele mit code und text
+- "text": Einleitender Text`,
+              theory: `Erstelle einen informativen Theorieteil. Verwende diese Block-Typen:
+- "heading": Überschriften (level 1, 2 oder 3)
+- "text": Fliesstext-Absätze (html mit <b>, <i>, <br> Tags)
+- "info_box": Infokästen mit variant "wusstest_du", "wichtig", "merke" oder "tipp"
+- "table": Tabellen für Vergleiche oder Übersichten`,
+              exercises: `Erstelle einen Übungsblock mit verschiedenen Fragetypen. Verwende diese Block-Typen:
+- "heading": Überschriften
+- "question": Fragen (type: "multiple_choice", "open", "fill_blank", "matching", "ordering", "true_false")
+  Jede Frage braucht: id, number, type, question, answer, explanation, answerLines
+  Bei multiple_choice zusätzlich: options (Array mit 4 Optionen)
+- "text": Einleitende Texte zwischen Aufgaben`,
+              source_text: `Erstelle einen Quellentext mit Verständnisfragen. Verwende:
+- "heading": Titel des Quellentexts
+- "text": Der Quellentext selbst (ausführlich, 200-400 Wörter)
+- "info_box": Kontext-Information zum Text (variant "tipp")
+- "question": Verständnisfragen zum Text`,
+              creative: `Erstelle eine Kreativaufgabe. Verwende:
+- "heading": Titel der Aufgabe
+- "text": Ausführliche Aufgabenbeschreibung
+- "creative_task": Die eigentliche Aufgabe mit instruction, type ("drawing"/"writing"/"project"), space_lines`,
+              summary: `Erstelle eine Zusammenfassung und Reflexion. Verwende:
+- "heading": Überschriften
+- "text": Zusammenfassender Text der wichtigsten Punkte
+- "reflection": Reflexionsfragen für die Schüler
+- "objectives_checklist": Selbstcheck der Lernziele`,
+              glossary: `Erstelle ein Glossar/Wortschatz. Verwende:
+- "heading": Überschrift "Glossar" oder "Wortschatz"
+- "glossary": Liste von Begriffen mit Definitionen (terms Array mit term und definition)`
+            }
+
+            for (let idx = 0; idx < plannedSections.length; idx++) {
+              const planned = plannedSections[idx]
+              const sectionType = planned.type || 'theory'
+              const sectionTitle = planned.title || `Sektion ${idx + 1}`
+              const sectionDescription = planned.description || ''
+              const progressBase = 15 + Math.floor((idx / totalSections) * 70)
+
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'section_start', section: sectionTitle, sectionIndex: idx, totalSections, progress: progressBase })}\n\n`))
+
+              const contextText = previousSummaries.length > 0
+                ? `\n\nBereits behandelte Inhalte (für Kohärenz):\n${previousSummaries.slice(-3).map(s => `- ${s}`).join('\n')}`
+                : ''
+              const objectivesText = learningObjectives.length > 0
+                ? learningObjectives.map(o => `- ${o}`).join('\n')
+                : 'Keine spezifischen Lernziele definiert'
+
+              const sectionPrompt = `Du bist ein erfahrener Schweizer Primarschullehrer. Generiere den Inhalt für EINE Sektion eines Lerndossiers.
+
+=== KONTEXT ===
+Thema: ${topic}
+Klassenstufe: ${grade}. Klasse
+Fach: ${subject}
+Schwierigkeit: ${difficulty || 'medium'}
+
+Lernziele des Dossiers:
+${objectivesText}
+${contextText}
+
+=== AKTUELLE SEKTION ===
+Typ: ${sectionType}
+Titel: ${sectionTitle}
+Beschreibung: ${sectionDescription}
+
+=== BLOCK-TYPEN ===
+${blockInstructions[sectionType] || blockInstructions.theory}
+
+=== ANTWORTFORMAT (JSON) ===
+{
+  "blocks": [
+    {
+      "type": "heading",
+      "content": { "text": "Überschrift", "level": 2 }
+    },
+    {
+      "type": "text",
+      "content": { "html": "<b>Fettgedruckter Text</b> und normaler Text..." }
+    }
+  ],
+  "summary": "Kurze Zusammenfassung dieser Sektion (1-2 Sätze)"
+}
+
+WICHTIG:
+- Generiere substanzielle, pädagogisch hochwertige Inhalte
+- Verwende Schweizer Hochdeutsch
+- Texte sollen ausführlich und informativ sein
+- Bei Fragen: Kreative, kontextreiche Aufgabenstellungen
+- Passe den Sprachstil an die Klassenstufe an`
+
+              let sectionContent
+              try {
+                const sectionResponse = await openai.chat.completions.create({
+                  model: 'gpt-4o',
+                  messages: [
+                    { role: 'system', content: sectionPrompt },
+                    { role: 'user', content: `Generiere die Sektion '${sectionTitle}' für das Dossier '${dossierTitle}'.` }
+                  ],
+                  temperature: 0.7,
+                  response_format: { type: 'json_object' }
+                })
+                sectionContent = JSON.parse(sectionResponse.choices[0].message.content)
+              } catch (e) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'section_error', section: sectionTitle, sectionIndex: idx, message: e.message })}\n\n`))
+                sectionContent = { blocks: [{ type: 'text', content: { html: `<i>Fehler bei der Generierung: ${e.message}</i>` } }], summary: '' }
+              }
+
+              // Process blocks
+              const blocks = (sectionContent.blocks || []).map((block, bIdx) => {
+                const blockId = `s${idx + 1}_b${bIdx + 1}`
+                const processed = {
+                  id: blockId,
+                  type: block.type || 'text',
+                  content: block.content || {},
+                  order: bIdx
+                }
+                if (block.type === 'question') {
+                  const qContent = block.content || {}
+                  if (!qContent.id) qContent.id = blockId
+                  allQuestions.push(qContent)
+                }
+                return processed
+              })
+
+              const sectionId = `sec_${idx + 1}`
+              generatedSections.push({
+                id: sectionId,
+                type: sectionType,
+                title: sectionTitle,
+                order: idx,
+                blocks
+              })
+
+              const summary = sectionContent.summary || ''
+              if (summary) previousSummaries.push(`${sectionTitle}: ${summary}`)
+
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'section_complete', section: sectionTitle, sectionIndex: idx, totalSections, blockCount: blocks.length, progress: progressBase + Math.floor(70 / totalSections) })}\n\n`))
+            }
+
+            // STEP 3: Generate solutions section
+            if (allQuestions.length > 0) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'status', message: 'Lösungsteil wird erstellt...', progress: 88 })}\n\n`))
+
+              const solutionsBlocks = [{ id: 'sol_h1', type: 'heading', content: { text: 'Lösungen', level: 1 }, order: 0 }]
+              allQuestions.forEach((q, qIdx) => {
+                const answerText = q.answer || 'Keine Lösung vorhanden'
+                const explanation = q.explanation || ''
+                let html = `<b>Frage ${q.number || qIdx + 1}:</b> ${answerText}`
+                if (explanation) html += `<br><i>Erklärung: ${explanation}</i>`
+                solutionsBlocks.push({ id: `sol_b${qIdx + 1}`, type: 'text', content: { html }, order: qIdx + 1 })
+              })
+
+              generatedSections.push({
+                id: `sec_${generatedSections.length + 1}`,
+                type: 'solutions',
+                title: 'Lösungen',
+                order: generatedSections.length,
+                blocks: solutionsBlocks
+              })
+            }
+
+            // STEP 4: Save to MongoDB
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'status', message: 'Dossier wird gespeichert...', progress: 95 })}\n\n`))
+
+            const dossierId = uuidv4()
+            const now = new Date()
+            const dossier = {
+              id: dossierId,
+              user_id: decoded.userId,
+              title: dossierTitle,
+              topic,
+              grade,
+              subject,
+              difficulty: difficulty || 'medium',
+              theme: theme || 'classic',
+              competency_codes: competency_codes || [],
+              learning_objectives: learningObjectives,
+              sections: generatedSections,
+              generation_status: 'complete',
+              generated_sections: generatedSections.length,
+              total_sections: generatedSections.length,
+              mode: 'dossier',
+              created_at: now,
+              updated_at: now
+            }
+
+            await db.collection('dossiers').insertOne(dossier)
+            await db.collection('users').updateOne({ id: decoded.userId }, { $inc: { worksheets_used_this_month: 1 } })
+
+            const dossierResponse = { ...dossier, created_at: now.toISOString(), updated_at: now.toISOString() }
+            delete dossierResponse._id
+
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'dossier_complete', dossier: dossierResponse, progress: 100 })}\n\n`))
+            controller.close()
+          } catch (error) {
+            console.error('Dossier streaming error:', error)
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: error.message })}\n\n`))
+            controller.close()
+          }
+        }
+      })
+
+      const response = new NextResponse(stream, {
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' }
+      })
+      return handleCORS(response)
+    }
+
+    // Get user's dossiers - GET /api/dossiers
+    if (route === '/dossiers' && method === 'GET') {
+      const decoded = await verifyToken(request)
+      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+
+      const dossiers = await db.collection('dossiers')
+        .find({ user_id: decoded.userId }, { projection: { _id: 0, 'sections.blocks': 0 } })
+        .sort({ created_at: -1 })
+        .limit(100)
+        .toArray()
+
+      dossiers.forEach(d => {
+        if (d.created_at instanceof Date) d.created_at = d.created_at.toISOString()
+        if (d.updated_at instanceof Date) d.updated_at = d.updated_at.toISOString()
+      })
+
+      return handleCORS(NextResponse.json(dossiers))
+    }
+
+    // Get single dossier - GET /api/dossiers/:id
+    if (route.startsWith('/dossiers/') && method === 'GET') {
+      const decoded = await verifyToken(request)
+      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+
+      const dossierId = path[1]
+      const dossier = await db.collection('dossiers').findOne(
+        { id: dossierId, user_id: decoded.userId },
+        { projection: { _id: 0 } }
+      )
+      if (!dossier) return handleCORS(NextResponse.json({ error: "Dossier nicht gefunden" }, { status: 404 }))
+
+      if (dossier.created_at instanceof Date) dossier.created_at = dossier.created_at.toISOString()
+      if (dossier.updated_at instanceof Date) dossier.updated_at = dossier.updated_at.toISOString()
+
+      return handleCORS(NextResponse.json(dossier))
+    }
+
+    // Update dossier - PUT /api/dossiers/:id
+    if (route.startsWith('/dossiers/') && method === 'PUT') {
+      const decoded = await verifyToken(request)
+      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+
+      const dossierId = path[1]
+      const body = await request.json()
+      const { title, theme: dossierTheme, sections, competency_codes: codes } = body
+
+      const existing = await db.collection('dossiers').findOne({ id: dossierId, user_id: decoded.userId })
+      if (!existing) return handleCORS(NextResponse.json({ error: "Dossier nicht gefunden" }, { status: 404 }))
+
+      const updateData = { updated_at: new Date() }
+      if (title !== undefined) updateData.title = title
+      if (dossierTheme !== undefined) updateData.theme = dossierTheme
+      if (sections !== undefined) updateData.sections = sections
+      if (codes !== undefined) updateData.competency_codes = codes
+
+      await db.collection('dossiers').updateOne({ id: dossierId }, { $set: updateData })
+
+      const updated = await db.collection('dossiers').findOne({ id: dossierId }, { projection: { _id: 0 } })
+      if (updated.created_at instanceof Date) updated.created_at = updated.created_at.toISOString()
+      if (updated.updated_at instanceof Date) updated.updated_at = updated.updated_at.toISOString()
+
+      return handleCORS(NextResponse.json(updated))
+    }
+
+    // Delete dossier - DELETE /api/dossiers/:id
+    if (route.startsWith('/dossiers/') && method === 'DELETE') {
+      const decoded = await verifyToken(request)
+      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+
+      const dossierId = path[1]
+      const result = await db.collection('dossiers').deleteOne({ id: dossierId, user_id: decoded.userId })
+      if (result.deletedCount === 0) return handleCORS(NextResponse.json({ error: "Dossier nicht gefunden" }, { status: 404 }))
+
+      return handleCORS(NextResponse.json({ message: 'Dossier gelöscht', success: true }))
+    }
+
+    // Export dossier PDF - POST /api/export/dossier/pdf
+    if (route === '/export/dossier/pdf' && method === 'POST') {
+      const decoded = await verifyToken(request)
+      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+
+      const body = await request.json()
+      const { dossier: dossierData, version } = body
+
+      if (!dossierData) return handleCORS(NextResponse.json({ error: "Dossier-Daten fehlen" }, { status: 400 }))
+
+      // For PDF export, we generate a simple PDF using jsPDF on the server side
+      // Since we don't have the Python export_service here, we create a clean PDF
+      try {
+        const { jsPDF } = require('jspdf')
+        const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+        const includeSolutions = version === 'teacher'
+        const pageWidth = 210
+        const margin = 20
+        const contentWidth = pageWidth - 2 * margin
+        let y = margin
+
+        const addPage = () => { doc.addPage(); y = margin }
+        const checkPage = (needed = 20) => { if (y + needed > 277) addPage() }
+
+        // Title page
+        doc.setFontSize(24)
+        doc.setFont('helvetica', 'bold')
+        const title = dossierData.title || 'Arbeitsdossier'
+        doc.text(title, pageWidth / 2, 60, { align: 'center' })
+
+        doc.setFontSize(14)
+        doc.setFont('helvetica', 'normal')
+        if (dossierData.subject) doc.text(`Fach: ${dossierData.subject}`, pageWidth / 2, 80, { align: 'center' })
+        if (dossierData.grade) doc.text(`${dossierData.grade}. Klasse`, pageWidth / 2, 90, { align: 'center' })
+
+        doc.setFontSize(10)
+        doc.text(`${version === 'teacher' ? 'Lehrerversion' : 'Schülerversion'}`, pageWidth / 2, 110, { align: 'center' })
+        doc.text('Name: ____________________', margin, 140)
+        doc.text('Datum: ____________________', margin, 150)
+
+        // Sections
+        const sections = dossierData.sections || []
+        for (const section of sections) {
+          if (section.type === 'solutions' && !includeSolutions) continue
+
+          addPage()
+
+          // Section title
+          doc.setFontSize(16)
+          doc.setFont('helvetica', 'bold')
+          doc.text(section.title || '', margin, y)
+          y += 10
+
+          doc.setDrawColor(100, 100, 200)
+          doc.setLineWidth(0.5)
+          doc.line(margin, y, pageWidth - margin, y)
+          y += 8
+
+          // Blocks
+          for (const block of (section.blocks || [])) {
+            checkPage(15)
+            const content = block.content || {}
+
+            if (block.type === 'heading') {
+              const level = content.level || 2
+              const fontSize = level === 1 ? 14 : level === 2 ? 12 : 11
+              doc.setFontSize(fontSize)
+              doc.setFont('helvetica', 'bold')
+              doc.text(content.text || '', margin, y)
+              y += fontSize * 0.5 + 4
+            } else if (block.type === 'text') {
+              doc.setFontSize(10)
+              doc.setFont('helvetica', 'normal')
+              const text = (content.html || '').replace(/<br\s*\/?>/g, '\n').replace(/<[^>]+>/g, '')
+              const lines = doc.splitTextToSize(text, contentWidth)
+              for (const line of lines) {
+                checkPage(6)
+                doc.text(line, margin, y)
+                y += 5
+              }
+              y += 3
+            } else if (block.type === 'question') {
+              doc.setFontSize(10)
+              doc.setFont('helvetica', 'bold')
+              const qNum = content.number || '?'
+              doc.text(`Frage ${qNum}:`, margin, y)
+              y += 5
+              doc.setFont('helvetica', 'normal')
+              const qLines = doc.splitTextToSize(content.question || '', contentWidth - 5)
+              for (const line of qLines) {
+                checkPage(6)
+                doc.text(line, margin + 5, y)
+                y += 5
+              }
+              if (content.type === 'multiple_choice' && content.options) {
+                y += 2
+                content.options.forEach((opt, i) => {
+                  checkPage(6)
+                  doc.text(`${String.fromCharCode(65 + i)}) ${opt}`, margin + 8, y)
+                  y += 5
+                })
+              }
+              // Answer lines for student version
+              if (!includeSolutions) {
+                const answerLines = content.answerLines || 3
+                y += 2
+                for (let i = 0; i < answerLines; i++) {
+                  checkPage(8)
+                  doc.setDrawColor(200, 200, 200)
+                  doc.line(margin + 5, y, pageWidth - margin, y)
+                  y += 7
+                }
+              } else {
+                // Teacher version: show answer
+                checkPage(10)
+                doc.setFontSize(9)
+                doc.setTextColor(0, 100, 0)
+                doc.setFont('helvetica', 'italic')
+                const aLines = doc.splitTextToSize(`Lösung: ${content.answer || ''}`, contentWidth - 5)
+                for (const line of aLines) {
+                  checkPage(5)
+                  doc.text(line, margin + 5, y)
+                  y += 4.5
+                }
+                doc.setTextColor(0, 0, 0)
+              }
+              y += 5
+            } else if (block.type === 'info_box') {
+              checkPage(20)
+              doc.setFillColor(240, 245, 255)
+              const boxText = (content.content || '').replace(/<[^>]+>/g, '')
+              const boxLines = doc.splitTextToSize(boxText, contentWidth - 12)
+              const boxHeight = 10 + boxLines.length * 5
+              doc.roundedRect(margin, y - 2, contentWidth, boxHeight, 2, 2, 'F')
+              doc.setFontSize(10)
+              doc.setFont('helvetica', 'bold')
+              const variantLabels = { wusstest_du: 'Wusstest du?', wichtig: 'Wichtig!', merke: 'Merke dir', tipp: 'Tipp' }
+              doc.text(content.title || variantLabels[content.variant] || 'Info', margin + 4, y + 5)
+              doc.setFont('helvetica', 'normal')
+              doc.setFontSize(9)
+              let boxY = y + 10
+              for (const line of boxLines) {
+                doc.text(line, margin + 4, boxY)
+                boxY += 5
+              }
+              y += boxHeight + 5
+            } else if (block.type === 'objectives_checklist') {
+              const objectives = content.objectives || []
+              doc.setFontSize(10)
+              for (const obj of objectives) {
+                checkPage(8)
+                doc.setFont('helvetica', 'normal')
+                doc.rect(margin + 2, y - 3, 3.5, 3.5)
+                const objText = obj.code ? `${obj.code}: ${obj.text}` : obj.text
+                const objLines = doc.splitTextToSize(objText, contentWidth - 12)
+                for (const line of objLines) {
+                  doc.text(line, margin + 8, y)
+                  y += 5
+                }
+                y += 2
+              }
+              y += 3
+            } else if (block.type === 'glossary') {
+              const terms = content.terms || []
+              doc.setFontSize(10)
+              for (const t of terms) {
+                checkPage(10)
+                doc.setFont('helvetica', 'bold')
+                doc.text(`${t.term}:`, margin + 2, y)
+                doc.setFont('helvetica', 'normal')
+                const defLines = doc.splitTextToSize(t.definition || '', contentWidth - 30)
+                let defX = margin + 2 + doc.getTextWidth(`${t.term}: `)
+                if (defX > margin + 50) { y += 5; defX = margin + 8 }
+                for (const line of defLines) {
+                  checkPage(5)
+                  doc.text(line, defX, y)
+                  y += 5
+                  defX = margin + 8
+                }
+                y += 2
+              }
+            } else if (block.type === 'table') {
+              const headers = content.headers || []
+              const rows = content.rows || []
+              if (headers.length > 0) {
+                checkPage(10 + rows.length * 7)
+                const colWidth = contentWidth / headers.length
+                doc.setFontSize(9)
+                doc.setFont('helvetica', 'bold')
+                doc.setFillColor(230, 230, 240)
+                doc.rect(margin, y - 4, contentWidth, 7, 'F')
+                headers.forEach((h, i) => { doc.text(h, margin + i * colWidth + 2, y) })
+                y += 7
+                doc.setFont('helvetica', 'normal')
+                for (const row of rows) {
+                  checkPage(7)
+                  row.forEach((cell, i) => { doc.text(String(cell || ''), margin + i * colWidth + 2, y) })
+                  y += 6
+                }
+                y += 4
+              }
+            }
+          }
+        }
+
+        // Footer on each page
+        const totalPages = doc.internal.getNumberOfPages()
+        for (let i = 1; i <= totalPages; i++) {
+          doc.setPage(i)
+          doc.setFontSize(8)
+          doc.setFont('helvetica', 'normal')
+          doc.setTextColor(150, 150, 150)
+          doc.text(`${title} | Seite ${i} von ${totalPages}`, pageWidth / 2, 290, { align: 'center' })
+          doc.setTextColor(0, 0, 0)
+        }
+
+        const pdfBuffer = Buffer.from(doc.output('arraybuffer'))
+        const versionLabel = version === 'teacher' ? 'Lehrerversion' : 'Schuelerversion'
+        const filename = `${title.replace(/[/\\]/g, '-')}_${versionLabel}.pdf`
+
+        return new Response(pdfBuffer, {
+          headers: {
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `attachment; filename="${filename}"`,
+            ...Object.fromEntries(handleCORS(new Response()).headers)
+          }
+        })
+      } catch (e) {
+        console.error('Dossier PDF export error:', e)
+        return handleCORS(NextResponse.json({ error: `PDF-Export fehlgeschlagen: ${e.message}` }, { status: 500 }))
+      }
+    }
+
     // Route not found
     return handleCORS(NextResponse.json(
       { error: `Route ${route} not found` },
