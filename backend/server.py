@@ -16,7 +16,7 @@ import openai
 import json
 import asyncio
 import time
-from export_service import export_worksheet_pdf, export_worksheet_docx
+from export_service import export_worksheet_pdf, export_worksheet_docx, export_dossier_pdf
 from material_service import MaterialParser, MaterialAnalyzer, MaterialTransformer, ContextualEditor
 
 ROOT_DIR = Path(__file__).parent
@@ -98,6 +98,35 @@ class ChatEditRequest(BaseModel):
     message: str
     worksheet_id: str
     worksheet_content: Dict[str, Any]
+
+# ==================== DOSSIER MODELS ====================
+
+class DossierBlock(BaseModel):
+    id: str
+    type: str  # heading, text, info_box, question, table, image_placeholder, objectives_checklist, glossary, reflection, creative_task, page_break, divider
+    content: Dict[str, Any]
+    order: int
+
+class DossierSection(BaseModel):
+    id: str
+    type: str  # title_page, toc, objectives, theory, exercises, source_text, creative, summary, solutions, glossary
+    title: str
+    order: int
+    blocks: List[DossierBlock] = []
+
+class DossierGenerateRequest(BaseModel):
+    topic: str
+    grade: str
+    subject: str
+    difficulty: str
+    theme: Optional[str] = 'classic'
+    competency_codes: Optional[List[str]] = []
+
+class DossierUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    theme: Optional[str] = None
+    sections: Optional[List[Dict[str, Any]]] = None
+    competency_codes: Optional[List[str]] = None
 
 class ChatAction(BaseModel):
     type: str  # update_question, add_question, delete_question, replace_question, reorder_questions
@@ -926,6 +955,40 @@ async def export_docx_get(worksheet_id: str, version: str = 'student', user = De
         headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
 
+# ==================== DOSSIER EXPORT ====================
+
+class DossierExportRequest(BaseModel):
+    dossierId: str
+    version: str = 'student'  # 'student' or 'teacher'
+
+@api_router.post("/export/dossier/pdf")
+async def export_dossier_pdf_post(data: DossierExportRequest, user = Depends(get_current_user)):
+    """Export a dossier as PDF"""
+    dossier = await db.dossiers.find_one({'id': data.dossierId, 'user_id': user['id']}, {'_id': 0})
+    if not dossier:
+        raise HTTPException(status_code=404, detail="Dossier nicht gefunden")
+
+    include_solutions = data.version == 'teacher'
+    logger.info(f"Dossier PDF export: id={data.dossierId}, version={data.version}")
+
+    try:
+        start = time.time()
+        pdf_buffer = export_dossier_pdf(dossier, include_solutions)
+        duration = time.time() - start
+
+        title = dossier.get('title', 'Dossier').replace('/', '-').replace('\\', '-')
+        filename = f"{title}_{data.version}.pdf"
+
+        logger.info(f"Dossier PDF export completed in {duration:.2f}s: {filename}")
+        return Response(
+            content=pdf_buffer.getvalue(),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except Exception as e:
+        logger.error(f"Dossier PDF export error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"PDF-Export fehlgeschlagen: {str(e)}")
+
 # ==================== MATERIAL UPLOAD & ANALYSIS ====================
 
 class MaterialTransformRequest(BaseModel):
@@ -1249,6 +1312,455 @@ async def suggest_improvements(data: QuestionImprovementRequest, user = Depends(
     
     result = await ContextualEditor.suggest_improvements(data.question, context)
     return result
+
+# ==================== DOSSIER ROUTES ====================
+
+def get_dossier_planning_prompt(grade: str, subject: str, difficulty: str, topic: str, competency_codes: List[str]) -> str:
+    """Generate the planning prompt for dossier outline generation"""
+    competencies_text = ""
+    if competency_codes:
+        competencies_text = f"\n\nLehrplan 21 Kompetenzen die abgedeckt werden sollen:\n" + "\n".join(f"- {code}" for code in competency_codes)
+
+    return f"""Du bist ein erfahrener Schweizer Primarschullehrer. Erstelle einen detaillierten Strukturplan für ein Lerndossier.
+
+Thema: {topic}
+Klassenstufe: {grade}. Klasse (Primarschule Schweiz)
+Fach: {subject}
+Schwierigkeit: {difficulty}{competencies_text}
+
+Erstelle einen JSON-Strukturplan mit 7-10 Sektionen. Das Dossier soll 15-20 Seiten umfassen.
+
+ANTWORTFORMAT (JSON):
+{{
+  "title": "Dossier-Titel",
+  "sections": [
+    {{
+      "type": "objectives",
+      "title": "Lernziele",
+      "description": "Kurze Beschreibung was in dieser Sektion generiert werden soll",
+      "estimated_pages": 1
+    }},
+    {{
+      "type": "theory",
+      "title": "Einführung: [Thema]",
+      "description": "Einführungstext mit Infokästen zum Thema...",
+      "estimated_pages": 3
+    }},
+    {{
+      "type": "exercises",
+      "title": "Übungen Teil 1",
+      "description": "Multiple Choice, Lückentext und Zuordnungsaufgaben zu...",
+      "estimated_pages": 3
+    }},
+    ...weitere Sektionen...
+  ],
+  "learning_objectives": [
+    "Die Schülerinnen und Schüler können...",
+    "Die Schülerinnen und Schüler verstehen..."
+  ]
+}}
+
+Sektionstypen die du verwenden kannst:
+- "objectives": Lernziele-Übersicht
+- "theory": Theorie/Informationstext mit Infokästen
+- "exercises": Übungsblock mit verschiedenen Fragetypen
+- "source_text": Quellentext/Lesetext mit Verständnisfragen
+- "creative": Kreativaufgabe (Zeichnen, Schreiben, Projekt)
+- "summary": Zusammenfassung und Reflexion
+- "glossary": Wortschatz/Glossar
+
+WICHTIG:
+- Plane ein abwechslungsreiches, pädagogisch sinnvolles Dossier
+- Beginne immer mit Lernzielen
+- Wechsle zwischen Theorie und Übungen ab
+- Ende mit Zusammenfassung/Reflexion
+- Schweizer Kontext und Lehrplan 21"""
+
+
+def get_dossier_section_prompt(section_type: str, section_title: str, section_description: str,
+                                grade: str, subject: str, difficulty: str, topic: str,
+                                learning_objectives: List[str], previous_summaries: List[str]) -> str:
+    """Generate the prompt for a single dossier section"""
+
+    context = ""
+    if previous_summaries:
+        context = "\n\nBereits behandelte Inhalte (für Kohärenz):\n" + "\n".join(f"- {s}" for s in previous_summaries[-3:])
+
+    objectives_text = "\n".join(f"- {obj}" for obj in learning_objectives) if learning_objectives else "Keine spezifischen Lernziele definiert"
+
+    block_instructions = {
+        "objectives": """Erstelle eine Lernziel-Checkliste. Verwende diese Block-Typen:
+- "heading": Überschriften
+- "objectives_checklist": Liste der Lernziele mit code und text
+- "text": Einleitender Text""",
+
+        "theory": """Erstelle einen informativen Theorieteil. Verwende diese Block-Typen:
+- "heading": Überschriften (level 1, 2 oder 3)
+- "text": Fliesstext-Absätze (html mit <b>, <i>, <br> Tags)
+- "info_box": Infokästen mit variant "wusstest_du", "wichtig", "merke" oder "tipp"
+- "table": Tabellen für Vergleiche oder Übersichten
+- "image_placeholder": Bildplatzhalter mit Beschreibung""",
+
+        "exercises": """Erstelle einen Übungsblock mit verschiedenen Fragetypen. Verwende diese Block-Typen:
+- "heading": Überschriften
+- "question": Fragen (type: "multiple_choice", "open", "fill_blank", "matching", "ordering", "true_false")
+  Jede Frage braucht: id, number, type, question, answer, explanation, answerLines
+  Bei multiple_choice zusätzlich: options (Array mit 4 Optionen)
+  Bei fill_blank: Lücken mit ___ markieren
+  Bei matching: answer als "links1→rechts1, links2→rechts2"
+- "text": Einleitende Texte zwischen Aufgaben""",
+
+        "source_text": """Erstelle einen Quellentext mit Verständnisfragen. Verwende:
+- "heading": Titel des Quellentexts
+- "text": Der Quellentext selbst (ausführlich, 200-400 Wörter)
+- "info_box": Kontext-Information zum Text (variant "tipp")
+- "question": Verständnisfragen zum Text""",
+
+        "creative": """Erstelle eine Kreativaufgabe. Verwende:
+- "heading": Titel der Aufgabe
+- "text": Ausführliche Aufgabenbeschreibung
+- "creative_task": Die eigentliche Aufgabe mit instruction, type ("drawing"/"writing"/"project"), space_lines""",
+
+        "summary": """Erstelle eine Zusammenfassung und Reflexion. Verwende:
+- "heading": Überschriften
+- "text": Zusammenfassender Text der wichtigsten Punkte
+- "reflection": Reflexionsfragen für die Schüler
+- "objectives_checklist": Selbstcheck der Lernziele (gleiche wie am Anfang)""",
+
+        "glossary": """Erstelle ein Glossar/Wortschatz. Verwende:
+- "heading": Überschrift "Glossar" oder "Wortschatz"
+- "glossary": Liste von Begriffen mit Definitionen (terms Array mit term und definition)"""
+    }
+
+    return f"""Du bist ein erfahrener Schweizer Primarschullehrer. Generiere den Inhalt für EINE Sektion eines Lerndossiers.
+
+=== KONTEXT ===
+Thema: {topic}
+Klassenstufe: {grade}. Klasse
+Fach: {subject}
+Schwierigkeit: {difficulty}
+
+Lernziele des Dossiers:
+{objectives_text}
+{context}
+
+=== AKTUELLE SEKTION ===
+Typ: {section_type}
+Titel: {section_title}
+Beschreibung: {section_description}
+
+=== BLOCK-TYPEN ===
+{block_instructions.get(section_type, block_instructions["theory"])}
+
+=== ANTWORTFORMAT (JSON) ===
+{{
+  "blocks": [
+    {{
+      "type": "heading",
+      "content": {{ "text": "Überschrift", "level": 2 }}
+    }},
+    {{
+      "type": "text",
+      "content": {{ "html": "<b>Fettgedruckter Text</b> und normaler Text..." }}
+    }},
+    ...weitere Blöcke je nach Sektionstyp...
+  ],
+  "summary": "Kurze Zusammenfassung dieser Sektion (1-2 Sätze, für Kohärenz mit nächster Sektion)"
+}}
+
+WICHTIG:
+- Generiere substanzielle, pädagogisch hochwertige Inhalte
+- Verwende Schweizer Hochdeutsch
+- Texte sollen ausführlich und informativ sein (nicht nur Stichpunkte!)
+- Bei Fragen: Kreative, kontextreiche Aufgabenstellungen
+- Passe den Sprachstil an die Klassenstufe an"""
+
+
+@api_router.post("/generate-dossier-stream")
+async def generate_dossier_stream(data: DossierGenerateRequest, user = Depends(get_current_user)):
+    if user['subscription_tier'] == 'free' and user['worksheets_used_this_month'] >= 5:
+        raise HTTPException(status_code=403, detail="Monatliches Limit erreicht. Bitte auf Premium upgraden.")
+
+    logger.info(f"Starting dossier generation for user {user['id']}: {data.topic}")
+
+    async def stream_generator():
+        start_time = time.time()
+
+        try:
+            # ===== STEP 1: Planning Call =====
+            yield f"data: {json.dumps({'type': 'status', 'message': 'Dossier wird geplant...', 'progress': 5})}\n\n"
+
+            planning_prompt = get_dossier_planning_prompt(
+                data.grade, data.subject, data.difficulty, data.topic, data.competency_codes or []
+            )
+
+            try:
+                planning_response = openai_client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {"role": "system", "content": planning_prompt},
+                        {"role": "user", "content": f"Erstelle einen Strukturplan für ein Lerndossier zum Thema: {data.topic}"}
+                    ],
+                    temperature=0.7,
+                    response_format={"type": "json_object"},
+                    timeout=60.0
+                )
+
+                outline = json.loads(planning_response.choices[0].message.content)
+
+            except Exception as e:
+                logger.error(f"Dossier planning error: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'message': f'Planungsfehler: {str(e)}'})}\n\n"
+                return
+
+            dossier_title = outline.get('title', f'{data.subject}: {data.topic}')
+            planned_sections = outline.get('sections', [])
+            learning_objectives = outline.get('learning_objectives', [])
+            total_sections = len(planned_sections)
+
+            yield f"data: {json.dumps({'type': 'plan_complete', 'title': dossier_title, 'sections': planned_sections, 'totalSections': total_sections, 'progress': 15})}\n\n"
+
+            # ===== STEP 2: Generate sections one by one =====
+            generated_sections = []
+            previous_summaries = []
+            all_questions = []  # Collect for solutions section
+
+            for idx, planned in enumerate(planned_sections):
+                section_type = planned.get('type', 'theory')
+                section_title = planned.get('title', f'Sektion {idx + 1}')
+                section_description = planned.get('description', '')
+
+                progress_base = 15 + int((idx / total_sections) * 70)
+
+                yield f"data: {json.dumps({'type': 'section_start', 'section': section_title, 'sectionIndex': idx, 'totalSections': total_sections, 'progress': progress_base})}\n\n"
+
+                section_prompt = get_dossier_section_prompt(
+                    section_type, section_title, section_description,
+                    data.grade, data.subject, data.difficulty, data.topic,
+                    learning_objectives, previous_summaries
+                )
+
+                try:
+                    section_response = openai_client.chat.completions.create(
+                        model="gpt-4o",
+                        messages=[
+                            {"role": "system", "content": section_prompt},
+                            {"role": "user", "content": f"Generiere die Sektion '{section_title}' für das Dossier '{dossier_title}'."}
+                        ],
+                        temperature=0.7,
+                        response_format={"type": "json_object"},
+                        timeout=90.0
+                    )
+
+                    section_content = json.loads(section_response.choices[0].message.content)
+
+                except Exception as e:
+                    logger.error(f"Section generation error for '{section_title}': {e}")
+                    yield f"data: {json.dumps({'type': 'section_error', 'section': section_title, 'sectionIndex': idx, 'message': str(e)})}\n\n"
+                    # Create empty section placeholder
+                    section_content = {"blocks": [{"type": "text", "content": {"html": f"<i>Fehler bei der Generierung: {str(e)}</i>"}}], "summary": ""}
+
+                # Process blocks: assign IDs and order
+                blocks = []
+                for b_idx, block in enumerate(section_content.get('blocks', [])):
+                    block_id = f"s{idx+1}_b{b_idx+1}"
+                    processed_block = {
+                        'id': block_id,
+                        'type': block.get('type', 'text'),
+                        'content': block.get('content', {}),
+                        'order': b_idx
+                    }
+                    blocks.append(processed_block)
+
+                    # Collect questions for solutions
+                    if block.get('type') == 'question':
+                        q_content = block.get('content', {})
+                        if 'id' not in q_content:
+                            q_content['id'] = block_id
+                        all_questions.append(q_content)
+
+                section_id = f"sec_{idx+1}"
+                section = {
+                    'id': section_id,
+                    'type': section_type,
+                    'title': section_title,
+                    'order': idx,
+                    'blocks': blocks
+                }
+                generated_sections.append(section)
+
+                # Track summaries for coherence
+                summary = section_content.get('summary', '')
+                if summary:
+                    previous_summaries.append(f"{section_title}: {summary}")
+
+                yield f"data: {json.dumps({'type': 'section_complete', 'section': section_title, 'sectionIndex': idx, 'totalSections': total_sections, 'blockCount': len(blocks), 'progress': progress_base + int(70 / total_sections)})}\n\n"
+                await asyncio.sleep(0)
+
+            # ===== STEP 3: Generate solutions section if there are questions =====
+            if all_questions:
+                yield f"data: {json.dumps({'type': 'status', 'message': 'Lösungsteil wird erstellt...', 'progress': 88})}\n\n"
+
+                solutions_blocks = [{'id': 'sol_h1', 'type': 'heading', 'content': {'text': 'Lösungen', 'level': 1}, 'order': 0}]
+
+                for q_idx, q in enumerate(all_questions):
+                    answer_text = q.get('answer', 'Keine Lösung vorhanden')
+                    explanation = q.get('explanation', '')
+                    q_number = q.get('number', q_idx + 1)
+
+                    html = f"<b>Frage {q_number}:</b> {answer_text}"
+                    if explanation:
+                        html += f"<br><i>Erklärung: {explanation}</i>"
+
+                    solutions_blocks.append({
+                        'id': f'sol_b{q_idx+1}',
+                        'type': 'text',
+                        'content': {'html': html},
+                        'order': q_idx + 1
+                    })
+
+                solutions_section = {
+                    'id': f'sec_{len(generated_sections)+1}',
+                    'type': 'solutions',
+                    'title': 'Lösungen',
+                    'order': len(generated_sections),
+                    'blocks': solutions_blocks
+                }
+                generated_sections.append(solutions_section)
+
+            # ===== STEP 4: Save to MongoDB =====
+            yield f"data: {json.dumps({'type': 'status', 'message': 'Dossier wird gespeichert...', 'progress': 95})}\n\n"
+
+            dossier_id = str(uuid.uuid4())
+            dossier = {
+                'id': dossier_id,
+                'user_id': user['id'],
+                'title': dossier_title,
+                'topic': data.topic,
+                'grade': data.grade,
+                'subject': data.subject,
+                'difficulty': data.difficulty,
+                'theme': data.theme or 'classic',
+                'competency_codes': data.competency_codes or [],
+                'learning_objectives': learning_objectives,
+                'sections': generated_sections,
+                'generation_status': 'complete',
+                'generated_sections': len(generated_sections),
+                'total_sections': len(generated_sections),
+                'mode': 'dossier',
+                'created_at': datetime.now(timezone.utc),
+                'updated_at': datetime.now(timezone.utc)
+            }
+
+            await db.dossiers.insert_one(dossier)
+
+            await db.users.update_one(
+                {'id': user['id']},
+                {'$inc': {'worksheets_used_this_month': 1}}
+            )
+
+            # Prepare response
+            dossier_response = dossier.copy()
+            dossier_response['created_at'] = dossier['created_at'].isoformat()
+            dossier_response['updated_at'] = dossier['updated_at'].isoformat()
+            dossier_response.pop('_id', None)
+
+            total_time = time.time() - start_time
+            logger.info(f"Dossier generation complete in {total_time:.2f}s: {dossier_id} ({len(generated_sections)} sections)")
+
+            yield f"data: {json.dumps({'type': 'complete', 'dossier': dossier_response, 'progress': 100})}\n\n"
+
+        except Exception as e:
+            total_time = time.time() - start_time
+            logger.error(f"Dossier streaming error after {total_time:.2f}s: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(stream_generator(), media_type="text/event-stream")
+
+
+@api_router.get("/dossiers")
+async def get_dossiers(user = Depends(get_current_user)):
+    dossiers = await db.dossiers.find(
+        {'user_id': user['id']},
+        {'_id': 0, 'sections.blocks': 0}  # Exclude heavy block data for list view
+    ).sort('created_at', -1).to_list(100)
+    for d in dossiers:
+        if 'created_at' in d and hasattr(d['created_at'], 'isoformat'):
+            d['created_at'] = d['created_at'].isoformat()
+        if 'updated_at' in d and hasattr(d['updated_at'], 'isoformat'):
+            d['updated_at'] = d['updated_at'].isoformat()
+    return dossiers
+
+
+@api_router.get("/dossiers/{dossier_id}")
+async def get_dossier(dossier_id: str, user = Depends(get_current_user)):
+    dossier = await db.dossiers.find_one({'id': dossier_id, 'user_id': user['id']}, {'_id': 0})
+    if not dossier:
+        raise HTTPException(status_code=404, detail="Dossier nicht gefunden")
+    if 'created_at' in dossier and hasattr(dossier['created_at'], 'isoformat'):
+        dossier['created_at'] = dossier['created_at'].isoformat()
+    if 'updated_at' in dossier and hasattr(dossier['updated_at'], 'isoformat'):
+        dossier['updated_at'] = dossier['updated_at'].isoformat()
+    return dossier
+
+
+@api_router.put("/dossiers/{dossier_id}")
+async def update_dossier(dossier_id: str, data: DossierUpdateRequest, user = Depends(get_current_user)):
+    dossier = await db.dossiers.find_one({'id': dossier_id, 'user_id': user['id']})
+    if not dossier:
+        raise HTTPException(status_code=404, detail="Dossier nicht gefunden")
+
+    update_data = {'updated_at': datetime.now(timezone.utc)}
+
+    if data.title is not None:
+        update_data['title'] = data.title
+    if data.theme is not None:
+        update_data['theme'] = data.theme
+    if data.competency_codes is not None:
+        update_data['competency_codes'] = data.competency_codes
+    if data.sections is not None:
+        update_data['sections'] = data.sections
+
+    await db.dossiers.update_one({'id': dossier_id}, {'$set': update_data})
+
+    updated = await db.dossiers.find_one({'id': dossier_id}, {'_id': 0})
+    if 'created_at' in updated and hasattr(updated['created_at'], 'isoformat'):
+        updated['created_at'] = updated['created_at'].isoformat()
+    if 'updated_at' in updated and hasattr(updated['updated_at'], 'isoformat'):
+        updated['updated_at'] = updated['updated_at'].isoformat()
+
+    return {'success': True, 'dossier': updated, 'message': 'Dossier gespeichert'}
+
+
+@api_router.delete("/dossiers/{dossier_id}")
+async def delete_dossier(dossier_id: str, user = Depends(get_current_user)):
+    result = await db.dossiers.delete_one({'id': dossier_id, 'user_id': user['id']})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Dossier nicht gefunden")
+    return {'message': 'Dossier gelöscht', 'success': True}
+
+
+@api_router.post("/dossiers/{dossier_id}/duplicate")
+async def duplicate_dossier(dossier_id: str, user = Depends(get_current_user)):
+    dossier = await db.dossiers.find_one({'id': dossier_id, 'user_id': user['id']}, {'_id': 0})
+    if not dossier:
+        raise HTTPException(status_code=404, detail="Dossier nicht gefunden")
+
+    new_id = str(uuid.uuid4())
+    new_dossier = dossier.copy()
+    new_dossier['id'] = new_id
+    new_dossier['title'] = f"{dossier['title']} (Kopie)"
+    new_dossier['created_at'] = datetime.now(timezone.utc)
+    new_dossier['updated_at'] = datetime.now(timezone.utc)
+
+    await db.dossiers.insert_one(new_dossier)
+
+    new_dossier.pop('_id', None)
+    new_dossier['created_at'] = new_dossier['created_at'].isoformat()
+    new_dossier['updated_at'] = new_dossier['updated_at'].isoformat()
+
+    return {'success': True, 'dossier': new_dossier}
+
 
 # ==================== ROOT ====================
 

@@ -34,6 +34,7 @@ import dynamic from 'next/dynamic'
 import jsPDF from 'jspdf'
 
 const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), { ssr: false, loading: () => <div className="h-24 bg-gray-50 rounded-lg animate-pulse" /> })
+const DossierEditor = dynamic(() => import('@/components/dossier/DossierEditor'), { ssr: false, loading: () => <div className="h-96 bg-gray-50 rounded-lg animate-pulse" /> })
 import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle, HeadingLevel, UnderlineType } from 'docx'
 import { saveAs } from 'file-saver'
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/ui/command'
@@ -49,6 +50,7 @@ const RESOURCE_TYPES = [
   { id: 'exam', label: 'Prüfung', icon: ClipboardList, description: 'Benotete Prüfung mit Punkteverteilung und Lösungsschlüssel', color: 'red' },
   { id: 'quiz', label: 'Quiz', icon: Lightbulb, description: 'Kurze Lernkontrollen mit sofortigem Feedback', color: 'green' },
   { id: 'vocabulary', label: 'Wortschatz', icon: Languages, description: 'Vokabellisten mit Übungen und Abfragen', color: 'purple' },
+  { id: 'dossier', label: 'Arbeitsdossier', icon: BookOpen, description: 'Komplettes Lerndossier mit 15-20 Seiten: Theorie, Aufgaben, Lernziele und Lösungen', color: 'indigo' },
 ]
 
 const SUBJECTS = [
@@ -263,6 +265,13 @@ const Home = () => {
   // Export history state
   const [exportHistory, setExportHistory] = useState([])
 
+  // Dossier state
+  const [dossiers, setDossiers] = useState([])
+  const [selectedDossier, setSelectedDossier] = useState(null)
+  const [dossierGenerating, setDossierGenerating] = useState(false)
+  const [dossierProgress, setDossierProgress] = useState([])
+  const [dossierSaving, setDossierSaving] = useState(false)
+
   // Chat assistant state
   const [chatOpen, setChatOpen] = useState(false)
   const [chatMessages, setChatMessages] = useState([])
@@ -444,6 +453,7 @@ const Home = () => {
         const userData = await response.json()
         setUser(userData)
         fetchWorksheets(authToken)
+        fetchDossiers(authToken)
         loadAssignments(authToken)
         loadTeacherClasses(authToken)
       } else {
@@ -601,6 +611,167 @@ const Home = () => {
     const duplicate = { ...worksheet, id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(), title: `${worksheet.title} (Kopie)`, created_at: new Date().toISOString() }
     setWorksheets(prev => [duplicate, ...prev])
     setSuccessMessage('Material wurde dupliziert.')
+  }
+
+  // ============================================================
+  // DOSSIERS
+  // ============================================================
+
+  const fetchDossiers = async (authToken) => {
+    try {
+      const response = await fetch('/api/dossiers', { headers: { 'Authorization': `Bearer ${authToken || token}` } })
+      if (response.ok) { setDossiers(await response.json()) }
+    } catch (error) {
+      console.error('Fehler beim Laden der Dossiers:', error)
+    }
+  }
+
+  const handleGenerateDossier = async (e) => {
+    e.preventDefault()
+    setError('')
+    setDossierGenerating(true)
+    setDossierProgress([])
+    setGenerationProgress([])
+    setStreamingQuestions([])
+    setShowGenerationTheater(true)
+
+    try {
+      const response = await fetch('/api/generate-dossier-stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          topic: form.topic,
+          grade: form.grade,
+          subject: form.subject,
+          difficulty: form.difficulty,
+          theme: form.theme,
+          competency_codes: form.competencyCode ? [form.competencyCode] : []
+        })
+      })
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}))
+        throw new Error(errData.error || 'Dossier-Generierung fehlgeschlagen')
+      }
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6))
+              if (data.type === 'section_start' || data.type === 'status') {
+                setDossierProgress(prev => [...prev, { step: prev.length + 1, message: data.message || `Sektion "${data.section}" wird erstellt...`, progress: data.progress || 0, type: 'status' }])
+                setGenerationProgress(prev => [...prev, { step: prev.length + 1, message: data.message || `Sektion "${data.section}" wird erstellt...`, progress: data.progress || 0, type: 'status' }])
+              } else if (data.type === 'section_complete') {
+                setDossierProgress(prev => [...prev, { step: prev.length + 1, message: `Sektion "${data.section}" fertig`, progress: data.progress || 0, type: 'question' }])
+                setGenerationProgress(prev => [...prev, { step: prev.length + 1, message: `✓ Sektion "${data.section}" fertig`, progress: data.progress || 0, type: 'question' }])
+              } else if (data.type === 'dossier_complete') {
+                setDossierProgress(prev => [...prev, { step: prev.length + 1, message: 'Arbeitsdossier erfolgreich erstellt!', progress: 100, type: 'complete' }])
+                setGenerationProgress(prev => [...prev, { step: prev.length + 1, message: 'Arbeitsdossier erfolgreich erstellt!', progress: 100, type: 'complete' }])
+                await new Promise(resolve => setTimeout(resolve, 1500))
+                setSelectedDossier(data.dossier)
+                setShowGenerationTheater(false)
+                setActiveView('dossier-editor')
+                fetchDossiers(token)
+                fetchCurrentUser(token)
+                setSuccessMessage('Ihr Arbeitsdossier wurde erfolgreich erstellt.')
+              } else if (data.type === 'error') {
+                throw new Error(data.message)
+              }
+            } catch (parseError) {
+              if (parseError.message !== 'Dossier-Generierung fehlgeschlagen') console.error('Parse-Fehler:', parseError)
+              else throw parseError
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Dossier-Streaming-Fehler:', error)
+      setError(error.message || 'Fehler bei der Dossier-Generierung. Bitte versuchen Sie es erneut.')
+      setShowGenerationTheater(false)
+    } finally {
+      setDossierGenerating(false)
+    }
+  }
+
+  const handleSaveDossier = async (updatedDossier) => {
+    setDossierSaving(true)
+    try {
+      const response = await fetch(`/api/dossiers/${updatedDossier.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          title: updatedDossier.title,
+          theme: updatedDossier.theme,
+          sections: updatedDossier.sections,
+          competency_codes: updatedDossier.competency_codes
+        })
+      })
+      if (response.ok) {
+        const saved = await response.json()
+        setSelectedDossier(saved)
+        fetchDossiers(token)
+        setSuccessMessage('Dossier gespeichert.')
+      } else {
+        throw new Error('Speichern fehlgeschlagen')
+      }
+    } catch (error) {
+      setError('Fehler beim Speichern des Dossiers.')
+    } finally {
+      setDossierSaving(false)
+    }
+  }
+
+  const handleExportDossierPDF = async (dossier, version = 'student') => {
+    try {
+      const response = await fetch('/api/export/dossier/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ dossier, version })
+      })
+      if (!response.ok) throw new Error('PDF-Export fehlgeschlagen')
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const versionLabel = version === 'teacher' ? 'Lehrerversion' : 'Schülerversion'
+      a.download = `${dossier.title || 'Dossier'}_${versionLabel}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+
+      const exportEntry = {
+        id: Date.now().toString(),
+        worksheetId: dossier.id,
+        worksheetTitle: dossier.title,
+        format: 'PDF',
+        version: versionLabel,
+        exportedAt: new Date().toISOString(),
+        filename: a.download
+      }
+      const newHistory = [exportEntry, ...exportHistory].slice(0, 50)
+      setExportHistory(newHistory)
+      localStorage.setItem('eduflow_export_history', JSON.stringify(newHistory))
+      setSuccessMessage(`Dossier ${versionLabel} als PDF exportiert.`)
+    } catch (error) {
+      setError('Fehler beim PDF-Export des Dossiers.')
+    }
+  }
+
+  const handleDeleteDossier = async (dossierId) => {
+    try {
+      await fetch(`/api/dossiers/${dossierId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } })
+      fetchDossiers(token)
+      if (selectedDossier?.id === dossierId) { setSelectedDossier(null) }
+      setSuccessMessage('Dossier wurde gelöscht.')
+    } catch (error) { setError('Fehler beim Löschen des Dossiers.') }
   }
 
   // ============================================================
@@ -4251,11 +4422,11 @@ const Home = () => {
                       <CardDescription className="text-base">Wählen Sie den Materialtyp und die Einstellungen. Die KI generiert passende Inhalte für Ihre Klasse.</CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <form onSubmit={handleGenerate} className="space-y-6">
+                      <form onSubmit={form.resourceType === 'dossier' ? handleGenerateDossier : handleGenerate} className="space-y-6">
                         {/* Resource Type */}
                         <div>
                           <Label className="text-sm font-medium mb-3 block">Materialtyp</Label>
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                             {RESOURCE_TYPES.map(rt => (
                               <button key={rt.id} type="button" onClick={() => setForm({ ...form, resourceType: rt.id })}
                                 className={`p-3 rounded-xl border-2 text-center transition-smooth hover:shadow-md ${form.resourceType === rt.id ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-gray-300'}`}>
@@ -4324,7 +4495,8 @@ const Home = () => {
                           </p>
                         </div>
 
-                        {/* Question Types */}
+                        {/* Question Types - hidden for dossier */}
+                        {form.resourceType !== 'dossier' && (
                         <div>
                           <Label className="text-sm font-medium mb-3 block">Fragetypen <span className="text-gray-400 font-normal">(optional – leer = gemischt)</span></Label>
                           <div className="flex flex-wrap gap-2">
@@ -4340,6 +4512,7 @@ const Home = () => {
                             <p className="text-xs text-blue-600 mt-2">{selectedQuestionTypes.length} Fragetyp{selectedQuestionTypes.length > 1 ? 'en' : ''} ausgewählt – KI erstellt passende Aufgaben</p>
                           )}
                         </div>
+                        )}
 
                         {/* Theme Selector */}
                         <div>
@@ -4373,12 +4546,27 @@ const Home = () => {
                           <p className="text-xs text-gray-500 mt-2">{getThemeById(form.theme).description} — druckfreundlich optimiert</p>
                         </div>
 
-                        {/* Question Count */}
+                        {/* Question Count - hidden for dossier */}
+                        {form.resourceType !== 'dossier' && (
                         <div>
                           <Label className="text-sm font-medium mb-3 block">Anzahl Fragen: <span className="text-blue-600 font-semibold">{form.questionCount}</span></Label>
                           <Slider value={[form.questionCount]} onValueChange={(value) => setForm({ ...form, questionCount: value[0] })} min={3} max={25} step={1} className="mt-2" />
                           <div className="flex justify-between text-xs text-gray-400 mt-1"><span>3</span><span>25</span></div>
                         </div>
+                        )}
+
+                        {/* Dossier info box */}
+                        {form.resourceType === 'dossier' && (
+                        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+                          <div className="flex items-start gap-3">
+                            <BookOpen className="h-5 w-5 text-indigo-600 mt-0.5 flex-shrink-0" />
+                            <div>
+                              <p className="text-sm font-medium text-indigo-900">Arbeitsdossier (15-20 Seiten)</p>
+                              <p className="text-xs text-indigo-700 mt-1">Die KI erstellt ein vollständiges Lerndossier mit Theorie, Übungen, Lernzielen (Lehrplan 21), Zusammenfassung und Lösungen. Die Generierung dauert ca. 30-60 Sekunden.</p>
+                            </div>
+                          </div>
+                        </div>
+                        )}
 
                         {error && (<motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}><Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert></motion.div>)}
 
@@ -4386,8 +4574,8 @@ const Home = () => {
                           <Alert><AlertDescription className="flex items-center justify-between"><span>Monatliches Limit (5 Materialien) erreicht.</span><Button variant="link" onClick={handleUpgrade} className="ml-2 text-blue-600">Jetzt upgraden</Button></AlertDescription></Alert>
                         )}
 
-                        <Button type="submit" className="w-full btn-premium text-lg py-6" disabled={generating || !form.topic.trim() || (user?.subscription_tier === 'free' && user?.worksheets_used_this_month >= 5)}>
-                          {generating ? (<><Zap className="h-5 w-5 mr-2 animate-pulse" /> Wird erstellt...</>) : (<><Sparkles className="h-5 w-5 mr-2" /> {RESOURCE_TYPES.find(r => r.id === form.resourceType)?.label || 'Material'} erstellen</>)}
+                        <Button type="submit" className="w-full btn-premium text-lg py-6" disabled={generating || dossierGenerating || !form.topic.trim() || (user?.subscription_tier === 'free' && user?.worksheets_used_this_month >= 5)}>
+                          {(generating || dossierGenerating) ? (<><Zap className="h-5 w-5 mr-2 animate-pulse" /> Wird erstellt...</>) : (<><Sparkles className="h-5 w-5 mr-2" /> {RESOURCE_TYPES.find(r => r.id === form.resourceType)?.label || 'Material'} erstellen</>)}
                         </Button>
                       </form>
                     </CardContent>
@@ -4419,7 +4607,7 @@ const Home = () => {
             <motion.div key="library" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-7xl mx-auto">
               <div className="mb-8">
                 <h2 className="text-3xl font-bold text-gradient mb-2">Meine Materialien</h2>
-                <p className="text-gray-600">Alle erstellten Arbeitsblätter, Prüfungen, Quizze und Vokabellisten.</p>
+                <p className="text-gray-600">Alle erstellten Arbeitsblätter, Prüfungen, Quizze, Vokabellisten und Arbeitsdossiers.</p>
               </div>
               <div className="glass-card rounded-xl p-4 mb-6">
                 <div className="flex flex-col sm:flex-row gap-3">
@@ -4478,6 +4666,50 @@ const Home = () => {
                   ))
                 )}
               </div>
+
+              {/* Dossier cards */}
+              {dossiers.length > 0 && (
+                <>
+                  <h3 className="text-lg font-semibold text-gray-800 mt-8 mb-4 flex items-center gap-2"><BookOpen className="h-5 w-5 text-indigo-500" /> Arbeitsdossiers</h3>
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {dossiers.filter(d => {
+                      const matchesSearch = librarySearch === '' || d.title?.toLowerCase().includes(librarySearch.toLowerCase()) || d.topic?.toLowerCase().includes(librarySearch.toLowerCase())
+                      const matchesSubject = libraryFilterSubject === 'all' || d.subject === libraryFilterSubject
+                      const matchesGrade = libraryFilterGrade === 'all' || d.grade === libraryFilterGrade
+                      return matchesSearch && matchesSubject && matchesGrade
+                    }).map((dossier, index) => (
+                      <motion.div key={dossier.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.04 }}>
+                        <Card className="glass-card border-0 hover-lift cursor-pointer h-full flex flex-col border-l-4 border-l-indigo-400" onClick={() => { setSelectedDossier(dossier); setActiveView('dossier-editor') }}>
+                          <CardHeader className="pb-3">
+                            <div className="flex items-start justify-between">
+                              <CardTitle className="text-base leading-tight line-clamp-2 min-h-[2.5rem] flex-1">{dossier.title}</CardTitle>
+                              <Badge className="bg-indigo-100 text-indigo-700 border border-indigo-300 text-[10px] flex-shrink-0 ml-2">Dossier</Badge>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                              <Badge variant="outline" className="text-xs">{dossier.grade}. Klasse</Badge>
+                              <Badge variant="outline" className="text-xs">{dossier.subject}</Badge>
+                              <Badge variant="outline" className="text-xs">{DIFFICULTY_LABELS[dossier.difficulty] || dossier.difficulty}</Badge>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="flex-1">
+                            <div className="flex items-center gap-3 text-xs text-gray-500">
+                              <span className="flex items-center gap-1"><Layers className="h-3 w-3" /> {dossier.sections?.length || 0} Sektionen</span>
+                              <span className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {new Date(dossier.created_at).toLocaleDateString('de-CH')}</span>
+                            </div>
+                          </CardContent>
+                          <CardFooter className="pt-0">
+                            <div className="flex gap-2 w-full">
+                              <Button size="sm" onClick={(e) => { e.stopPropagation(); setSelectedDossier(dossier); setActiveView('dossier-editor') }} className="flex-1 text-xs"><Eye className="h-3.5 w-3.5 mr-1" /> Bearbeiten</Button>
+                              <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); handleExportDossierPDF(dossier, 'student') }} title="PDF Schülerversion"><Download className="h-3.5 w-3.5" /></Button>
+                              <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); handleDeleteDossier(dossier.id) }} className="text-red-500 hover:text-red-600" title="Löschen"><Trash2 className="h-3.5 w-3.5" /></Button>
+                            </div>
+                          </CardFooter>
+                        </Card>
+                      </motion.div>
+                    ))}
+                  </div>
+                </>
+              )}
             </motion.div>
           )}
 
@@ -6177,6 +6409,20 @@ const Home = () => {
                   )}
                 </div>
               </div>
+            </motion.div>
+          )}
+
+          {/* ============ DOSSIER EDITOR VIEW ============ */}
+          {activeView === 'dossier-editor' && selectedDossier && (
+            <motion.div key="dossier-editor" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-7xl mx-auto">
+              <DossierEditor
+                dossier={selectedDossier}
+                onSave={handleSaveDossier}
+                onBack={() => { setSelectedDossier(null); setActiveView('library') }}
+                onExportPDF={handleExportDossierPDF}
+                saving={dossierSaving}
+                apiBase=""
+              />
             </motion.div>
           )}
 
