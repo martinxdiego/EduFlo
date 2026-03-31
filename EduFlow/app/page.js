@@ -28,7 +28,8 @@ import {
   ArrowLeftRight, Type, ListOrdered, GitBranch,
   ChevronUp, Wand2, Save, GripVertical, ArrowUp, ArrowDown,
   RotateCcw, Shuffle, Bot, CircleDot, Palette,
-  AlignLeft, Pen, SquarePen, Users, UserMinus, LayoutDashboard, Brain, TrendingDown, Rocket
+  AlignLeft, Pen, SquarePen, Users, UserMinus, LayoutDashboard, Brain, TrendingDown, Rocket,
+  Table2
 } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import jsPDF from 'jspdf'
@@ -53,12 +54,29 @@ const RESOURCE_TYPES = [
   { id: 'dossier', label: 'Arbeitsdossier', icon: BookOpen, description: 'Komplettes Lerndossier mit 15-20 Seiten: Theorie, Aufgaben, Lernziele und Lösungen', color: 'indigo' },
 ]
 
-const SUBJECTS = [
+const SUBJECTS_PRIMAR = [
   'Deutsch', 'Mathematik', 'NMG', 'Englisch', 'Französisch',
   'Bildnerisches Gestalten', 'Musik', 'Bewegung und Sport'
 ]
 
+const SUBJECTS_SEK = [
+  'Deutsch', 'Mathematik', 'Französisch', 'Englisch',
+  'RZG', 'Natur und Technik', 'Bildnerisches Gestalten',
+  'Musik', 'TTG', 'Bewegung und Sport', 'Medien und Informatik',
+  'Berufliche Orientierung', 'Projektunterricht'
+]
+
+// Legacy reference – used where no grade context is available
+const SUBJECTS = [...new Set([...SUBJECTS_PRIMAR, ...SUBJECTS_SEK])]
+
 const GRADES = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+// Helper: subjects for a given grade
+const getSubjectsForGrade = (grade) => {
+  const g = parseInt(grade, 10)
+  if (g >= 7) return SUBJECTS_SEK
+  return SUBJECTS_PRIMAR
+}
 
 const DIFFICULTY_LABELS = {
   easy: 'Einfach',
@@ -76,6 +94,7 @@ const QUESTION_TYPES = [
   { id: 'fill_blank', label: 'Lückentext', icon: Type, description: 'Fehlende Wörter im Text ergänzen', color: 'yellow' },
   { id: 'ordering', label: 'Reihenfolge', icon: ListOrdered, description: 'Elemente in die richtige Reihenfolge bringen', color: 'indigo' },
   { id: 'either_or', label: 'Entweder-Oder', icon: GitBranch, description: 'Zwischen zwei Optionen entscheiden', color: 'red' },
+  { id: 'table', label: 'Tabelle', icon: Table2, description: 'Vergleichstabelle, Zuordnung oder Ausfülltabelle', color: 'slate' },
 ]
 
 const KI_ACTIONS = [
@@ -106,108 +125,108 @@ const TEMPLATE_CATEGORIES = [
 const STARTER_TEMPLATES = [
   // ============ ARBEITSBLÄTTER ============
   // Deutsch
-  { id: 't1', name: 'Leseverständnis Kurztext', subject: 'Deutsch', grade: '3', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 6, description: 'Kurztext mit Verständnisfragen und Wortschatzübung', tags: ['Lesen', 'Wortschatz'] },
-  { id: 't2', name: 'Leseverständnis Sachtext', subject: 'Deutsch', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Sachtext lesen, Informationen entnehmen und Fragen beantworten', tags: ['Lesen', 'Textarbeit'] },
-  { id: 't3', name: 'Diktat-Vorlage', subject: 'Deutsch', grade: '4', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 10, description: 'Standardvorlage für wöchentliche Diktate', tags: ['Schreiben', 'Rechtschreibung'] },
-  { id: 't4', name: 'Wochenplan-Aufgaben', subject: 'Deutsch', grade: '4', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 12, description: 'Gemischte Aufgaben für die Wochenplanarbeit', tags: ['Wochenplan', 'Gemischt'] },
-  { id: 't5', name: 'Textanalyse Erzählung', subject: 'Deutsch', grade: '7', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Erzähltext analysieren: Aufbau, Figuren, Spannungskurve', tags: ['Textanalyse', 'Literatur'] },
-  { id: 't6', name: 'Argumentieren & Diskutieren', subject: 'Deutsch', grade: '8', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'hard', questionCount: 6, description: 'Argumente formulieren, Pro/Contra abwägen, Stellungnahme schreiben', tags: ['Argumentieren', 'Schreiben'] },
-  { id: 't7', name: 'Satzglieder bestimmen', subject: 'Deutsch', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Subjekt, Prädikat, Objekte, Adverbiale erkennen und bestimmen', tags: ['Grammatik', 'Satzglieder'] },
-  { id: 't8', name: 'Bericht schreiben', subject: 'Deutsch', grade: '6', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 5, description: 'Aufbau und Merkmale eines Berichts üben (W-Fragen, sachlicher Stil)', tags: ['Schreiben', 'Bericht'] },
-  { id: 't9', name: 'Buchstaben & Laute', subject: 'Deutsch', grade: '1', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 8, description: 'Buchstaben erkennen, Anlaute zuordnen, erste Wörter lesen', tags: ['Erstlesen', 'Zyklus 1'] },
-  { id: 't10', name: 'Gedichte verstehen', subject: 'Deutsch', grade: '6', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 6, description: 'Gedichte lesen, Reimschema erkennen, Stilmittel benennen', tags: ['Lyrik', 'Literatur'] },
+  { id: 't1', name: 'Leseverständnis Kurztext', topic: 'Leseverständnis: Kurztext lesen und Fragen beantworten', subject: 'Deutsch', grade: '3', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 6, description: 'Kurztext mit Verständnisfragen und Wortschatzübung', tags: ['Lesen', 'Wortschatz'] },
+  { id: 't2', name: 'Leseverständnis Sachtext', topic: 'Sachtext lesen, Informationen entnehmen und Fragen beantworten', subject: 'Deutsch', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Sachtext lesen, Informationen entnehmen und Fragen beantworten', tags: ['Lesen', 'Textarbeit'] },
+  { id: 't3', name: 'Diktat-Vorlage', topic: 'Diktat: Rechtschreibtraining mit schwierigen Wörtern', subject: 'Deutsch', grade: '4', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 10, description: 'Standardvorlage für wöchentliche Diktate', tags: ['Schreiben', 'Rechtschreibung'] },
+  { id: 't4', name: 'Wochenplan-Aufgaben', topic: 'Wochenplan Deutsch: Gemischte Übungen zu Grammatik, Lesen, Schreiben', subject: 'Deutsch', grade: '4', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 12, description: 'Gemischte Aufgaben für die Wochenplanarbeit', tags: ['Wochenplan', 'Gemischt'] },
+  { id: 't5', name: 'Textanalyse Erzählung', topic: 'Erzähltext analysieren: Aufbau, Figuren, Spannungskurve', subject: 'Deutsch', grade: '7', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Erzähltext analysieren: Aufbau, Figuren, Spannungskurve', tags: ['Textanalyse', 'Literatur'] },
+  { id: 't6', name: 'Argumentieren & Diskutieren', topic: 'Argumentieren lernen: Pro/Contra abwägen und Stellungnahme schreiben', subject: 'Deutsch', grade: '8', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'hard', questionCount: 6, description: 'Argumente formulieren, Pro/Contra abwägen, Stellungnahme schreiben', tags: ['Argumentieren', 'Schreiben'] },
+  { id: 't7', name: 'Satzglieder bestimmen', topic: 'Satzglieder bestimmen: Subjekt, Prädikat, Objekte, Adverbiale', subject: 'Deutsch', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Subjekt, Prädikat, Objekte, Adverbiale erkennen und bestimmen', tags: ['Grammatik', 'Satzglieder'] },
+  { id: 't8', name: 'Bericht schreiben', topic: 'Einen Bericht schreiben: W-Fragen, sachlicher Stil, Aufbau', subject: 'Deutsch', grade: '6', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 5, description: 'Aufbau und Merkmale eines Berichts üben (W-Fragen, sachlicher Stil)', tags: ['Schreiben', 'Bericht'] },
+  { id: 't9', name: 'Buchstaben & Laute', topic: 'Buchstaben erkennen, Anlaute zuordnen und erste Wörter lesen', subject: 'Deutsch', grade: '1', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 8, description: 'Buchstaben erkennen, Anlaute zuordnen, erste Wörter lesen', tags: ['Erstlesen', 'Zyklus 1'] },
+  { id: 't10', name: 'Gedichte verstehen', topic: 'Gedichte lesen und verstehen: Reimschema, Stilmittel, Interpretation', subject: 'Deutsch', grade: '6', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 6, description: 'Gedichte lesen, Reimschema erkennen, Stilmittel benennen', tags: ['Lyrik', 'Literatur'] },
   // Mathematik
-  { id: 't11', name: 'Multiplikations-Drill', subject: 'Mathematik', grade: '3', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 15, description: 'Einmaleins-Training mit aufsteigender Schwierigkeit', tags: ['Rechnen', 'Grundlagen'] },
-  { id: 't12', name: 'Sachaufgaben Alltag', subject: 'Mathematik', grade: '4', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Textaufgaben aus dem Alltag der Schüler', tags: ['Rechnen', 'Textaufgaben'] },
-  { id: 't13', name: 'Geometrie Formen', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Formen erkennen, benennen, Eigenschaften beschreiben', tags: ['Geometrie', 'Formen'] },
-  { id: 't14', name: 'Hausaufgabenblatt', subject: 'Mathematik', grade: '3', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 8, description: 'Kurze Hausaufgaben zur Festigung des Stoffes', tags: ['Hausaufgaben', 'Festigung'] },
-  { id: 't15', name: 'Bruchrechnen Grundlagen', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 12, description: 'Brüche kürzen, erweitern, addieren und subtrahieren', tags: ['Brüche', 'Grundlagen'] },
-  { id: 't16', name: 'Dezimalzahlen & Prozent', subject: 'Mathematik', grade: '6', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Umwandlung Bruch–Dezimalzahl–Prozent, Grundaufgaben', tags: ['Dezimalzahlen', 'Prozent'] },
-  { id: 't17', name: 'Gleichungen lösen', subject: 'Mathematik', grade: '7', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Lineare Gleichungen schrittweise lösen', tags: ['Algebra', 'Gleichungen'] },
-  { id: 't18', name: 'Fläche & Umfang', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Fläche und Umfang von Rechteck, Quadrat, Dreieck berechnen', tags: ['Geometrie', 'Berechnung'] },
-  { id: 't19', name: 'Zahlenraum bis 100', subject: 'Mathematik', grade: '2', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 12, description: 'Addition und Subtraktion im Zahlenraum bis 100', tags: ['Rechnen', 'Zyklus 1'] },
-  { id: 't20', name: 'Proportionalität & Dreisatz', subject: 'Mathematik', grade: '8', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'hard', questionCount: 8, description: 'Direkte und indirekte Proportionalität, Dreisatz anwenden', tags: ['Proportionalität', 'Dreisatz'] },
+  { id: 't11', name: 'Multiplikations-Drill', topic: 'Einmaleins-Training: Alle Reihen üben mit aufsteigender Schwierigkeit', subject: 'Mathematik', grade: '3', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 15, description: 'Einmaleins-Training mit aufsteigender Schwierigkeit', tags: ['Rechnen', 'Grundlagen'] },
+  { id: 't12', name: 'Sachaufgaben Alltag', topic: 'Sachaufgaben: Mathematik im Alltag (Einkaufen, Messen, Vergleichen)', subject: 'Mathematik', grade: '4', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Textaufgaben aus dem Alltag der Schüler', tags: ['Rechnen', 'Textaufgaben'] },
+  { id: 't13', name: 'Geometrie Formen', topic: 'Geometrische Formen: Erkennen, benennen und Eigenschaften beschreiben', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Formen erkennen, benennen, Eigenschaften beschreiben', tags: ['Geometrie', 'Formen'] },
+  { id: 't14', name: 'Hausaufgabenblatt', topic: 'Mathematik-Hausaufgaben: Grundoperationen festigen', subject: 'Mathematik', grade: '3', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 8, description: 'Kurze Hausaufgaben zur Festigung des Stoffes', tags: ['Hausaufgaben', 'Festigung'] },
+  { id: 't15', name: 'Bruchrechnen Grundlagen', topic: 'Bruchrechnen: Kürzen, erweitern, addieren und subtrahieren', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 12, description: 'Brüche kürzen, erweitern, addieren und subtrahieren', tags: ['Brüche', 'Grundlagen'] },
+  { id: 't16', name: 'Dezimalzahlen & Prozent', topic: 'Dezimalzahlen und Prozent: Umwandlung Bruch–Dezimal–Prozent', subject: 'Mathematik', grade: '6', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Umwandlung Bruch–Dezimalzahl–Prozent, Grundaufgaben', tags: ['Dezimalzahlen', 'Prozent'] },
+  { id: 't17', name: 'Gleichungen lösen', topic: 'Lineare Gleichungen schrittweise lösen (mit Äquivalenzumformungen)', subject: 'Mathematik', grade: '7', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Lineare Gleichungen schrittweise lösen', tags: ['Algebra', 'Gleichungen'] },
+  { id: 't18', name: 'Fläche & Umfang', topic: 'Fläche und Umfang berechnen: Rechteck, Quadrat, Dreieck', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Fläche und Umfang von Rechteck, Quadrat, Dreieck berechnen', tags: ['Geometrie', 'Berechnung'] },
+  { id: 't19', name: 'Zahlenraum bis 100', topic: 'Addition und Subtraktion im Zahlenraum bis 100', subject: 'Mathematik', grade: '2', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 12, description: 'Addition und Subtraktion im Zahlenraum bis 100', tags: ['Rechnen', 'Zyklus 1'] },
+  { id: 't20', name: 'Proportionalität & Dreisatz', topic: 'Direkte und indirekte Proportionalität, Dreisatz anwenden', subject: 'Mathematik', grade: '8', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'hard', questionCount: 8, description: 'Direkte und indirekte Proportionalität, Dreisatz anwenden', tags: ['Proportionalität', 'Dreisatz'] },
   // NMG
-  { id: 't21', name: 'Unser Körper', subject: 'NMG', grade: '3', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 8, description: 'Körperteile, Organe und ihre Funktionen kennenlernen', tags: ['Körper', 'Gesundheit'] },
-  { id: 't22', name: 'Tiere im Wald', subject: 'NMG', grade: '4', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Waldtiere, Nahrungsketten, Lebensräume', tags: ['Tiere', 'Lebensraum'] },
-  { id: 't23', name: 'Wetter & Klima', subject: 'NMG', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Wetterphänomene, Wasserkreislauf, Klimazonen der Schweiz', tags: ['Wetter', 'Klima'] },
-  { id: 't24', name: 'Die Schweiz entdecken', subject: 'NMG', grade: '4', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Kantone, Geographie, Sprachen und Kultur der Schweiz', tags: ['Schweiz', 'Geographie'] },
-  { id: 't25', name: 'Strom & Energie', subject: 'NMG', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Stromkreis, erneuerbare Energien, Energiesparen im Alltag', tags: ['Energie', 'Technik'] },
+  { id: 't21', name: 'Unser Körper', topic: 'Mein Körper: Körperteile, Organe und ihre Funktionen', subject: 'NMG', grade: '3', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 8, description: 'Körperteile, Organe und ihre Funktionen kennenlernen', tags: ['Körper', 'Gesundheit'] },
+  { id: 't22', name: 'Tiere im Wald', topic: 'Tiere im Schweizer Wald: Nahrungsketten und Lebensräume', subject: 'NMG', grade: '4', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Waldtiere, Nahrungsketten, Lebensräume', tags: ['Tiere', 'Lebensraum'] },
+  { id: 't23', name: 'Wetter & Klima', topic: 'Wetter und Klima: Wasserkreislauf, Wetterphänomene, Klimazonen der Schweiz', subject: 'NMG', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Wetterphänomene, Wasserkreislauf, Klimazonen der Schweiz', tags: ['Wetter', 'Klima'] },
+  { id: 't24', name: 'Die Schweiz entdecken', topic: 'Die Schweiz: Kantone, Geographie, Sprachen und Kultur', subject: 'NMG', grade: '4', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Kantone, Geographie, Sprachen und Kultur der Schweiz', tags: ['Schweiz', 'Geographie'] },
+  { id: 't25', name: 'Strom & Energie', topic: 'Strom und Energie: Stromkreis, erneuerbare Energien, Energiesparen', subject: 'NMG', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Stromkreis, erneuerbare Energien, Energiesparen im Alltag', tags: ['Energie', 'Technik'] },
   // Englisch
-  { id: 't26', name: 'My Daily Routine', subject: 'Englisch', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 8, description: 'Tagesablauf beschreiben, Present Simple üben', tags: ['Speaking', 'Writing'] },
-  { id: 't27', name: 'Reading Comprehension', subject: 'Englisch', grade: '6', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Englischen Text lesen und Verständnisfragen beantworten', tags: ['Reading', 'Comprehension'] },
-  { id: 't28', name: 'Past Simple Stories', subject: 'Englisch', grade: '7', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Vergangenheitsform: regelmässige und unregelmässige Verben', tags: ['Grammar', 'Past Simple'] },
+  { id: 't26', name: 'My Daily Routine', topic: 'My Daily Routine: Tagesablauf auf Englisch beschreiben (Present Simple)', subject: 'Englisch', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 8, description: 'Tagesablauf beschreiben, Present Simple üben', tags: ['Speaking', 'Writing'] },
+  { id: 't27', name: 'Reading Comprehension', topic: 'Reading Comprehension: Englischen Text lesen und verstehen', subject: 'Englisch', grade: '6', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Englischen Text lesen und Verständnisfragen beantworten', tags: ['Reading', 'Comprehension'] },
+  { id: 't28', name: 'Past Simple Stories', topic: 'Past Simple: Regelmässige und unregelmässige Verben in Geschichten', subject: 'Englisch', grade: '7', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Vergangenheitsform: regelmässige und unregelmässige Verben', tags: ['Grammar', 'Past Simple'] },
   // Französisch
-  { id: 't29', name: 'Se présenter', subject: 'Französisch', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 8, description: 'Sich vorstellen, Name, Alter, Hobbys auf Französisch', tags: ['Sprechen', 'Grundlagen'] },
-  { id: 't30', name: 'Les verbes au présent', subject: 'Französisch', grade: '6', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 12, description: 'Verben konjugieren: être, avoir, -er Verben', tags: ['Grammatik', 'Verben'] },
+  { id: 't29', name: 'Se présenter', topic: 'Se présenter: Sich auf Französisch vorstellen (Name, Alter, Hobbys)', subject: 'Französisch', grade: '5', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'easy', questionCount: 8, description: 'Sich vorstellen, Name, Alter, Hobbys auf Französisch', tags: ['Sprechen', 'Grundlagen'] },
+  { id: 't30', name: 'Les verbes au présent', topic: 'Französisch Verben konjugieren: être, avoir und -er Verben im Präsens', subject: 'Französisch', grade: '6', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 12, description: 'Verben konjugieren: être, avoir, -er Verben', tags: ['Grammatik', 'Verben'] },
   // Natur & Technik (Zyklus 3)
-  { id: 't31', name: 'Zellen & Mikroskopieren', subject: 'Natur und Technik', grade: '7', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Pflanzliche und tierische Zellen, Mikroskop-Aufbau', tags: ['Biologie', 'Zellen'] },
-  { id: 't32', name: 'Periodensystem Grundlagen', subject: 'Natur und Technik', grade: '8', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'hard', questionCount: 10, description: 'Elemente, Ordnungszahl, Gruppen und Perioden', tags: ['Chemie', 'PSE'] },
-  { id: 't33', name: 'Kräfte & Bewegung', subject: 'Natur und Technik', grade: '8', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Schwerkraft, Reibung, Geschwindigkeit, Newtonsche Gesetze', tags: ['Physik', 'Mechanik'] },
+  { id: 't31', name: 'Zellen & Mikroskopieren', topic: 'Pflanzliche und tierische Zellen: Aufbau, Unterschiede, Mikroskopieren', subject: 'Natur und Technik', grade: '7', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Pflanzliche und tierische Zellen, Mikroskop-Aufbau', tags: ['Biologie', 'Zellen'] },
+  { id: 't32', name: 'Periodensystem Grundlagen', topic: 'Periodensystem der Elemente: Ordnungszahl, Gruppen und Perioden', subject: 'Natur und Technik', grade: '8', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'hard', questionCount: 10, description: 'Elemente, Ordnungszahl, Gruppen und Perioden', tags: ['Chemie', 'PSE'] },
+  { id: 't33', name: 'Kräfte & Bewegung', topic: 'Kräfte und Bewegung: Schwerkraft, Reibung, Newtonsche Gesetze', subject: 'Natur und Technik', grade: '8', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Schwerkraft, Reibung, Geschwindigkeit, Newtonsche Gesetze', tags: ['Physik', 'Mechanik'] },
   // RZG (Zyklus 3)
-  { id: 't34', name: 'Mittelalter in der Schweiz', subject: 'RZG', grade: '7', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Burgen, Ritter, Stadtgründungen, Eidgenossenschaft', tags: ['Geschichte', 'Mittelalter'] },
-  { id: 't35', name: 'Demokratie & Staatskunde', subject: 'RZG', grade: '8', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Gewaltenteilung, Bundesrat, Volksinitiative, Referendum', tags: ['Staatskunde', 'Politik'] },
+  { id: 't34', name: 'Mittelalter in der Schweiz', topic: 'Mittelalter in der Schweiz: Burgen, Ritter, Eidgenossenschaft', subject: 'RZG', grade: '7', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 8, description: 'Burgen, Ritter, Stadtgründungen, Eidgenossenschaft', tags: ['Geschichte', 'Mittelalter'] },
+  { id: 't35', name: 'Demokratie & Staatskunde', topic: 'Schweizer Demokratie: Gewaltenteilung, Bundesrat, Volksinitiative, Referendum', subject: 'RZG', grade: '8', type: 'worksheet', category: 'arbeitsblatt', difficulty: 'medium', questionCount: 10, description: 'Gewaltenteilung, Bundesrat, Volksinitiative, Referendum', tags: ['Staatskunde', 'Politik'] },
 
   // ============ PRÜFUNGEN ============
-  { id: 't36', name: 'Bruchrechnen Prüfung', subject: 'Mathematik', grade: '6', type: 'exam', category: 'pruefung', difficulty: 'hard', questionCount: 12, description: 'Formale Prüfung zu Brüchen mit Notenskala', tags: ['Prüfung', 'Brüche'] },
-  { id: 't37', name: 'Deutsch Grammatik-Test', subject: 'Deutsch', grade: '5', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 15, description: 'Grammatikprüfung: Zeiten, Fälle, Satzglieder', tags: ['Prüfung', 'Grammatik'] },
-  { id: 't38', name: 'NMG Lernzielkontrolle', subject: 'NMG', grade: '4', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 10, description: 'Themenabschluss-Prüfung für NMG', tags: ['Prüfung', 'Sachunterricht'] },
-  { id: 't39', name: 'Repetitionstest Mathe', subject: 'Mathematik', grade: '5', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 15, description: 'Wiederholungsprüfung über mehrere Themen', tags: ['Repetition', 'Gemischt'] },
-  { id: 't40', name: 'Schnelltest 10 Min', subject: 'Deutsch', grade: '3', type: 'exam', category: 'pruefung', difficulty: 'easy', questionCount: 5, description: 'Kurzer Schnelltest für den Stundenbeginn', tags: ['Schnelltest', 'Kurz'] },
-  { id: 't41', name: 'Englisch Halbjahrsprüfung', subject: 'Englisch', grade: '6', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 20, description: 'Vocabulary, Grammar, Reading Comprehension', tags: ['Prüfung', 'Halbjahr'] },
-  { id: 't42', name: 'Französisch Unité-Test', subject: 'Französisch', grade: '6', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 15, description: 'Abschlusstest einer Unité: Vokabeln, Grammatik, Leseverständnis', tags: ['Prüfung', 'Unité'] },
-  { id: 't43', name: 'Algebra Lernkontrolle', subject: 'Mathematik', grade: '8', type: 'exam', category: 'pruefung', difficulty: 'hard', questionCount: 10, description: 'Gleichungen, Ungleichungen, Terme vereinfachen', tags: ['Prüfung', 'Algebra'] },
-  { id: 't44', name: 'Aufsatz-Prüfung', subject: 'Deutsch', grade: '7', type: 'exam', category: 'pruefung', difficulty: 'hard', questionCount: 3, description: 'Erörterung oder Erzählung schreiben mit Bewertungskriterien', tags: ['Prüfung', 'Schreiben'] },
-  { id: 't45', name: 'NT Lernkontrolle Biologie', subject: 'Natur und Technik', grade: '7', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 12, description: 'Zellen, Organe, Ökosysteme – Grundlagen der Biologie', tags: ['Prüfung', 'Biologie'] },
+  { id: 't36', name: 'Bruchrechnen Prüfung', topic: 'Prüfung Bruchrechnen: Kürzen, erweitern, Grundoperationen mit Brüchen', subject: 'Mathematik', grade: '6', type: 'exam', category: 'pruefung', difficulty: 'hard', questionCount: 12, description: 'Formale Prüfung zu Brüchen mit Notenskala', tags: ['Prüfung', 'Brüche'] },
+  { id: 't37', name: 'Deutsch Grammatik-Test', topic: 'Grammatikprüfung: Zeiten, Fälle, Satzglieder bestimmen', subject: 'Deutsch', grade: '5', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 15, description: 'Grammatikprüfung: Zeiten, Fälle, Satzglieder', tags: ['Prüfung', 'Grammatik'] },
+  { id: 't38', name: 'NMG Lernzielkontrolle', topic: 'NMG Lernzielkontrolle: Themenabschluss-Prüfung', subject: 'NMG', grade: '4', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 10, description: 'Themenabschluss-Prüfung für NMG', tags: ['Prüfung', 'Sachunterricht'] },
+  { id: 't39', name: 'Repetitionstest Mathe', topic: 'Mathematik Repetitionstest: Gemischte Themen wiederholen', subject: 'Mathematik', grade: '5', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 15, description: 'Wiederholungsprüfung über mehrere Themen', tags: ['Repetition', 'Gemischt'] },
+  { id: 't40', name: 'Schnelltest 10 Min', topic: 'Deutsch Schnelltest: Kurzüberprüfung in 10 Minuten', subject: 'Deutsch', grade: '3', type: 'exam', category: 'pruefung', difficulty: 'easy', questionCount: 5, description: 'Kurzer Schnelltest für den Stundenbeginn', tags: ['Schnelltest', 'Kurz'] },
+  { id: 't41', name: 'Englisch Halbjahrsprüfung', topic: 'Englisch Halbjahrsprüfung: Vocabulary, Grammar, Reading Comprehension', subject: 'Englisch', grade: '6', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 20, description: 'Vocabulary, Grammar, Reading Comprehension', tags: ['Prüfung', 'Halbjahr'] },
+  { id: 't42', name: 'Französisch Unité-Test', topic: 'Französisch Unité-Abschlusstest: Vokabeln, Grammatik, Leseverständnis', subject: 'Französisch', grade: '6', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 15, description: 'Abschlusstest einer Unité: Vokabeln, Grammatik, Leseverständnis', tags: ['Prüfung', 'Unité'] },
+  { id: 't43', name: 'Algebra Lernkontrolle', topic: 'Algebra Lernkontrolle: Gleichungen, Ungleichungen, Terme vereinfachen', subject: 'Mathematik', grade: '8', type: 'exam', category: 'pruefung', difficulty: 'hard', questionCount: 10, description: 'Gleichungen, Ungleichungen, Terme vereinfachen', tags: ['Prüfung', 'Algebra'] },
+  { id: 't44', name: 'Aufsatz-Prüfung', topic: 'Aufsatz schreiben: Erörterung oder Erzählung mit Bewertungskriterien', subject: 'Deutsch', grade: '7', type: 'exam', category: 'pruefung', difficulty: 'hard', questionCount: 3, description: 'Erörterung oder Erzählung schreiben mit Bewertungskriterien', tags: ['Prüfung', 'Schreiben'] },
+  { id: 't45', name: 'NT Lernkontrolle Biologie', topic: 'Biologie Lernkontrolle: Zellen, Organe, Ökosysteme', subject: 'Natur und Technik', grade: '7', type: 'exam', category: 'pruefung', difficulty: 'medium', questionCount: 12, description: 'Zellen, Organe, Ökosysteme – Grundlagen der Biologie', tags: ['Prüfung', 'Biologie'] },
 
   // ============ QUIZZE ============
-  { id: 't46', name: 'NMG Lernkontrolle', subject: 'NMG', grade: '4', type: 'quiz', category: 'quiz', difficulty: 'medium', questionCount: 10, description: 'Kurze Lernkontrolle zu NMG-Themen', tags: ['Quiz', 'Sachunterricht'] },
-  { id: 't47', name: 'Wahr oder Falsch', subject: 'NMG', grade: '5', type: 'quiz', category: 'quiz', difficulty: 'easy', questionCount: 10, description: 'Aussagen bewerten – stimmt das wirklich?', tags: ['Quiz', 'Wahr/Falsch'] },
-  { id: 't48', name: 'Kopfrechnen-Quiz', subject: 'Mathematik', grade: '4', type: 'quiz', category: 'quiz', difficulty: 'medium', questionCount: 15, description: 'Schnelles Kopfrechnen mit aufsteigendem Schwierigkeitsgrad', tags: ['Quiz', 'Kopfrechnen'] },
-  { id: 't49', name: 'Kantone-Quiz', subject: 'NMG', grade: '5', type: 'quiz', category: 'quiz', difficulty: 'medium', questionCount: 12, description: 'Schweizer Kantone, Hauptorte und Wappen erkennen', tags: ['Quiz', 'Schweiz'] },
-  { id: 't50', name: 'Englisch Irregular Verbs', subject: 'Englisch', grade: '6', type: 'quiz', category: 'quiz', difficulty: 'medium', questionCount: 20, description: 'Unregelmässige Verben: Infinitive, Past Simple, Past Participle', tags: ['Quiz', 'Verben'] },
-  { id: 't51', name: 'Wortarten-Quiz', subject: 'Deutsch', grade: '4', type: 'quiz', category: 'quiz', difficulty: 'medium', questionCount: 12, description: 'Nomen, Verben, Adjektive – Wörter richtig zuordnen', tags: ['Quiz', 'Grammatik'] },
-  { id: 't52', name: 'Einmaleins-Blitz', subject: 'Mathematik', grade: '3', type: 'quiz', category: 'quiz', difficulty: 'easy', questionCount: 20, description: 'Schnelles Einmaleins-Training mit allen Reihen', tags: ['Quiz', 'Einmaleins'] },
-  { id: 't53', name: 'Tier-Quiz Schweiz', subject: 'NMG', grade: '3', type: 'quiz', category: 'quiz', difficulty: 'easy', questionCount: 10, description: 'Heimische Tiere erkennen und Fakten wissen', tags: ['Quiz', 'Tiere'] },
+  { id: 't46', name: 'NMG Lernkontrolle', topic: 'NMG Quiz: Kurze Lernkontrolle zu Sachunterrichts-Themen', subject: 'NMG', grade: '4', type: 'quiz', category: 'quiz', difficulty: 'medium', questionCount: 10, description: 'Kurze Lernkontrolle zu NMG-Themen', tags: ['Quiz', 'Sachunterricht'] },
+  { id: 't47', name: 'Wahr oder Falsch', topic: 'Wahr oder Falsch Quiz: Stimmt diese Behauptung?', subject: 'NMG', grade: '5', type: 'quiz', category: 'quiz', difficulty: 'easy', questionCount: 10, description: 'Aussagen bewerten – stimmt das wirklich?', tags: ['Quiz', 'Wahr/Falsch'] },
+  { id: 't48', name: 'Kopfrechnen-Quiz', topic: 'Kopfrechnen-Quiz: Schnelles Rechnen mit aufsteigendem Schwierigkeitsgrad', subject: 'Mathematik', grade: '4', type: 'quiz', category: 'quiz', difficulty: 'medium', questionCount: 15, description: 'Schnelles Kopfrechnen mit aufsteigendem Schwierigkeitsgrad', tags: ['Quiz', 'Kopfrechnen'] },
+  { id: 't49', name: 'Kantone-Quiz', topic: 'Schweizer Kantone Quiz: Hauptorte und Wappen erkennen', subject: 'NMG', grade: '5', type: 'quiz', category: 'quiz', difficulty: 'medium', questionCount: 12, description: 'Schweizer Kantone, Hauptorte und Wappen erkennen', tags: ['Quiz', 'Schweiz'] },
+  { id: 't50', name: 'Englisch Irregular Verbs', topic: 'Irregular Verbs Quiz: Infinitive, Past Simple, Past Participle', subject: 'Englisch', grade: '6', type: 'quiz', category: 'quiz', difficulty: 'medium', questionCount: 20, description: 'Unregelmässige Verben: Infinitive, Past Simple, Past Participle', tags: ['Quiz', 'Verben'] },
+  { id: 't51', name: 'Wortarten-Quiz', topic: 'Wortarten-Quiz: Nomen, Verben, Adjektive richtig zuordnen', subject: 'Deutsch', grade: '4', type: 'quiz', category: 'quiz', difficulty: 'medium', questionCount: 12, description: 'Nomen, Verben, Adjektive – Wörter richtig zuordnen', tags: ['Quiz', 'Grammatik'] },
+  { id: 't52', name: 'Einmaleins-Blitz', topic: 'Einmaleins-Blitz: Schnelles Training aller Reihen', subject: 'Mathematik', grade: '3', type: 'quiz', category: 'quiz', difficulty: 'easy', questionCount: 20, description: 'Schnelles Einmaleins-Training mit allen Reihen', tags: ['Quiz', 'Einmaleins'] },
+  { id: 't53', name: 'Tier-Quiz Schweiz', topic: 'Schweizer Tiere Quiz: Heimische Tiere erkennen und Fakten wissen', subject: 'NMG', grade: '3', type: 'quiz', category: 'quiz', difficulty: 'easy', questionCount: 10, description: 'Heimische Tiere erkennen und Fakten wissen', tags: ['Quiz', 'Tiere'] },
 
   // ============ SOZIALFORMEN ============
-  { id: 't54', name: 'Partnerarbeit Deutsch', subject: 'Deutsch', grade: '5', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 6, description: 'Aufgaben für die Arbeit zu zweit – gegenseitig abfragen', tags: ['Partnerarbeit', 'Kooperativ'] },
-  { id: 't55', name: 'Gruppenarbeit Forschen', subject: 'NMG', grade: '5', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 5, description: 'Forschungsaufträge für Gruppen mit Präsentation', tags: ['Gruppenarbeit', 'Forschen'] },
-  { id: 't56', name: 'Lernstationen Mathe', subject: 'Mathematik', grade: '4', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 8, description: 'Stationsarbeit mit unterschiedlichen Aufgabentypen', tags: ['Stationen', 'Differenziert'] },
-  { id: 't57', name: 'Lerntempoduett', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 8, description: 'Zwei Niveaus: Schnelle helfen Langsameren, alle lernen', tags: ['Kooperativ', 'Differenziert'] },
-  { id: 't58', name: 'Placemat-Methode', subject: 'NMG', grade: '6', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 4, description: 'Vierergruppen: Erst einzeln denken, dann gemeinsam diskutieren', tags: ['Placemat', 'Kooperativ'] },
-  { id: 't59', name: 'Expertengruppen Jigsaw', subject: 'Deutsch', grade: '7', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 6, description: 'Jigsaw-Methode: Jeder wird Experte für ein Thema', tags: ['Jigsaw', 'Kooperativ'] },
+  { id: 't54', name: 'Partnerarbeit Deutsch', topic: 'Partnerarbeit Deutsch: Gegenseitig abfragen und üben', subject: 'Deutsch', grade: '5', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 6, description: 'Aufgaben für die Arbeit zu zweit – gegenseitig abfragen', tags: ['Partnerarbeit', 'Kooperativ'] },
+  { id: 't55', name: 'Gruppenarbeit Forschen', topic: 'NMG Gruppenarbeit: Forschungsauftrag mit Präsentation', subject: 'NMG', grade: '5', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 5, description: 'Forschungsaufträge für Gruppen mit Präsentation', tags: ['Gruppenarbeit', 'Forschen'] },
+  { id: 't56', name: 'Lernstationen Mathe', topic: 'Mathe Lernstationen: Stationsarbeit mit verschiedenen Aufgabentypen', subject: 'Mathematik', grade: '4', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 8, description: 'Stationsarbeit mit unterschiedlichen Aufgabentypen', tags: ['Stationen', 'Differenziert'] },
+  { id: 't57', name: 'Lerntempoduett', topic: 'Lerntempoduett Mathematik: Zwei Niveaus kooperativ bearbeiten', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 8, description: 'Zwei Niveaus: Schnelle helfen Langsameren, alle lernen', tags: ['Kooperativ', 'Differenziert'] },
+  { id: 't58', name: 'Placemat-Methode', topic: 'Placemat-Methode NMG: Erst einzeln denken, dann gemeinsam diskutieren', subject: 'NMG', grade: '6', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 4, description: 'Vierergruppen: Erst einzeln denken, dann gemeinsam diskutieren', tags: ['Placemat', 'Kooperativ'] },
+  { id: 't59', name: 'Expertengruppen Jigsaw', topic: 'Jigsaw-Methode Deutsch: Jeder wird Experte für ein Teilthema', subject: 'Deutsch', grade: '7', type: 'worksheet', category: 'sozial', difficulty: 'medium', questionCount: 6, description: 'Jigsaw-Methode: Jeder wird Experte für ein Thema', tags: ['Jigsaw', 'Kooperativ'] },
 
   // ============ WORTSCHATZ ============
-  { id: 't60', name: 'Vokabeltest Englisch', subject: 'Englisch', grade: '5', type: 'vocabulary', category: 'wortschatz', difficulty: 'medium', questionCount: 20, description: 'Wörterliste mit Übersetzungsübungen', tags: ['Vokabeln', 'Englisch'] },
-  { id: 't61', name: 'Französisch Grundwortschatz', subject: 'Französisch', grade: '5', type: 'vocabulary', category: 'wortschatz', difficulty: 'easy', questionCount: 25, description: 'Basisvokabular mit Übungen', tags: ['Vokabeln', 'Französisch'] },
-  { id: 't62', name: 'Lückentext Sprache', subject: 'Deutsch', grade: '4', type: 'worksheet', category: 'wortschatz', difficulty: 'medium', questionCount: 10, description: 'Lückentext zum Wortschatz und Sprachgefühl', tags: ['Lückentext', 'Wortschatz'] },
-  { id: 't63', name: 'Fachwörter NMG', subject: 'NMG', grade: '5', type: 'vocabulary', category: 'wortschatz', difficulty: 'medium', questionCount: 15, description: 'Fachbegriffe aus dem NMG-Unterricht üben und zuordnen', tags: ['Fachbegriffe', 'NMG'] },
-  { id: 't64', name: 'Fremdwörter Deutsch', subject: 'Deutsch', grade: '7', type: 'vocabulary', category: 'wortschatz', difficulty: 'medium', questionCount: 15, description: 'Häufige Fremdwörter verstehen und richtig verwenden', tags: ['Fremdwörter', 'Wortschatz'] },
-  { id: 't65', name: 'Englisch Phrasal Verbs', subject: 'Englisch', grade: '8', type: 'vocabulary', category: 'wortschatz', difficulty: 'hard', questionCount: 20, description: 'Wichtige Phrasal Verbs: look up, give in, turn out...', tags: ['Phrasal Verbs', 'Advanced'] },
+  { id: 't60', name: 'Vokabeltest Englisch', topic: 'Englisch Vokabeltest: Wörterliste mit Übersetzungsübungen', subject: 'Englisch', grade: '5', type: 'vocabulary', category: 'wortschatz', difficulty: 'medium', questionCount: 20, description: 'Wörterliste mit Übersetzungsübungen', tags: ['Vokabeln', 'Englisch'] },
+  { id: 't61', name: 'Französisch Grundwortschatz', topic: 'Französisch Grundwortschatz: Basisvokabular lernen und üben', subject: 'Französisch', grade: '5', type: 'vocabulary', category: 'wortschatz', difficulty: 'easy', questionCount: 25, description: 'Basisvokabular mit Übungen', tags: ['Vokabeln', 'Französisch'] },
+  { id: 't62', name: 'Lückentext Sprache', topic: 'Deutsch Lückentext: Wortschatz und Sprachgefühl trainieren', subject: 'Deutsch', grade: '4', type: 'worksheet', category: 'wortschatz', difficulty: 'medium', questionCount: 10, description: 'Lückentext zum Wortschatz und Sprachgefühl', tags: ['Lückentext', 'Wortschatz'] },
+  { id: 't63', name: 'Fachwörter NMG', topic: 'NMG Fachwörter: Fachbegriffe aus dem Sachunterricht üben', subject: 'NMG', grade: '5', type: 'vocabulary', category: 'wortschatz', difficulty: 'medium', questionCount: 15, description: 'Fachbegriffe aus dem NMG-Unterricht üben und zuordnen', tags: ['Fachbegriffe', 'NMG'] },
+  { id: 't64', name: 'Fremdwörter Deutsch', topic: 'Fremdwörter verstehen und richtig verwenden', subject: 'Deutsch', grade: '7', type: 'vocabulary', category: 'wortschatz', difficulty: 'medium', questionCount: 15, description: 'Häufige Fremdwörter verstehen und richtig verwenden', tags: ['Fremdwörter', 'Wortschatz'] },
+  { id: 't65', name: 'Englisch Phrasal Verbs', topic: 'Phrasal Verbs: look up, give in, turn out und weitere wichtige Ausdrücke', subject: 'Englisch', grade: '8', type: 'vocabulary', category: 'wortschatz', difficulty: 'hard', questionCount: 20, description: 'Wichtige Phrasal Verbs: look up, give in, turn out...', tags: ['Phrasal Verbs', 'Advanced'] },
 
   // ============ ÜBUNGEN ============
-  { id: 't66', name: 'Aufsatz-Training', subject: 'Deutsch', grade: '6', type: 'worksheet', category: 'uebung', difficulty: 'medium', questionCount: 5, description: 'Kriterienbasierte Schreibaufgabe mit Selbstbewertung', tags: ['Schreiben', 'Bewertung'] },
-  { id: 't67', name: 'Differenzierte Aufgaben', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'uebung', difficulty: 'medium', questionCount: 12, description: 'Drei Niveaus: Basis, Erweitert, Profi', tags: ['Differenzierung', 'Niveaus'] },
-  { id: 't68', name: 'Prüfungsvorbereitung', subject: 'Deutsch', grade: '6', type: 'worksheet', category: 'uebung', difficulty: 'hard', questionCount: 15, description: 'Gemischte Übungen zur Prüfungsvorbereitung', tags: ['Vorbereitung', 'Repetition'] },
-  { id: 't69', name: 'Rechtschreib-Training', subject: 'Deutsch', grade: '4', type: 'worksheet', category: 'uebung', difficulty: 'medium', questionCount: 12, description: 'Häufige Fehlerwörter, Doppelkonsonanten, Dehnungs-h', tags: ['Rechtschreibung', 'Übung'] },
-  { id: 't70', name: 'Terme vereinfachen', subject: 'Mathematik', grade: '7', type: 'worksheet', category: 'uebung', difficulty: 'medium', questionCount: 15, description: 'Terme zusammenfassen, ausmultiplizieren, faktorisieren', tags: ['Algebra', 'Terme'] },
-  { id: 't71', name: 'Hörverständnis Englisch', subject: 'Englisch', grade: '7', type: 'worksheet', category: 'uebung', difficulty: 'medium', questionCount: 8, description: 'Übungen zum Hörverstehen mit Lückentexten und Multiple Choice', tags: ['Listening', 'Comprehension'] },
+  { id: 't66', name: 'Aufsatz-Training', topic: 'Aufsatz-Training: Kriterienbasierte Schreibaufgabe mit Selbstbewertung', subject: 'Deutsch', grade: '6', type: 'worksheet', category: 'uebung', difficulty: 'medium', questionCount: 5, description: 'Kriterienbasierte Schreibaufgabe mit Selbstbewertung', tags: ['Schreiben', 'Bewertung'] },
+  { id: 't67', name: 'Differenzierte Aufgaben', topic: 'Differenzierte Mathe-Aufgaben: Drei Niveaus (Basis, Erweitert, Profi)', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'uebung', difficulty: 'medium', questionCount: 12, description: 'Drei Niveaus: Basis, Erweitert, Profi', tags: ['Differenzierung', 'Niveaus'] },
+  { id: 't68', name: 'Prüfungsvorbereitung', topic: 'Deutsch Prüfungsvorbereitung: Gemischte Übungen zur Repetition', subject: 'Deutsch', grade: '6', type: 'worksheet', category: 'uebung', difficulty: 'hard', questionCount: 15, description: 'Gemischte Übungen zur Prüfungsvorbereitung', tags: ['Vorbereitung', 'Repetition'] },
+  { id: 't69', name: 'Rechtschreib-Training', topic: 'Rechtschreib-Training: Fehlerwörter, Doppelkonsonanten, Dehnungs-h', subject: 'Deutsch', grade: '4', type: 'worksheet', category: 'uebung', difficulty: 'medium', questionCount: 12, description: 'Häufige Fehlerwörter, Doppelkonsonanten, Dehnungs-h', tags: ['Rechtschreibung', 'Übung'] },
+  { id: 't70', name: 'Terme vereinfachen', topic: 'Terme vereinfachen: Zusammenfassen, ausmultiplizieren, faktorisieren', subject: 'Mathematik', grade: '7', type: 'worksheet', category: 'uebung', difficulty: 'medium', questionCount: 15, description: 'Terme zusammenfassen, ausmultiplizieren, faktorisieren', tags: ['Algebra', 'Terme'] },
+  { id: 't71', name: 'Hörverständnis Englisch', topic: 'Englisch Hörverständnis: Listening mit Lückentexten und Multiple Choice', subject: 'Englisch', grade: '7', type: 'worksheet', category: 'uebung', difficulty: 'medium', questionCount: 8, description: 'Übungen zum Hörverstehen mit Lückentexten und Multiple Choice', tags: ['Listening', 'Comprehension'] },
 
   // ============ FÖRDERUNG ============
-  { id: 't72', name: 'DaZ Grundwortschatz', subject: 'Deutsch', grade: '3', type: 'worksheet', category: 'foerderung', difficulty: 'easy', questionCount: 10, description: 'Deutsch als Zweitsprache: Alltagswörter mit Bildern', tags: ['DaZ', 'Grundwortschatz'] },
-  { id: 't73', name: 'Leseförderung Silben', subject: 'Deutsch', grade: '2', type: 'worksheet', category: 'foerderung', difficulty: 'easy', questionCount: 8, description: 'Silbentraining, Silbenbögen, einfache Wörter erlesen', tags: ['Leseförderung', 'Silben'] },
-  { id: 't74', name: 'Dyskalkulie Übungen', subject: 'Mathematik', grade: '3', type: 'worksheet', category: 'foerderung', difficulty: 'easy', questionCount: 10, description: 'Grundlegendes Mengenverständnis, Zahlzerlegung, Stellenwerte', tags: ['Dyskalkulie', 'Förderung'] },
-  { id: 't75', name: 'Begabtenförderung Mathe', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'foerderung', difficulty: 'hard', questionCount: 6, description: 'Knobelaufgaben, Logikrätsel und Muster erkennen', tags: ['Begabtenförderung', 'Knobeln'] },
-  { id: 't76', name: 'Lesen lernen Zyklus 1', subject: 'Deutsch', grade: '1', type: 'worksheet', category: 'foerderung', difficulty: 'easy', questionCount: 6, description: 'Erste Wörter und Sätze lesen, Bild-Wort-Zuordnung', tags: ['Erstlesen', 'Zyklus 1'] },
-  { id: 't77', name: 'LRS-Training', subject: 'Deutsch', grade: '4', type: 'worksheet', category: 'foerderung', difficulty: 'easy', questionCount: 10, description: 'Lese-Rechtschreib-Schwäche: Visualisierung, Regeln, Merkwörter', tags: ['LRS', 'Förderung'] },
+  { id: 't72', name: 'DaZ Grundwortschatz', topic: 'Deutsch als Zweitsprache: Alltagswörter lernen und üben', subject: 'Deutsch', grade: '3', type: 'worksheet', category: 'foerderung', difficulty: 'easy', questionCount: 10, description: 'Deutsch als Zweitsprache: Alltagswörter mit Bildern', tags: ['DaZ', 'Grundwortschatz'] },
+  { id: 't73', name: 'Leseförderung Silben', topic: 'Leseförderung: Silbentraining, Silbenbögen, einfache Wörter erlesen', subject: 'Deutsch', grade: '2', type: 'worksheet', category: 'foerderung', difficulty: 'easy', questionCount: 8, description: 'Silbentraining, Silbenbögen, einfache Wörter erlesen', tags: ['Leseförderung', 'Silben'] },
+  { id: 't74', name: 'Dyskalkulie Übungen', topic: 'Dyskalkulie-Förderung: Mengenverständnis, Zahlzerlegung, Stellenwerte', subject: 'Mathematik', grade: '3', type: 'worksheet', category: 'foerderung', difficulty: 'easy', questionCount: 10, description: 'Grundlegendes Mengenverständnis, Zahlzerlegung, Stellenwerte', tags: ['Dyskalkulie', 'Förderung'] },
+  { id: 't75', name: 'Begabtenförderung Mathe', topic: 'Begabtenförderung Mathematik: Knobelaufgaben, Logikrätsel, Muster', subject: 'Mathematik', grade: '5', type: 'worksheet', category: 'foerderung', difficulty: 'hard', questionCount: 6, description: 'Knobelaufgaben, Logikrätsel und Muster erkennen', tags: ['Begabtenförderung', 'Knobeln'] },
+  { id: 't76', name: 'Lesen lernen Zyklus 1', topic: 'Lesen lernen: Erste Wörter und Sätze, Bild-Wort-Zuordnung', subject: 'Deutsch', grade: '1', type: 'worksheet', category: 'foerderung', difficulty: 'easy', questionCount: 6, description: 'Erste Wörter und Sätze lesen, Bild-Wort-Zuordnung', tags: ['Erstlesen', 'Zyklus 1'] },
+  { id: 't77', name: 'LRS-Training', topic: 'LRS-Training: Visualisierung, Rechtschreibregeln, Merkwörter', subject: 'Deutsch', grade: '4', type: 'worksheet', category: 'foerderung', difficulty: 'easy', questionCount: 10, description: 'Lese-Rechtschreib-Schwäche: Visualisierung, Regeln, Merkwörter', tags: ['LRS', 'Förderung'] },
 
   // ============ DIGITAL & MI ============
-  { id: 't78', name: 'Sicher im Internet', subject: 'Medien und Informatik', grade: '5', type: 'worksheet', category: 'digital', difficulty: 'medium', questionCount: 8, description: 'Passwortsicherheit, Datenschutz, Cybermobbing erkennen', tags: ['Medienkompetenz', 'Sicherheit'] },
-  { id: 't79', name: 'Algorithmen verstehen', subject: 'Medien und Informatik', grade: '5', type: 'worksheet', category: 'digital', difficulty: 'medium', questionCount: 6, description: 'Einfache Algorithmen lesen, verstehen und selber erstellen', tags: ['Informatik', 'Algorithmen'] },
-  { id: 't80', name: 'Fake News erkennen', subject: 'Medien und Informatik', grade: '7', type: 'worksheet', category: 'digital', difficulty: 'medium', questionCount: 8, description: 'Nachrichten prüfen, Quellen bewerten, Manipulation erkennen', tags: ['Medienkompetenz', 'Fake News'] },
-  { id: 't81', name: 'Programmieren Grundlagen', subject: 'Medien und Informatik', grade: '6', type: 'worksheet', category: 'digital', difficulty: 'medium', questionCount: 6, description: 'Scratch/Blockly: Sequenz, Schleife, Bedingung verstehen', tags: ['Programmieren', 'Scratch'] },
-  { id: 't82', name: 'Daten & Diagramme', subject: 'Medien und Informatik', grade: '5', type: 'worksheet', category: 'digital', difficulty: 'easy', questionCount: 8, description: 'Daten sammeln, ordnen und in Diagrammen darstellen', tags: ['Daten', 'Diagramme'] },
+  { id: 't78', name: 'Sicher im Internet', topic: 'Internetsicherheit: Passwortsicherheit, Datenschutz, Cybermobbing', subject: 'Medien und Informatik', grade: '5', type: 'worksheet', category: 'digital', difficulty: 'medium', questionCount: 8, description: 'Passwortsicherheit, Datenschutz, Cybermobbing erkennen', tags: ['Medienkompetenz', 'Sicherheit'] },
+  { id: 't79', name: 'Algorithmen verstehen', topic: 'Algorithmen: Einfache Algorithmen lesen, verstehen und erstellen', subject: 'Medien und Informatik', grade: '5', type: 'worksheet', category: 'digital', difficulty: 'medium', questionCount: 6, description: 'Einfache Algorithmen lesen, verstehen und selber erstellen', tags: ['Informatik', 'Algorithmen'] },
+  { id: 't80', name: 'Fake News erkennen', topic: 'Fake News erkennen: Nachrichten prüfen, Quellen bewerten', subject: 'Medien und Informatik', grade: '7', type: 'worksheet', category: 'digital', difficulty: 'medium', questionCount: 8, description: 'Nachrichten prüfen, Quellen bewerten, Manipulation erkennen', tags: ['Medienkompetenz', 'Fake News'] },
+  { id: 't81', name: 'Programmieren Grundlagen', topic: 'Programmieren mit Scratch: Sequenz, Schleife, Bedingung', subject: 'Medien und Informatik', grade: '6', type: 'worksheet', category: 'digital', difficulty: 'medium', questionCount: 6, description: 'Scratch/Blockly: Sequenz, Schleife, Bedingung verstehen', tags: ['Programmieren', 'Scratch'] },
+  { id: 't82', name: 'Daten & Diagramme', topic: 'Daten und Diagramme: Sammeln, ordnen und darstellen', subject: 'Medien und Informatik', grade: '5', type: 'worksheet', category: 'digital', difficulty: 'easy', questionCount: 8, description: 'Daten sammeln, ordnen und in Diagrammen darstellen', tags: ['Daten', 'Diagramme'] },
 ]
 
 // LEHRPLAN_CYCLES imported from @/data/lehrplan21
@@ -997,45 +1016,33 @@ const Home = () => {
 
       yPosition += questionLines.length * 5 + 4
 
-      // === MC / True-False / Either-Or: Canva-style option cards ===
+      // === MC / True-False / Either-Or: clean print-friendly style ===
       if (['multiple_choice', 'true_false', 'either_or'].includes(qType) && q.options) {
         doc.setFont('helvetica', 'normal')
         doc.setFontSize(10)
-        yPosition += 2
+        yPosition += 3
         q.options.forEach((option, oi) => {
           checkPage(12)
           const letter = String.fromCharCode(65 + oi)
           const cleanOption = sanitizePdfText(option.replace(/^[A-Z]\)\s*/, ''))
-          const optionLines = doc.splitTextToSize(cleanOption, pageWidth - 65)
-          const optionHeight = optionLines.length * 5 + 4
+          const optionLines = doc.splitTextToSize(cleanOption, pageWidth - 60)
+          const optionHeight = optionLines.length * 5 + 2
 
-          // Light background card for each option
-          setFillHex(tc.primaryLight + '60')
-          setDrawHex(tc.accent + '40')
-          doc.setLineWidth(0.2)
-          doc.roundedRect(29, yPosition - 4.5, pageWidth - 54, optionHeight, 2, 2, 'FD')
-
-          // Letter badge
-          if (isExam) {
-            setDrawHex(tc.accent)
-            doc.setLineWidth(0.3)
-            doc.rect(32, yPosition - 3, 3.5, 3.5)
-            doc.setLineWidth(0.2)
-          } else {
-            setFillHex(tc.accent)
-            doc.circle(34, yPosition - 1, 2.5, 'F')
-            doc.setTextColor(255, 255, 255)
-            doc.setFont('helvetica', 'bold')
-            doc.setFontSize(8)
-            doc.text(letter, 34, yPosition, { align: 'center' })
-          }
+          // Checkbox square with letter
+          doc.setDrawColor(120, 120, 120)
+          doc.setLineWidth(0.4)
+          doc.rect(30, yPosition - 3.5, 4, 4)
+          doc.setFont('helvetica', 'bold')
+          doc.setFontSize(8)
+          doc.setTextColor(100, 100, 100)
+          doc.text(letter, 32, yPosition - 0.3, { align: 'center' })
 
           // Option text
           doc.setFont('helvetica', 'normal')
           doc.setFontSize(10)
-          doc.setTextColor(50, 50, 50)
-          doc.text(optionLines, 42, yPosition)
-          yPosition += optionHeight + 1.5
+          doc.setTextColor(40, 40, 40)
+          doc.text(optionLines, 38, yPosition)
+          yPosition += optionHeight + 2
         })
         yPosition += 2
       }
@@ -1211,6 +1218,48 @@ const Home = () => {
         }
       }
 
+      // === Table: render grid ===
+      if (qType === 'table' && q.tableHeaders) {
+        const headers = q.tableHeaders || []
+        const rows = q.tableRows || []
+        const colCount = headers.length
+        const tableWidth = pageWidth - 50
+        const colWidth = tableWidth / colCount
+        const rowHeight = 8
+        const startX = 25
+
+        checkPage((rows.length + 1) * rowHeight + 10)
+        // Header row
+        doc.setFillColor(240, 240, 240)
+        doc.rect(startX, yPosition, tableWidth, rowHeight, 'F')
+        doc.setDrawColor(160, 160, 160)
+        doc.setLineWidth(0.3)
+        doc.rect(startX, yPosition, tableWidth, rowHeight, 'S')
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(9)
+        doc.setTextColor(50, 50, 50)
+        headers.forEach((h, hi) => {
+          if (hi > 0) doc.line(startX + hi * colWidth, yPosition, startX + hi * colWidth, yPosition + rowHeight)
+          doc.text(sanitizePdfText(h), startX + hi * colWidth + 2, yPosition + 5.5)
+        })
+        yPosition += rowHeight
+        // Data rows
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(9)
+        rows.forEach((row) => {
+          checkPage(rowHeight + 2)
+          doc.setDrawColor(160, 160, 160)
+          doc.rect(startX, yPosition, tableWidth, rowHeight, 'S')
+          row.forEach((cell, ci) => {
+            if (ci > 0) doc.line(startX + ci * colWidth, yPosition, startX + ci * colWidth, yPosition + rowHeight)
+            doc.text(sanitizePdfText(cell || ''), startX + ci * colWidth + 2, yPosition + 5.5)
+          })
+          yPosition += rowHeight
+        })
+        doc.setLineWidth(0.2)
+        yPosition += 4
+      }
+
       // === Open questions: writing lines ===
       if (qType === 'open' && version === 'student') {
         const pts = q.points || 1
@@ -1225,7 +1274,7 @@ const Home = () => {
       }
 
       // Generic writing lines for types without specific handler
-      if (!['multiple_choice', 'true_false', 'either_or', 'fill_blank', 'matching', 'ordering', 'math', 'image', 'open'].includes(qType) && version === 'student' && !q.options) {
+      if (!['multiple_choice', 'true_false', 'either_or', 'fill_blank', 'matching', 'ordering', 'math', 'image', 'open', 'table'].includes(qType) && version === 'student' && !q.options) {
         const pts = q.points || 1
         const lineCount = pts >= 3 ? 5 : pts >= 2 ? 3 : 2
         setDrawHex(tp_pdf.lineColor)
@@ -2302,6 +2351,7 @@ const Home = () => {
       fill_blank: { question: 'Ergänze die Lücken: Der ___ ist ein ___ Tier.', answer: 'Hund, treues', type: 'fill_blank' },
       ordering: { question: 'Bringe die folgenden Schritte in die richtige Reihenfolge:', answer: '', type: 'ordering' },
       either_or: { question: 'Wähle die richtige Aussage:', options: ['A) Erste Aussage', 'B) Zweite Aussage'], answer: 'A) Erste Aussage', type: 'either_or' },
+      table: { question: 'Fülle die Tabelle aus:', answer: '', type: 'table', tableHeaders: ['Spalte 1', 'Spalte 2', 'Spalte 3'], tableRows: [['', '', ''], ['', '', '']] },
     }
     const template = templates[type] || templates.open
     setEditedQuestions(prev => {
@@ -2975,11 +3025,11 @@ const Home = () => {
   }
 
   const handleUseTemplate = (template) => {
-    setForm({ topic: '', grade: template.grade, subject: template.subject, difficulty: template.difficulty, questionCount: template.questionCount, resourceType: template.type, dyslexiaFont: false })
+    setForm({ topic: template.topic || '', grade: template.grade, subject: template.subject, difficulty: template.difficulty, questionCount: template.questionCount, resourceType: template.type, dyslexiaFont: false, theme: 'classic', competencyCode: '' })
     setActiveView('create')
     setSelectedWorksheet(null)
     setShowEditorPanel(false)
-    setSuccessMessage(`Vorlage "${template.name}" geladen. Geben Sie jetzt ein Thema ein.`)
+    setSuccessMessage(template.topic ? `Vorlage "${template.name}" geladen – Thema vorausgefüllt. Passen Sie es bei Bedarf an.` : `Vorlage "${template.name}" geladen. Geben Sie jetzt ein Thema ein.`)
   }
 
   // ============================================================
@@ -3874,6 +3924,73 @@ const Home = () => {
                                   </div>
                                 )}
 
+                                {/* === Table / Tabelle editor === */}
+                                {q.type === 'table' && (
+                                  <div className="space-y-3">
+                                    <Label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Tabelle bearbeiten</Label>
+                                    <div className="overflow-x-auto border rounded-lg">
+                                      <table className="w-full text-sm">
+                                        <thead className="bg-gray-100">
+                                          <tr>
+                                            {(q.tableHeaders || ['Spalte 1', 'Spalte 2']).map((h, hi) => (
+                                              <th key={hi} className="px-2 py-1.5 border-r last:border-r-0">
+                                                <Input value={h} onChange={(e) => {
+                                                  const headers = [...(q.tableHeaders || [])]
+                                                  headers[hi] = e.target.value
+                                                  updateEditedQuestion(index, 'tableHeaders', headers)
+                                                }} className="text-xs font-semibold h-7 bg-transparent border-0 text-center" placeholder="Überschrift" />
+                                              </th>
+                                            ))}
+                                            <th className="w-8"></th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {(q.tableRows || [['', '']]).map((row, ri) => (
+                                            <tr key={ri} className="border-t">
+                                              {row.map((cell, ci) => (
+                                                <td key={ci} className="px-2 py-1 border-r last:border-r-0">
+                                                  <Input value={cell} onChange={(e) => {
+                                                    const rows = (q.tableRows || []).map(r => [...r])
+                                                    rows[ri][ci] = e.target.value
+                                                    updateEditedQuestion(index, 'tableRows', rows)
+                                                  }} className="text-xs h-7 bg-transparent border-0" placeholder="..." />
+                                                </td>
+                                              ))}
+                                              <td className="w-8 text-center">
+                                                <Button variant="ghost" size="sm" onClick={() => {
+                                                  const rows = (q.tableRows || []).filter((_, i) => i !== ri)
+                                                  updateEditedQuestion(index, 'tableRows', rows.length ? rows : [new Array((q.tableHeaders || []).length).fill('')])
+                                                }} className="h-6 w-6 p-0 text-gray-300 hover:text-red-500"><X className="h-3 w-3" /></Button>
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <Button variant="ghost" size="sm" onClick={() => {
+                                        const colCount = (q.tableHeaders || []).length
+                                        const rows = [...(q.tableRows || []), new Array(colCount).fill('')]
+                                        updateEditedQuestion(index, 'tableRows', rows)
+                                      }} className="text-xs text-blue-600"><PlusCircle className="h-3 w-3 mr-1" /> Zeile</Button>
+                                      <Button variant="ghost" size="sm" onClick={() => {
+                                        const headers = [...(q.tableHeaders || []), `Spalte ${(q.tableHeaders || []).length + 1}`]
+                                        const rows = (q.tableRows || []).map(r => [...r, ''])
+                                        updateEditedQuestion(index, 'tableHeaders', headers)
+                                        updateEditedQuestion(index, 'tableRows', rows)
+                                      }} className="text-xs text-blue-600"><PlusCircle className="h-3 w-3 mr-1" /> Spalte</Button>
+                                      {(q.tableHeaders || []).length > 2 && (
+                                        <Button variant="ghost" size="sm" onClick={() => {
+                                          const headers = (q.tableHeaders || []).slice(0, -1)
+                                          const rows = (q.tableRows || []).map(r => r.slice(0, -1))
+                                          updateEditedQuestion(index, 'tableHeaders', headers)
+                                          updateEditedQuestion(index, 'tableRows', rows)
+                                        }} className="text-xs text-red-500"><Minus className="h-3 w-3 mr-1" /> Spalte entfernen</Button>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+
                                 {/* === Math / Rechenfrage editor === */}
                                 {q.type === 'math' && (
                                   <div className="space-y-2">
@@ -4077,17 +4194,15 @@ const Home = () => {
                                 </button>
                               </div>
 
-                              {/* MC / True-False / Either-Or options */}
+                              {/* MC / True-False / Either-Or options – clean print-friendly style */}
                               {q.options && ['multiple_choice', 'true_false', 'either_or'].includes(q.type || 'multiple_choice') && (
-                                <div className="space-y-1.5 ml-4">
+                                <div className="space-y-2 ml-1 mt-2">
                                   {q.options.map((option, i) => (
-                                    <div key={i} className="text-gray-700 text-sm flex items-center gap-2.5">
-                                      {isExam ? (
-                                        <span className="w-4 h-4 border-2 rounded-sm inline-block flex-shrink-0" style={{ borderColor: wsTheme.colors.accent }} />
-                                      ) : (
-                                        <span className="w-5 h-5 rounded-full border-2 inline-flex items-center justify-center flex-shrink-0 text-[10px] font-bold" style={{ borderColor: wsTheme.colors.accent + '80', color: wsTheme.colors.accent }}>{String.fromCharCode(65 + i)}</span>
-                                      )}
-                                      <span>{option.replace(/^[A-Z]\)\s*/, '')}</span>
+                                    <div key={i} className="flex items-start gap-3 text-gray-800 text-sm">
+                                      <span className="w-5 h-5 mt-0.5 border-2 border-gray-400 rounded-sm inline-flex items-center justify-center flex-shrink-0 text-[10px] font-semibold text-gray-500">
+                                        {String.fromCharCode(65 + i)}
+                                      </span>
+                                      <span className="leading-relaxed">{option.replace(/^[A-Z]\)\s*/, '')}</span>
                                     </div>
                                   ))}
                                 </div>
@@ -4188,8 +4303,32 @@ const Home = () => {
                                 </div>
                               )}
 
+                              {/* Table preview */}
+                              {q.type === 'table' && q.tableHeaders && (
+                                <div className="mt-3 overflow-x-auto">
+                                  <table className="w-full text-sm border-collapse border border-gray-300">
+                                    <thead>
+                                      <tr>
+                                        {q.tableHeaders.map((h, hi) => (
+                                          <th key={hi} className="border border-gray-300 px-3 py-2 text-left font-semibold bg-gray-100 text-gray-700">{h}</th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {(q.tableRows || []).map((row, ri) => (
+                                        <tr key={ri}>
+                                          {row.map((cell, ci) => (
+                                            <td key={ci} className="border border-gray-300 px-3 py-2 text-gray-600 min-h-[32px]">{cell || '\u00A0'}</td>
+                                          ))}
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+
                               {/* Writing lines for open/generic questions without specific type handling */}
-                              {(q.type === 'open' || (!q.options && !['fill_blank', 'matching', 'ordering', 'math', 'image'].includes(q.type))) && (
+                              {(q.type === 'open' || (!q.options && !['fill_blank', 'matching', 'ordering', 'math', 'image', 'table'].includes(q.type))) && (
                                 <div className="mt-3 ml-1 space-y-3">
                                   {Array.from({ length: (q.points || 1) >= 3 ? 4 : (q.points || 1) >= 2 ? 3 : 2 }).map((_, i) => (
                                     <div key={i} className="h-6" style={{ borderBottom: `1px solid ${wsTheme.colors.accent}40` }} />
@@ -4466,16 +4605,25 @@ const Home = () => {
                         <div className="grid grid-cols-2 gap-4">
                           <div>
                             <Label className="text-sm font-medium">Klasse</Label>
-                            <Select value={form.grade} onValueChange={(value) => setForm({ ...form, grade: value })}>
+                            <Select value={form.grade} onValueChange={(value) => {
+                              const newSubjects = getSubjectsForGrade(value)
+                              const subjectStillValid = newSubjects.includes(form.subject)
+                              setForm({ ...form, grade: value, subject: subjectStillValid ? form.subject : newSubjects[0] })
+                            }}>
                               <SelectTrigger className="mt-2"><SelectValue /></SelectTrigger>
-                              <SelectContent>{GRADES.map(n => <SelectItem key={n} value={String(n)}>{n}. Klasse</SelectItem>)}</SelectContent>
+                              <SelectContent>
+                                <SelectItem disabled value="_header_primar" className="text-xs font-bold text-gray-400 pointer-events-none">Primarstufe</SelectItem>
+                                {[1,2,3,4,5,6].map(n => <SelectItem key={n} value={String(n)}>{n}. Klasse</SelectItem>)}
+                                <SelectItem disabled value="_header_sek" className="text-xs font-bold text-gray-400 pointer-events-none">Sekundarstufe</SelectItem>
+                                {[7,8,9].map(n => <SelectItem key={n} value={String(n)}>{n}. Klasse</SelectItem>)}
+                              </SelectContent>
                             </Select>
                           </div>
                           <div>
                             <Label className="text-sm font-medium">Fach</Label>
                             <Select value={form.subject} onValueChange={(value) => setForm({ ...form, subject: value })}>
                               <SelectTrigger className="mt-2"><SelectValue /></SelectTrigger>
-                              <SelectContent>{SUBJECTS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                              <SelectContent>{getSubjectsForGrade(form.grade).map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
                             </Select>
                           </div>
                         </div>
@@ -4494,6 +4642,35 @@ const Home = () => {
                             {form.difficulty === 'hard' && 'Synthese und Bewertung, komplexe Problemlösung.'}
                           </p>
                         </div>
+
+                        {/* LP21 Competency Quick-Select */}
+                        {(() => {
+                          const gradeInt = parseInt(form.grade, 10)
+                          const cycleId = gradeInt >= 7 ? 'z3' : gradeInt >= 3 ? 'z2' : 'z1'
+                          const cycleAreas = LEHRPLAN_CYCLES.find(c => c.id === cycleId)?.areas || []
+                          const matchingArea = cycleAreas.find(a => a.name === form.subject) || cycleAreas.find(a => form.subject.includes(a.name) || a.name.includes(form.subject))
+                          const comps = matchingArea?.competencies || []
+                          if (comps.length === 0) return null
+                          return (
+                            <div>
+                              <Label className="text-sm font-medium mb-2 block">LP21-Kompetenz <span className="text-gray-400 font-normal">(optional)</span></Label>
+                              <Select value={form.competencyCode || '_none'} onValueChange={(v) => setForm({ ...form, competencyCode: v === '_none' ? '' : v })}>
+                                <SelectTrigger className="mt-1"><SelectValue placeholder="Kompetenz wählen..." /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="_none">Keine spezifische Kompetenz</SelectItem>
+                                  {comps.slice(0, 15).map(c => (
+                                    <SelectItem key={c.code} value={c.code}>
+                                      <span className="font-mono text-xs mr-1.5">{c.code}</span> {c.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {form.competencyCode && comps.find(c => c.code === form.competencyCode) && (
+                                <p className="text-xs text-blue-600 mt-1.5">{comps.find(c => c.code === form.competencyCode)?.description}</p>
+                              )}
+                            </div>
+                          )
+                        })()}
 
                         {/* Question Types - hidden for dossier */}
                         {form.resourceType !== 'dossier' && (

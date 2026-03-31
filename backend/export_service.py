@@ -638,7 +638,8 @@ class DossierExporter:
         difficulty_map = {'easy': 'Einfach', 'medium': 'Mittel', 'hard': 'Schwierig'}
 
         # ===== TITLE PAGE =====
-        story.append(Spacer(1, 3*cm))
+        cover = self.dossier.get('coverPage', {}) or {}
+        story.append(Spacer(1, 2.5*cm))
 
         # Accent bar
         bar = Table([['']],  colWidths=[self.page_width])
@@ -652,7 +653,18 @@ class DossierExporter:
 
         # Title
         story.append(Paragraph(self.dossier.get('title', 'Lerndossier'), self.styles['title']))
-        story.append(Spacer(1, 0.5*cm))
+        story.append(Spacer(1, 0.3*cm))
+
+        # Subtitle (from coverPage)
+        if cover.get('subtitle'):
+            story.append(Paragraph(cover['subtitle'], self.styles['subtitle']))
+            story.append(Spacer(1, 0.3*cm))
+
+        # Description (from coverPage)
+        if cover.get('description'):
+            desc_style = ParagraphStyle('CoverDesc', parent=self.styles['body'], fontSize=10, textColor=colors.HexColor('#555555'), alignment=1)
+            story.append(Paragraph(cover['description'], desc_style))
+            story.append(Spacer(1, 0.3*cm))
 
         # Metadata
         grade = self.dossier.get('grade', '')
@@ -661,10 +673,19 @@ class DossierExporter:
         meta_text = f"{subject} | {grade}. Klasse | {difficulty}"
         story.append(Paragraph(meta_text, self.styles['subtitle']))
 
-        # Name/Date line
-        story.append(Spacer(1, 2*cm))
-        story.append(Paragraph('Name: ________________________    Datum: ____________',
+        # Name/Date/Class line
+        story.append(Spacer(1, 1.5*cm))
+        name_val = cover.get('studentName', '') or '________________________'
+        class_val = cover.get('className', '') or '____________'
+        date_val = cover.get('date', '') or '____________'
+        name_line = f"Name: {name_val}    Klasse: {class_val}    Datum: {date_val}"
+        story.append(Paragraph(name_line,
             ParagraphStyle('TitleName', parent=self.styles['body'], fontSize=11)))
+
+        if cover.get('teacher'):
+            story.append(Spacer(1, 0.3*cm))
+            story.append(Paragraph(f"Lehrperson: {cover['teacher']}",
+                ParagraphStyle('TitleTeacher', parent=self.styles['body'], fontSize=10, textColor=colors.HexColor('#888888'))))
 
         story.append(Spacer(1, 1*cm))
         story.append(bar)  # Bottom accent bar

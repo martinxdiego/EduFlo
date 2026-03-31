@@ -67,6 +67,7 @@ class WorksheetGenerateRequest(BaseModel):
     questionCount: Optional[int] = 10
     mode: Optional[str] = 'worksheet'
     theme: Optional[str] = 'classic'
+    competency_codes: Optional[List[str]] = []
 
 class RegenerateRequest(BaseModel):
     worksheetId: str
@@ -216,10 +217,15 @@ def get_system_prompt(grade: str, subject: str, difficulty: str, mode: str = 'wo
     points_instruction = '"points": 2,' if mode == 'exam' else ''
     total_points_instruction = '"total_points": sum of all question points,' if mode == 'exam' else ''
 
-    return f"""Du bist ein erfahrener Schweizer Primarschullehrer mit 15 Jahren Berufserfahrung. Du erstellst hochwertige, kreative und pädagogisch durchdachte Unterrichtsmaterialien nach Lehrplan 21.
+    grade_int = int(grade) if grade.isdigit() else 5
+    stufe = 'Sekundarstufe I' if grade_int >= 7 else 'Primarstufe'
+    zyklus = 'Zyklus 3' if grade_int >= 7 else ('Zyklus 2' if grade_int >= 3 else 'Zyklus 1')
+    lehrer_rolle = 'Sekundarschullehrperson' if grade_int >= 7 else 'Primarschullehrperson'
+
+    return f"""Du bist eine erfahrene Schweizer {lehrer_rolle} mit 15 Jahren Berufserfahrung. Du erstellst hochwertige, kreative und pädagogisch durchdachte Unterrichtsmaterialien nach Lehrplan 21 ({zyklus}).
 
 === KONTEXT ===
-Klassenstufe: {grade}. Klasse (Primarschule Schweiz)
+Klassenstufe: {grade}. Klasse ({stufe}, Schweiz)
 Fach: {subject}
 Schwierigkeitsgrad: {difficulty_descriptions.get(difficulty, difficulty_descriptions['medium'])}
 Modus: {'Arbeitsblatt (Übung)' if mode == 'worksheet' else 'Prüfung (benotet)'}
@@ -228,40 +234,60 @@ Modus: {'Arbeitsblatt (Übung)' if mode == 'worksheet' else 'Prüfung (benotet)'
 
 === QUALITÄTSANFORDERUNGEN (SEHR WICHTIG!) ===
 
-1. **REICHHALTIGE FRAGEN**: Jede Frage muss substanziell sein. KEINE Ein-Satz-Fragen!
+1. **REICHHALTIGE, TIEFGRÜNDIGE FRAGEN**: Jede Frage muss substanziell und pädagogisch wertvoll sein.
    - SCHLECHT: "Was war eine typische Beschäftigung im Mittelalter?"
    - GUT: "Im Mittelalter war die Gesellschaft in verschiedene Stände eingeteilt. Der Adel, die Geistlichen und die Bauern hatten sehr unterschiedliche Aufgaben und Rechte. Erkläre, welche Aufgaben ein Ritter im Mittelalter hatte und warum die Bauern den grössten Teil der Bevölkerung ausmachten."
+   - Mindestens 2-3 Sätze pro Fragestellung! KEINE Ein-Satz-Fragen!
 
-2. **INTELLIGENTE MULTIPLE-CHOICE-OPTIONEN**: ALLE Antwortmöglichkeiten müssen realistisch und plausibel klingen!
+2. **BLOOM'SCHE TAXONOMIE**: Variiere bewusst die kognitiven Stufen:
+   - Wissen (erinnern): "Nenne...", "Was ist..."
+   - Verstehen (erklären): "Erkläre in eigenen Worten...", "Warum..."
+   - Anwenden (übertragen): "Berechne...", "Wende die Regel an auf..."
+   - Analysieren (zerlegen): "Vergleiche...", "Was sind die Unterschiede zwischen..."
+   - Bewerten (beurteilen): "Beurteile...", "Welche Lösung ist besser und warum?"
+   - Erschaffen (gestalten): "Entwirf...", "Schreibe selber...", "Erfinde ein Beispiel für..."
+   - Pro Arbeitsblatt: Nutze MINDESTENS 3 verschiedene Bloom-Stufen!
+
+3. **INTELLIGENTE MULTIPLE-CHOICE-OPTIONEN**: ALLE Antwortmöglichkeiten müssen realistisch und plausibel klingen!
    - SCHLECHT: A) Ritter, B) Astronaut, C) Computerprogrammierer, D) YouTuber
    - GUT: A) Ritter und Burgherren, B) Handwerker in den Zünften, C) Mönche in Klöstern, D) Fahrende Händler und Kaufleute
-   - Die falschen Antworten sollen zum Nachdenken anregen, NICHT offensichtlich absurd sein!
+   - Die falschen Antworten sollen typische Denkfehler oder Verwechslungen abbilden!
+   - Vermeide "Alle oben genannten" oder "Keine der Antworten" als Optionen.
 
-3. **KONTEXTREICHE AUFGABENSTELLUNGEN**: Baue Szenarien, Geschichten, Quelltexte oder Situationen in die Fragen ein.
+4. **KONTEXTREICHE AUFGABENSTELLUNGEN**: Baue Szenarien, Geschichten, Quelltexte oder Situationen ein.
    - Beginne Fragen mit einer kurzen Einleitung, einem Zitat, einer Situation oder einem Beispiel
    - Verwende "Stell dir vor...", "Ein Bauer im Jahr 1350...", "Lies den folgenden Text..."
+   - Verwende TRANSFERAUFGABEN: Wissen auf neue, unbekannte Situationen anwenden
+   - Baue DENKAUFGABEN ein: "Was wäre passiert, wenn...", "Vergleiche zwei Lösungswege"
+   - Verwende ANWENDUNGSAUFGABEN: Bezug zum Alltag der Schülerinnen und Schüler
 
-4. **SCHWEIZER KONTEXT**: Verwende Schweizer Beispiele, Orte, Bräuche und den Schweizer Lehrplan 21.
-   - Zürich, Bern, Luzern statt Berlin oder Wien
+5. **SCHWEIZER KONTEXT UND LEHRPLAN 21**:
+   - Zürich, Bern, Basel, Luzern statt Berlin oder Wien
    - Schweizer Geschichte, Geographie, Kultur wo passend
-   - Schweizerdeutsche Begriffe in Klammern wo hilfreich
+   - Bei Mathematik: CHF statt Euro, Schweizer Masse, reale Schweizer Preise
+   - Schweizer Schulrealität (Pausenplatz, Schulreise, Klassenlager, Znüni, etc.)
+   - Kompetenzbezug: Aufgaben sollen auf LP21-Kompetenzen abgestimmt sein
 
-5. **VIELFÄLTIGE FRAGETYPEN**: Mische verschiedene Typen kreativ:
-   - "multiple_choice": Gut durchdachte Optionen (4 Stück), alle plausibel
-   - "open": Offene Fragen die zum Argumentieren, Erklären oder Reflektieren einladen (NICHT nur "Nenne zwei Dinge...")
+6. **VIELFÄLTIGE FRAGETYPEN** – Mische ABWECHSLUNGSREICH:
+   - "multiple_choice": Gut durchdachte Optionen (4 Stück), alle plausibel, Distraktoren basierend auf typischen Fehlern
+   - "open": Offene Fragen die zum Argumentieren, Erklären oder Reflektieren einladen (NICHT nur "Nenne zwei Dinge..." – stattdessen: "Erkläre, warum..." / "Begründe deine Meinung zu...")
    - "fill_blank": Lückentexte mit zusammenhängendem, informativem Text (markiere Lücken mit ___)
    - "matching": Kreative Zuordnungsaufgaben (Format in answer: "links1→rechts1, links2→rechts2")
-   - "ordering": Elemente in richtige Reihenfolge bringen
-   - "true_false": Aussagen die zum Nachdenken anregen, nicht offensichtlich richtig/falsch
-   - "math": Rechenaufgaben mit Textaufgaben-Kontext (für Mathematik)
+   - "ordering": Elemente in richtige Reihenfolge bringen (z.B. historische Ereignisse, Arbeitsschritte)
+   - "true_false": Knifflige Aussagen, bei denen man wirklich nachdenken muss – nicht offensichtlich richtig/falsch
+   - "math": Textaufgaben mit realem Kontext, NICHT nur nackte Rechnungen
 
-6. **ERKLÄRUNGEN FÜR LEHRER**: Jede Frage braucht eine ausführliche Erklärung mit didaktischem Hinweis.
+7. **DIDAKTISCHE QUALITÄT**:
+   - Jede Frage braucht eine ausführliche Erklärung mit didaktischem Hinweis für die Lehrperson
+   - Erkläre in der Explanation: Was ist das Lernziel? Welche typischen Fehler machen Schüler? Wie kann man differenzieren?
+   - Beginne mit einer leichteren Aufgabe und steigere die Komplexität (Scaffolding)
+   - Baue mindestens eine kreative oder überraschende Aufgabe ein, die Schüler motiviert
 
-7. **ANTWORTZEILEN**: Setze "answerLines" passend: 2 für kurze Antworten, 4-6 für ausführliche offene Fragen.
+8. **ANTWORTZEILEN**: Setze "answerLines" passend: 2 für kurze Antworten, 4-6 für ausführliche offene Fragen, 8 für kreatives Schreiben.
 
 === ANTWORTFORMAT (JSON) ===
 {{
-  "title": "{subject}: [Kreatives Thema] - {grade}. Klasse",
+  "title": "{subject}: [Kreatives, konkretes Thema] - {grade}. Klasse",
   "questions": [
     {{
       "id": "q1",
@@ -270,12 +296,12 @@ Modus: {'Arbeitsblatt (Übung)' if mode == 'worksheet' else 'Prüfung (benotet)'
       "question": "Ausführlicher Fragetext mit Kontext und Szenario (mindestens 2-3 Sätze!)",
       "options": ["Plausible Option A", "Plausible Option B", "Plausible Option C", "Plausible Option D"],
       "answer": "Die korrekte Antwort",
-      "explanation": "Ausführliche Erklärung für die Lehrperson mit didaktischem Hinweis",
+      "explanation": "Ausführliche Erklärung für die Lehrperson: Lernziel, typische Fehler, Differenzierungshinweis",
       {points_instruction}
       "answerLines": 3
     }}
   ],
-  "teacher_notes": "Ausführliche Hinweise: Lernziele, häufige Fehler, Differenzierungsmöglichkeiten, Bezug zum Lehrplan 21",
+  "teacher_notes": "Ausführliche Hinweise: Lernziele (LP21-Bezug), Einstiegsidee, häufige Fehler, Differenzierungsmöglichkeiten (leichtere und anspruchsvollere Varianten), Unterrichtsvorschlag",
   {total_points_instruction}
   "estimated_time": "XX Minuten"
 }}
@@ -284,7 +310,9 @@ WICHTIG:
 - Jede Frage braucht eine eindeutige "id" ("q1", "q2", etc.)
 - Schreibe ALLE Texte auf Deutsch (Schweizer Hochdeutsch)
 - Qualität vor Quantität: Lieber weniger, dafür richtig gute Fragen!
-- KEINE trivialen oder offensichtlich absurden Antwortoptionen!"""
+- KEINE trivialen oder offensichtlich absurden Antwortoptionen!
+- KEINE generischen Fragen – jede Frage muss themenspezifisch und inhaltsreich sein!
+- Abwechslung in den Fragetypen – nicht 5x dasselbe Schema!"""
 
 # ==================== AUTH ROUTES ====================
 
@@ -351,8 +379,9 @@ async def generate_worksheet(data: WorksheetGenerateRequest, user = Depends(get_
         raise HTTPException(status_code=403, detail="Monatliches Limit erreicht. Bitte auf Premium upgraden.")
     
     system_prompt = get_system_prompt(data.grade, data.subject, data.difficulty, data.mode)
-    user_prompt = f"Erstelle ein {'Arbeitsblatt' if data.mode == 'worksheet' else 'eine Prüfung'} mit {data.questionCount} Fragen zum Thema: {data.topic}\n\nKlassenstufe: {data.grade}. Klasse, Schweiz.\n\nWICHTIG: Die Fragen müssen kreativ, ausführlich und inhaltlich reichhaltig sein. Jede Frage soll mindestens 2-3 Sätze lang sein und einen spannenden Kontext bieten. Bei Multiple-Choice müssen ALLE Optionen realistisch und plausibel klingen — keine offensichtlich absurden Antworten!"
-    
+    competency_hint = f"\nLehrplan-21-Kompetenz: {data.competency_codes[0]}. Richte die Aufgaben gezielt auf diese Kompetenz aus." if hasattr(data, 'competency_codes') and data.competency_codes else ""
+    user_prompt = f"Erstelle ein {'hochwertiges Arbeitsblatt' if data.mode == 'worksheet' else 'eine faire, benotete Prüfung'} mit {data.questionCount} Fragen zum Thema: {data.topic}\n\nKlassenstufe: {data.grade}. Klasse, Schweiz.{competency_hint}\n\nQUALITÄTSMASSSTAB:\n- Jede Frage muss mindestens 2-3 Sätze Kontext bieten\n- Nutze Bloom-Stufen: Starte einfacher, steigere zu Anwenden/Analysieren\n- Mindestens 1 Transferaufgabe und 1 kreative/Denkaufgabe\n- Bei MC: Distraktoren basierend auf typischen Schülerfehlern\n- Schweizer Kontext: CHF, Schweizer Orte, LP21\n- Verschiedene Fragetypen für Abwechslung"
+
     completion = openai_client.chat.completions.create(
         model="gpt-4o",
         messages=[
@@ -422,7 +451,8 @@ async def generate_worksheet_stream(data: WorksheetGenerateRequest, user = Depen
             logger.info(f"Starting OpenAI streaming for {data.topic}")
             
             system_prompt = get_system_prompt(data.grade, data.subject, data.difficulty, data.mode)
-            user_prompt = f"Erstelle ein {'Arbeitsblatt' if data.mode == 'worksheet' else 'eine Prüfung'} mit {data.questionCount} Fragen zum Thema: {data.topic}\n\nKlassenstufe: {data.grade}. Klasse, Schweiz.\n\nWICHTIG: Die Fragen müssen kreativ, ausführlich und inhaltlich reichhaltig sein. Jede Frage soll mindestens 2-3 Sätze lang sein und einen spannenden Kontext bieten. Bei Multiple-Choice müssen ALLE Optionen realistisch und plausibel klingen — keine offensichtlich absurden Antworten!"
+            competency_hint = f"\nLehrplan-21-Kompetenz: {data.competency_codes[0]}. Richte die Aufgaben gezielt auf diese Kompetenz aus." if hasattr(data, 'competency_codes') and data.competency_codes else ""
+            user_prompt = f"Erstelle ein {'hochwertiges Arbeitsblatt' if data.mode == 'worksheet' else 'eine faire, benotete Prüfung'} mit {data.questionCount} Fragen zum Thema: {data.topic}\n\nKlassenstufe: {data.grade}. Klasse, Schweiz.{competency_hint}\n\nQUALITÄTSMASSSTAB:\n- Jede Frage muss mindestens 2-3 Sätze Kontext bieten\n- Nutze Bloom-Stufen: Starte einfacher, steigere zu Anwenden/Analysieren\n- Mindestens 1 Transferaufgabe und 1 kreative/Denkaufgabe\n- Bei MC: Distraktoren basierend auf typischen Schülerfehlern\n- Schweizer Kontext: CHF, Schweizer Orte, LP21\n- Verschiedene Fragetypen für Abwechslung"
             
             try:
                 stream = openai_client.chat.completions.create(
@@ -631,7 +661,7 @@ async def regenerate_worksheet(data: RegenerateRequest, user = Depends(get_curre
     
     mode = worksheet.get('mode', 'worksheet')
     system_prompt = get_system_prompt(worksheet['grade'], worksheet['subject'], data.newDifficulty, mode)
-    user_prompt = f"Erstelle ein {'Arbeitsblatt' if mode == 'worksheet' else 'eine Prüfung'} mit {worksheet['question_count']} Fragen zum Thema: {worksheet['topic']}\n\nKlassenstufe: {worksheet['grade']}. Klasse, Schweiz.\n\nWICHTIG: Die Fragen müssen kreativ, ausführlich und inhaltlich reichhaltig sein. Jede Frage soll mindestens 2-3 Sätze lang sein und einen spannenden Kontext bieten. Bei Multiple-Choice müssen ALLE Optionen realistisch und plausibel klingen!"
+    user_prompt = f"Erstelle ein {'hochwertiges Arbeitsblatt' if mode == 'worksheet' else 'eine faire Prüfung'} mit {worksheet['question_count']} Fragen zum Thema: {worksheet['topic']}\n\nKlassenstufe: {worksheet['grade']}. Klasse, Schweiz.\n\nQUALITÄTSMASSSTAB:\n- Jede Frage mindestens 2-3 Sätze Kontext\n- Bloom-Stufen variieren (Wissen bis Analysieren)\n- 1 Transferaufgabe, 1 kreative Aufgabe\n- MC: plausible Distraktoren basierend auf typischen Fehlern\n- Schweizer Kontext, verschiedene Fragetypen"
     
     completion = openai_client.chat.completions.create(
         model="gpt-4o",

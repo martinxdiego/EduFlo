@@ -828,26 +828,98 @@ export default function DossierEditor({
         {/* Document */}
         <Card className="bg-white shadow-lg">
           <CardContent className="p-8">
-            {/* Dossier Title */}
-            <div className="mb-6">
-              {editMode ? (
-                <Input
-                  value={editedDossier.title}
-                  onChange={e => setEditedDossier({ ...editedDossier, title: e.target.value })}
-                  className="text-2xl font-bold border-0 border-b-2 border-dashed focus:border-blue-500 bg-transparent px-0 h-auto py-2"
-                />
+            {/* Cover Page / Titelblatt */}
+            {(() => {
+              const cover = editedDossier.coverPage || {}
+              const updateCover = (field, value) => setEditedDossier(prev => ({
+                ...prev,
+                coverPage: { ...(prev.coverPage || {}), [field]: value }
+              }))
+              return editMode ? (
+                <div className="mb-8 space-y-4 border-2 border-dashed border-blue-200 rounded-xl p-6 bg-blue-50/30">
+                  <p className="text-xs font-semibold text-blue-500 uppercase tracking-wider">Titelblatt bearbeiten</p>
+                  <Input
+                    value={editedDossier.title}
+                    onChange={e => setEditedDossier({ ...editedDossier, title: e.target.value })}
+                    className="text-2xl font-bold border-0 border-b-2 border-dashed focus:border-blue-500 bg-transparent px-0 h-auto py-2"
+                    placeholder="Titel des Dossiers"
+                  />
+                  <Input
+                    value={cover.subtitle || ''}
+                    onChange={e => updateCover('subtitle', e.target.value)}
+                    className="text-lg border-0 border-b border-dashed focus:border-blue-400 bg-transparent px-0 h-auto py-1 text-gray-600"
+                    placeholder="Untertitel (optional)"
+                  />
+                  <Textarea
+                    value={cover.description || ''}
+                    onChange={e => updateCover('description', e.target.value)}
+                    className="text-sm bg-white/50 min-h-[60px] resize-y"
+                    placeholder="Beschreibung / Einleitung (optional)"
+                  />
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <Input
+                      value={cover.studentName || ''}
+                      onChange={e => updateCover('studentName', e.target.value)}
+                      className="text-sm bg-white/50"
+                      placeholder="Name: ___________"
+                    />
+                    <Input
+                      value={cover.className || ''}
+                      onChange={e => updateCover('className', e.target.value)}
+                      className="text-sm bg-white/50"
+                      placeholder="Klasse: ___________"
+                    />
+                    <Input
+                      value={cover.date || ''}
+                      onChange={e => updateCover('date', e.target.value)}
+                      className="text-sm bg-white/50"
+                      placeholder="Datum: ___________"
+                    />
+                    <Input
+                      value={cover.teacher || ''}
+                      onChange={e => updateCover('teacher', e.target.value)}
+                      className="text-sm bg-white/50"
+                      placeholder="Lehrperson (optional)"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 block mb-1">Titelbild-URL (optional)</label>
+                    <Input
+                      value={cover.imageUrl || ''}
+                      onChange={e => updateCover('imageUrl', e.target.value)}
+                      className="text-sm bg-white/50"
+                      placeholder="https://... oder leer lassen"
+                    />
+                  </div>
+                </div>
               ) : (
-                <h1 className="text-2xl font-bold text-gray-900">{editedDossier.title}</h1>
-              )}
-              <div className="flex flex-wrap gap-2 mt-3">
-                <Badge variant="outline">{editedDossier.grade}. Klasse</Badge>
-                <Badge variant="outline">{editedDossier.subject}</Badge>
-                <Badge variant="outline">
-                  {editedDossier.difficulty === 'easy' ? 'Einfach' : editedDossier.difficulty === 'medium' ? 'Mittel' : 'Schwierig'}
-                </Badge>
-                <Badge className="bg-amber-50 text-amber-700 border-amber-200">Dossier</Badge>
-              </div>
-            </div>
+                <div className="mb-8">
+                  {/* Preview cover page */}
+                  <div className="border rounded-xl overflow-hidden" style={{ borderColor: theme?.colors?.primary || '#3b82f6' }}>
+                    <div className="p-8 text-center" style={{ backgroundColor: (theme?.colors?.primaryLight || '#dbeafe') + '40' }}>
+                      {cover.imageUrl && (
+                        <img src={cover.imageUrl} alt="Titelbild" className="max-h-40 mx-auto mb-4 rounded-lg object-contain" />
+                      )}
+                      <h1 className="text-3xl font-bold mb-2" style={{ color: theme?.colors?.primary || '#1e40af' }}>{editedDossier.title}</h1>
+                      {cover.subtitle && <p className="text-lg text-gray-600 mb-3">{cover.subtitle}</p>}
+                      {cover.description && <p className="text-sm text-gray-500 max-w-lg mx-auto mb-4">{cover.description}</p>}
+                      <div className="flex flex-wrap justify-center gap-2 mb-4">
+                        <Badge variant="outline">{editedDossier.subject}</Badge>
+                        <Badge variant="outline">{editedDossier.grade}. Klasse</Badge>
+                        <Badge variant="outline">{editedDossier.difficulty === 'easy' ? 'Einfach' : editedDossier.difficulty === 'medium' ? 'Mittel' : 'Schwierig'}</Badge>
+                      </div>
+                      <Separator className="my-4 max-w-xs mx-auto" />
+                      <div className="flex justify-center gap-8 text-sm text-gray-500">
+                        {(cover.studentName || true) && <span>Name: {cover.studentName || '___________'}</span>}
+                        {(cover.className || true) && <span>Klasse: {cover.className || '___________'}</span>}
+                        {(cover.date || true) && <span>Datum: {cover.date || '___________'}</span>}
+                      </div>
+                      {cover.teacher && <p className="text-xs text-gray-400 mt-2">Lehrperson: {cover.teacher}</p>}
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
 
             <Separator className="mb-6" />
 
