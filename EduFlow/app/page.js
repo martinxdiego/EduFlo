@@ -3131,19 +3131,26 @@ const Home = () => {
     ] : [])
   ]
 
-  const navItems = [
-    { id: 'home', label: 'Start', icon: LayoutDashboard },
-    { id: 'create', label: 'Erstellen', icon: PlusCircle },
-    { id: 'library', label: 'Bibliothek', icon: FolderOpen },
-    { id: 'upload', label: 'Hochladen', icon: Upload },
-    { id: 'templates', label: 'Vorlagen', icon: LayoutTemplate },
-    { id: 'curriculum', label: 'Lehrplan 21', icon: GraduationCap },
-    { id: 'planner', label: 'Jahresplaner', icon: Calendar },
-    { id: 'students', label: 'Schüler', icon: User },
-    { id: 'classes', label: 'Klassen', icon: Users },
-    { id: 'exports', label: 'Exporte', icon: Clock },
-    { id: 'settings', label: 'Einstellungen', icon: Settings },
+  const navGroups = [
+    { label: 'Inhalte', items: [
+      { id: 'home', label: 'Start', icon: LayoutDashboard },
+      { id: 'create', label: 'Erstellen', icon: PlusCircle },
+      { id: 'library', label: 'Bibliothek', icon: FolderOpen },
+      { id: 'upload', label: 'Hochladen', icon: Upload },
+      { id: 'templates', label: 'Vorlagen', icon: LayoutTemplate },
+    ]},
+    { label: 'Unterricht', items: [
+      { id: 'curriculum', label: 'Lehrplan 21', icon: GraduationCap },
+      { id: 'planner', label: 'Jahresplaner', icon: Calendar },
+      { id: 'students', label: 'Schüler', icon: User },
+      { id: 'classes', label: 'Klassen', icon: Users },
+    ]},
+    { label: 'System', items: [
+      { id: 'exports', label: 'Exporte', icon: Clock },
+      { id: 'settings', label: 'Einstellungen', icon: Settings },
+    ]},
   ]
+  const navItems = navGroups.flatMap(g => g.items)
 
   // ============================================================
   // LANDING PAGE
@@ -3239,12 +3246,17 @@ const Home = () => {
               <h1 className="text-xl font-bold text-gradient">EduFlow</h1>
             </button>
 
-            <nav className="hidden xl:flex items-center gap-1" role="navigation">
-              {navItems.map(item => (
-                <Button key={item.id} variant={activeView === item.id ? 'default' : 'ghost'} size="sm" onClick={() => { setActiveView(item.id); setMobileNavOpen(false) }} className="transition-smooth text-xs">
-                  <item.icon className="h-3.5 w-3.5 mr-1.5" />
-                  {item.label}
-                </Button>
+            <nav className="hidden xl:flex items-center gap-0.5" role="navigation">
+              {navGroups.map((group, gi) => (
+                <div key={group.label} className="flex items-center">
+                  {gi > 0 && <div className="w-px h-5 bg-gray-300/50 mx-1.5" />}
+                  {group.items.map(item => (
+                    <Button key={item.id} variant="ghost" size="sm" onClick={() => { setActiveView(item.id); setMobileNavOpen(false) }} className={`transition-smooth text-xs ${activeView === item.id ? 'bg-blue-50 text-blue-700 font-semibold shadow-sm ring-1 ring-blue-200/60' : 'text-gray-600 hover:text-gray-900'}`}>
+                      <item.icon className={`h-3.5 w-3.5 mr-1.5 ${activeView === item.id ? 'text-blue-600' : ''}`} />
+                      {item.label}
+                    </Button>
+                  ))}
+                </div>
               ))}
             </nav>
 
@@ -3273,11 +3285,18 @@ const Home = () => {
         <AnimatePresence>
           {mobileNavOpen && (
             <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="xl:hidden glass p-3 shadow-lg border-b border-white/20">
-              <nav className="grid grid-cols-2 gap-2">
-                {navItems.map(item => (
-                  <Button key={item.id} variant={activeView === item.id ? 'default' : 'ghost'} size="sm" onClick={() => { setActiveView(item.id); setMobileNavOpen(false) }} className="justify-start text-xs">
-                    <item.icon className="h-3.5 w-3.5 mr-1.5" />{item.label}
-                  </Button>
+              <nav className="space-y-3">
+                {navGroups.map(group => (
+                  <div key={group.label}>
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-2 mb-1">{group.label}</p>
+                    <div className="grid grid-cols-2 gap-1">
+                      {group.items.map(item => (
+                        <Button key={item.id} variant="ghost" size="sm" onClick={() => { setActiveView(item.id); setMobileNavOpen(false) }} className={`justify-start text-xs ${activeView === item.id ? 'bg-blue-50 text-blue-700 font-semibold ring-1 ring-blue-200/60' : 'text-gray-600'}`}>
+                          <item.icon className={`h-3.5 w-3.5 mr-1.5 ${activeView === item.id ? 'text-blue-600' : ''}`} />{item.label}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </nav>
             </motion.div>
