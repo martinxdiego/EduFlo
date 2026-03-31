@@ -245,6 +245,24 @@ async function handleRoute(request, { params }) {
       return handleCORS(NextResponse.json(userWithoutPassword))
     }
 
+    // Update teacher type - PATCH /api/auth/teacher-type
+    if (route === '/auth/teacher-type' && method === 'PATCH') {
+      const decoded = await verifyToken(request)
+      if (!decoded) {
+        return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }))
+      }
+      const body = await request.json()
+      const { teacher_type } = body
+      if (!teacher_type || !['primar', 'sekundar', 'sonstiges'].includes(teacher_type)) {
+        return handleCORS(NextResponse.json({ error: 'Invalid teacher_type' }, { status: 400 }))
+      }
+      await db.collection('users').updateOne(
+        { id: decoded.userId },
+        { $set: { teacher_type } }
+      )
+      return handleCORS(NextResponse.json({ success: true, teacher_type }))
+    }
+
     // ========== STUDENT AUTH ==========
 
     // Register student - POST /api/student/register

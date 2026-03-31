@@ -29,7 +29,7 @@ import {
   ChevronUp, Wand2, Save, GripVertical, ArrowUp, ArrowDown,
   RotateCcw, Shuffle, Bot, CircleDot, Palette,
   AlignLeft, Pen, SquarePen, Users, UserMinus, LayoutDashboard, Brain, TrendingDown, Rocket,
-  Table2
+  Table2, School, Check
 } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import jsPDF from 'jspdf'
@@ -241,6 +241,9 @@ const Home = () => {
   const [user, setUser] = useState(null)
   const [authMode, setAuthMode] = useState('login')
   const [authForm, setAuthForm] = useState({ email: '', password: '', name: '' })
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  const [selectedTeacherType, setSelectedTeacherType] = useState(null)
+  const [savingTeacherType, setSavingTeacherType] = useState(false)
 
   // App state
   const [worksheets, setWorksheets] = useState([])
@@ -433,6 +436,24 @@ const Home = () => {
     if (saved) { try { setSettings(prev => ({ ...prev, ...JSON.parse(saved) })) } catch(e) {} }
   }, [])
 
+  // Auto-expand relevant Lehrplan cycle when entering curriculum view
+  useEffect(() => {
+    if (activeView !== 'curriculum' || !user?.teacher_type || expandedCycle) return
+    if (user.teacher_type === 'primar') setExpandedCycle('z2')
+    else if (user.teacher_type === 'sekundar') setExpandedCycle('z3')
+  }, [activeView])
+
+  // Sync form/settings defaults based on teacher_type (soft defaults, not restrictions)
+  useEffect(() => {
+    if (!user?.teacher_type) return
+    const savedSettings = localStorage.getItem('eduflow_settings')
+    if (savedSettings) return // user has manually saved settings, don't override
+    const defaultGrade = user.teacher_type === 'sekundar' ? '8' : '3'
+    const defaultSubject = user.teacher_type === 'sekundar' ? 'Deutsch' : 'Deutsch'
+    setSettings(prev => ({ ...prev, defaultGrade, defaultSubject }))
+    setForm(prev => ({ ...prev, grade: defaultGrade, subject: defaultSubject }))
+  }, [user?.teacher_type])
+
   useEffect(() => {
     if (successMessage) {
       const timer = setTimeout(() => setSuccessMessage(''), 4000)
@@ -471,10 +492,14 @@ const Home = () => {
       if (response.ok) {
         const userData = await response.json()
         setUser(userData)
-        fetchWorksheets(authToken)
-        fetchDossiers(authToken)
-        loadAssignments(authToken)
-        loadTeacherClasses(authToken)
+        if (!userData.teacher_type) {
+          setShowOnboarding(true)
+        } else {
+          fetchWorksheets(authToken)
+          fetchDossiers(authToken)
+          loadAssignments(authToken)
+          loadTeacherClasses(authToken)
+        }
       } else {
         localStorage.removeItem('teachertime_token')
         setToken(null)
@@ -499,7 +524,11 @@ const Home = () => {
         setToken(data.token)
         setUser(data.user)
         localStorage.setItem('teachertime_token', data.token)
-        fetchWorksheets(data.token)
+        if (!data.user.teacher_type) {
+          setShowOnboarding(true)
+        } else {
+          fetchWorksheets(data.token)
+        }
       } else {
         setError(data.error === 'Invalid credentials' ? 'E-Mail oder Passwort ist falsch.' :
                  data.error === 'User already exists' ? 'Diese E-Mail-Adresse ist bereits registriert.' :
@@ -515,6 +544,30 @@ const Home = () => {
     setToken(null)
     setUser(null)
     setWorksheets([])
+  }
+
+  const handleSaveTeacherType = async () => {
+    if (!selectedTeacherType) return
+    setSavingTeacherType(true)
+    try {
+      const res = await fetch('/api/auth/teacher-type', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ teacher_type: selectedTeacherType })
+      })
+      if (res.ok) {
+        setUser(prev => ({ ...prev, teacher_type: selectedTeacherType }))
+        setShowOnboarding(false)
+        fetchWorksheets(token)
+        fetchDossiers(token)
+        loadAssignments(token)
+        loadTeacherClasses(token)
+      }
+    } catch (err) {
+      console.error('Fehler beim Speichern:', err)
+    } finally {
+      setSavingTeacherType(false)
+    }
   }
 
   // ============================================================
@@ -3232,6 +3285,75 @@ const Home = () => {
   }
 
   // ============================================================
+  // ONBOARDING - Teacher Type Selection
+  // ============================================================
+
+  const teacherTypeOptions = [
+    { id: 'primar', label: 'Primarlehrperson', description: 'Zyklus 1 & 2 (1.–6. Klasse)', icon: School,
+      active: 'border-blue-400 bg-blue-50 shadow-md', iconBg: 'bg-blue-200', iconColor: 'text-blue-600', checkBg: 'bg-blue-500' },
+    { id: 'sekundar', label: 'Sekundarlehrperson', description: 'Zyklus 3 (7.–9. Klasse)', icon: GraduationCap,
+      active: 'border-purple-400 bg-purple-50 shadow-md', iconBg: 'bg-purple-200', iconColor: 'text-purple-600', checkBg: 'bg-purple-500' },
+    { id: 'sonstiges', label: 'Sonstiges', description: 'Heilpädagogik, DaZ, Förderlehrperson etc.', icon: Users,
+      active: 'border-emerald-400 bg-emerald-50 shadow-md', iconBg: 'bg-emerald-200', iconColor: 'text-emerald-600', checkBg: 'bg-emerald-500' },
+  ]
+
+  if (showOnboarding && token) {
+    return (
+      <div className="min-h-screen gradient-liquid flex items-center justify-center p-4">
+        <motion.div className="w-full max-w-lg" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.5 }}>
+          <div className="text-center mb-8">
+            <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 200, damping: 20, delay: 0.1 }}>
+              <div className="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <BookOpen className="h-8 w-8 text-blue-600" />
+              </div>
+            </motion.div>
+            <motion.h2 className="text-3xl font-bold text-gradient mb-2" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+              Willkommen bei EduFlow
+            </motion.h2>
+            <motion.p className="text-gray-500" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
+              Welche Art Lehrperson sind Sie?
+            </motion.p>
+          </div>
+
+          <div className="space-y-3">
+            {teacherTypeOptions.map((opt, i) => (
+              <motion.button key={opt.id} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.3 + i * 0.1 }}
+                onClick={() => setSelectedTeacherType(opt.id)}
+                className={`w-full p-4 rounded-2xl border-2 transition-all text-left flex items-center gap-4 ${selectedTeacherType === opt.id
+                  ? opt.active
+                  : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm'}`}>
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${selectedTeacherType === opt.id ? opt.iconBg : 'bg-gray-100'}`}>
+                  <opt.icon className={`h-6 w-6 ${selectedTeacherType === opt.id ? opt.iconColor : 'text-gray-500'}`} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className={`font-semibold ${selectedTeacherType === opt.id ? 'text-gray-900' : 'text-gray-700'}`}>{opt.label}</p>
+                  <p className="text-sm text-gray-400">{opt.description}</p>
+                </div>
+                {selectedTeacherType === opt.id && (
+                  <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 300 }}>
+                    <div className={`w-8 h-8 ${opt.checkBg} rounded-full flex items-center justify-center`}>
+                      <Check className="h-4 w-4 text-white" />
+                    </div>
+                  </motion.div>
+                )}
+              </motion.button>
+            ))}
+          </div>
+
+          <motion.div className="mt-8" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6 }}>
+            <Button onClick={handleSaveTeacherType} disabled={!selectedTeacherType || savingTeacherType}
+              className="w-full btn-premium h-12 text-base">
+              {savingTeacherType ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <ArrowRight className="h-4 w-4 mr-2" />}
+              {savingTeacherType ? 'Wird gespeichert...' : 'Weiter zu EduFlow'}
+            </Button>
+            <p className="text-center text-xs text-gray-400 mt-3">Sie können dies später in den Einstellungen ändern.</p>
+          </motion.div>
+        </motion.div>
+      </div>
+    )
+  }
+
+  // ============================================================
   // MAIN DASHBOARD
   // ============================================================
 
@@ -3431,6 +3553,37 @@ const Home = () => {
                       </CardContent>
                     </Card>
                   </motion.div>
+
+                  {/* Recommended templates based on teacher type */}
+                  {user?.teacher_type && (
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.28 }}>
+                      <Card className="glass-card border-0">
+                        <CardHeader className="pb-2">
+                          <div className="flex items-center justify-between">
+                            <CardTitle className="text-sm">Vorlagen für Sie</CardTitle>
+                            <Button variant="ghost" size="sm" className="text-xs" onClick={() => setActiveView('templates')}>Alle Vorlagen <ChevronRight className="h-3 w-3 ml-1" /></Button>
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="grid grid-cols-2 gap-2">
+                            {STARTER_TEMPLATES
+                              .filter(t => {
+                                const g = parseInt(t.grade, 10)
+                                return user.teacher_type === 'sekundar' ? g >= 7 : g <= 6
+                              })
+                              .slice(0, 4)
+                              .map(t => (
+                                <button key={t.id} onClick={() => handleUseTemplate(t)}
+                                  className="p-3 rounded-xl text-left hover:bg-gray-50 transition-colors border border-gray-100">
+                                  <p className="text-xs font-medium text-gray-900 truncate">{t.name}</p>
+                                  <p className="text-[10px] text-gray-400 mt-0.5">{t.subject} · {t.grade}. Kl.</p>
+                                </button>
+                              ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </motion.div>
+                  )}
 
                   {/* Active assignments */}
                   <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
@@ -5059,7 +5212,13 @@ const Home = () => {
                 </CardContent></Card>
               ) : (
                 <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {filteredTemplates.map((template, index) => {
+                  {[...filteredTemplates].sort((a, b) => {
+                    if (!user?.teacher_type) return 0
+                    const gA = parseInt(a.grade, 10), gB = parseInt(b.grade, 10)
+                    const relevantA = user.teacher_type === 'sekundar' ? gA >= 7 : gA <= 6
+                    const relevantB = user.teacher_type === 'sekundar' ? gB >= 7 : gB <= 6
+                    return (relevantB ? 1 : 0) - (relevantA ? 1 : 0)
+                  }).map((template, index) => {
                     const typeInfo = RESOURCE_TYPES.find(r => r.id === template.type)
                     const TypeIcon = typeInfo?.icon || FileText
                     return (
@@ -5252,7 +5411,11 @@ const Home = () => {
               {/* Cycle Cards */}
               {!curriculumSearch.trim() && (
                 <div className="space-y-4">
-                  {LEHRPLAN_CYCLES.map(cycle => {
+                  {[...LEHRPLAN_CYCLES].sort((a, b) => {
+                    if (!user?.teacher_type) return 0
+                    const relevant = user.teacher_type === 'sekundar' ? ['z3'] : ['z1', 'z2']
+                    return (relevant.includes(a.id) ? 0 : 1) - (relevant.includes(b.id) ? 0 : 1)
+                  }).map(cycle => {
                     const cycleColor = cycle.color === 'emerald' ? 'from-emerald-50 to-green-50' : cycle.color === 'blue' ? 'from-blue-50 to-indigo-50' : 'from-purple-50 to-pink-50'
                     const iconBg = cycle.color === 'emerald' ? 'bg-emerald-100' : cycle.color === 'blue' ? 'bg-blue-100' : 'bg-purple-100'
                     const iconColor = cycle.color === 'emerald' ? 'text-emerald-600' : cycle.color === 'blue' ? 'text-blue-600' : 'text-purple-600'
@@ -6638,6 +6801,23 @@ const Home = () => {
                       {user?.subscription_tier === 'premium' ? (<Badge className="bg-gradient-to-r from-yellow-400 to-orange-500"><Crown className="h-3 w-3 mr-1" /> Premium</Badge>) : (<div className="text-right"><Badge variant="secondary" className="mb-1">Free</Badge><p className="text-xs text-gray-500">{user?.worksheets_used_this_month || 0}/5 diesen Monat</p></div>)}
                     </div>
                     {user?.subscription_tier !== 'premium' && (<Button onClick={handleUpgrade} className="w-full btn-premium bg-gradient-to-r from-blue-600 to-purple-600"><Crown className="h-4 w-4 mr-2" /> Auf Premium upgraden – CHF 19.90/Monat</Button>)}
+                    <div>
+                      <Label className="text-sm font-medium">Lehrertyp</Label>
+                      <Select value={user?.teacher_type || ''} onValueChange={async (v) => {
+                        try {
+                          const res = await fetch('/api/auth/teacher-type', { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ teacher_type: v }) })
+                          if (res.ok) { setUser(prev => ({ ...prev, teacher_type: v })); setSuccessMessage('Lehrertyp wurde aktualisiert.') }
+                        } catch (err) { console.error(err) }
+                      }}>
+                        <SelectTrigger className="mt-1.5"><SelectValue placeholder="Bitte wählen" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="primar">Primarlehrperson (1.–6. Klasse)</SelectItem>
+                          <SelectItem value="sekundar">Sekundarlehrperson (7.–9. Klasse)</SelectItem>
+                          <SelectItem value="sonstiges">Sonstiges (Heilpädagogik, DaZ etc.)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-gray-400 mt-1">Beeinflusst Voreinstellungen für Klassen, Fächer und Lehrplan-Ansicht.</p>
+                    </div>
                   </CardContent>
                 </Card>
 
