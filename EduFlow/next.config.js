@@ -4,7 +4,7 @@ const nextConfig = {
     unoptimized: true,
   },
   experimental: {
-    serverComponentsExternalPackages: ['mongodb'],
+    serverComponentsExternalPackages: ['mongodb', 'pdf-parse', 'mammoth'],
   },
   webpack(config, { dev }) {
     if (dev) {

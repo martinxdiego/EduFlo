@@ -4,6 +4,8 @@ import { NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
+import mammoth from 'mammoth'
+import pdfParse from 'pdf-parse'
 
 // MongoDB connection
 let client
@@ -104,6 +106,233 @@ Format your response as a JSON object with:
   "total_points": sum of all points,
   "estimated_time": "20-30 minutes"
 }`
+}
+
+// ============================================================
+// FILE EXTRACTION HELPERS
+// ============================================================
+
+/**
+ * Extract structured text from a file buffer based on file type.
+ * Returns { text, sections[], method, pageCount? }
+ */
+async function extractFileContent(buffer, fileName, fileType, fileSize) {
+  const ext = fileName.split('.').pop()?.toLowerCase() || ''
+
+  // --- DOCX ---
+  if (ext === 'docx' || fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    try {
+      const result = await mammoth.convertToHtml({ buffer })
+      const html = result.value || ''
+      const sections = parseHtmlToSections(html)
+      const plainText = sections.map(s => s.content).join('\n\n')
+      return { text: plainText, sections, method: 'mammoth-docx', warnings: result.messages?.filter(m => m.type === 'warning').map(m => m.message) || [] }
+    } catch (e) {
+      return { text: '', sections: [], method: 'docx-failed', error: e.message }
+    }
+  }
+
+  // --- PDF (text layer first, Vision fallback) ---
+  if (ext === 'pdf' || fileType === 'application/pdf') {
+    try {
+      const pdfData = await pdfParse(buffer)
+      const rawText = (pdfData.text || '').trim()
+      // If PDF has a real text layer (not scanned)
+      if (rawText.length > 50) {
+        const cleaned = cleanExtractedText(rawText)
+        const sections = splitTextIntoSections(cleaned)
+        return { text: cleaned, sections, method: 'pdf-text-layer', pageCount: pdfData.numpages }
+      }
+      // Weak text layer → flag for OCR/Vision fallback
+      return { text: rawText, sections: [], method: 'pdf-needs-ocr', pageCount: pdfData.numpages }
+    } catch (e) {
+      return { text: '', sections: [], method: 'pdf-needs-ocr', error: e.message }
+    }
+  }
+
+  // --- Plain text / CSV ---
+  if (ext === 'txt' || ext === 'csv' || fileType === 'text/plain' || fileType === 'text/csv') {
+    const raw = buffer.toString('utf-8')
+    const cleaned = cleanExtractedText(raw)
+    const sections = ext === 'csv' ? [{ type: 'table', content: cleaned }] : splitTextIntoSections(cleaned)
+    return { text: cleaned, sections, method: 'text-direct' }
+  }
+
+  // --- RTF ---
+  if (ext === 'rtf') {
+    const raw = buffer.toString('utf-8').replace(/\\[a-z]+\d*\s?/g, '').replace(/[{}]/g, '')
+    const cleaned = cleanExtractedText(raw)
+    const sections = splitTextIntoSections(cleaned)
+    return { text: cleaned, sections, method: 'rtf-stripped' }
+  }
+
+  // --- PPTX (basic XML extraction) ---
+  if (ext === 'pptx' || fileType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation') {
+    try {
+      // PPTX is a ZIP; extract slide XML text
+      const text = extractTextFromZipXml(buffer)
+      const cleaned = cleanExtractedText(text)
+      const sections = splitTextIntoSections(cleaned)
+      return { text: cleaned, sections, method: 'pptx-xml' }
+    } catch (e) {
+      return { text: '', sections: [], method: 'pptx-failed', error: e.message }
+    }
+  }
+
+  // --- XLSX / XLS ---
+  if (ext === 'xlsx' || ext === 'xls' || fileType?.includes('spreadsheet')) {
+    try {
+      const text = extractTextFromZipXml(buffer)
+      const cleaned = cleanExtractedText(text)
+      return { text: cleaned, sections: [{ type: 'table', content: cleaned }], method: 'xlsx-xml' }
+    } catch (e) {
+      return { text: '', sections: [], method: 'xlsx-failed', error: e.message }
+    }
+  }
+
+  // --- Images → always OCR/Vision ---
+  if (fileType?.startsWith('image/')) {
+    return { text: '', sections: [], method: 'image-needs-ocr' }
+  }
+
+  return { text: '', sections: [], method: 'unsupported' }
+}
+
+/**
+ * Basic ZIP XML text extraction for OOXML formats (PPTX, XLSX).
+ * Extracts text content from XML files inside the ZIP archive.
+ */
+function extractTextFromZipXml(buffer) {
+  // Simple approach: find XML text between tags in the raw buffer
+  const raw = buffer.toString('utf-8', 0, Math.min(buffer.length, 500000))
+  const textParts = []
+  // Match <a:t>...</a:t> (PowerPoint text) and <t>...</t> (Excel shared strings)
+  const regex = /<(?:a:t|t|w:t)[^>]*>([^<]+)<\/(?:a:t|t|w:t)>/g
+  let match
+  while ((match = regex.exec(raw)) !== null) {
+    const text = match[1].trim()
+    if (text.length > 0) textParts.push(text)
+  }
+  return textParts.join(' ')
+}
+
+/**
+ * Parse HTML (from mammoth) into structured sections
+ */
+function parseHtmlToSections(html) {
+  const sections = []
+  // Split on headings
+  const parts = html.split(/(<h[1-6][^>]*>.*?<\/h[1-6]>)/gi)
+  let currentHeading = null
+
+  for (const part of parts) {
+    const headingMatch = part.match(/<h([1-6])[^>]*>(.*?)<\/h[1-6]>/i)
+    if (headingMatch) {
+      currentHeading = stripHtml(headingMatch[2])
+      sections.push({ type: 'heading', level: parseInt(headingMatch[1]), content: currentHeading })
+    } else if (part.trim()) {
+      // Check for tables
+      if (part.includes('<table')) {
+        sections.push({ type: 'table', content: stripHtml(part), parent_heading: currentHeading })
+      }
+      // Check for lists
+      else if (part.includes('<li')) {
+        const items = [...part.matchAll(/<li[^>]*>(.*?)<\/li>/gi)].map(m => stripHtml(m[1]))
+        sections.push({ type: 'list', content: items.join('\n• '), items, parent_heading: currentHeading })
+      }
+      // Regular paragraph text
+      else {
+        const text = stripHtml(part).trim()
+        if (text.length > 5) {
+          sections.push({ type: 'paragraph', content: text, parent_heading: currentHeading })
+        }
+      }
+    }
+  }
+  return sections
+}
+
+function stripHtml(html) {
+  return html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Clean extracted raw text: remove noise, repeated headers/footers, page numbers
+ */
+function cleanExtractedText(text) {
+  let cleaned = text
+    // Remove page numbers (standalone numbers on lines, common patterns)
+    .replace(/^\s*-?\s*\d{1,3}\s*-?\s*$/gm, '')
+    .replace(/^\s*Seite\s+\d+\s*(von\s+\d+)?\s*$/gmi, '')
+    .replace(/^\s*Page\s+\d+\s*(of\s+\d+)?\s*$/gmi, '')
+    // Remove repeated header/footer patterns (lines that appear 3+ times)
+    .replace(/\f/g, '\n') // form feeds
+    // Collapse excessive whitespace
+    .replace(/\n{4,}/g, '\n\n\n')
+    .replace(/[ \t]{3,}/g, '  ')
+    .trim()
+
+  // Detect and remove repeated lines (headers/footers appearing on every page)
+  const lines = cleaned.split('\n')
+  const lineCounts = {}
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed.length > 3 && trimmed.length < 100) {
+      lineCounts[trimmed] = (lineCounts[trimmed] || 0) + 1
+    }
+  }
+  const repeatedLines = new Set(Object.entries(lineCounts).filter(([, count]) => count >= 3).map(([line]) => line))
+  if (repeatedLines.size > 0) {
+    cleaned = lines.filter(l => !repeatedLines.has(l.trim())).join('\n')
+  }
+
+  return cleaned.substring(0, 15000) // generous but bounded
+}
+
+/**
+ * Split plain text into rough sections based on blank lines and heading patterns
+ */
+function splitTextIntoSections(text) {
+  const sections = []
+  const blocks = text.split(/\n\s*\n/)
+  for (const block of blocks) {
+    const trimmed = block.trim()
+    if (!trimmed) continue
+    // Detect headings: short lines, possibly uppercase or ending with ':'
+    const lines = trimmed.split('\n')
+    if (lines.length === 1 && trimmed.length < 80 && (trimmed === trimmed.toUpperCase() || trimmed.endsWith(':'))) {
+      sections.push({ type: 'heading', content: trimmed })
+    }
+    // Detect lists
+    else if (lines.every(l => /^\s*[-•*]\s/.test(l) || /^\s*\d+[.)]\s/.test(l))) {
+      sections.push({ type: 'list', content: trimmed, items: lines.map(l => l.replace(/^\s*[-•*\d.)]+\s*/, '').trim()) })
+    }
+    // Regular paragraph
+    else {
+      sections.push({ type: 'paragraph', content: trimmed })
+    }
+  }
+  return sections
+}
+
+/**
+ * Build the intermediate structured document from extraction + AI analysis
+ */
+function buildStructuredSource(extraction, aiAnalysis, fileName) {
+  return {
+    document_title: aiAnalysis?.title || fileName,
+    detected_subject: aiAnalysis?.subject || null,
+    detected_grade: aiAnalysis?.grade_suggestion || null,
+    extraction_method: extraction.method,
+    page_count: extraction.pageCount || null,
+    content_quality: extraction.text.length > 200 ? 'good' : extraction.text.length > 20 ? 'partial' : 'weak',
+    sections: extraction.sections.slice(0, 50), // cap sections
+    full_text: extraction.text.substring(0, 12000), // bounded for prompt inclusion
+    key_topics: aiAnalysis?.key_topics || [],
+    content_summary: aiAnalysis?.content_summary || '',
+    difficulty_suggestion: aiAnalysis?.difficulty_suggestion || 'medium',
+    material_type_suggestion: aiAnalysis?.material_type_suggestion || 'worksheet',
+  }
 }
 
 // Route handler function
@@ -1139,7 +1368,7 @@ Gib:
       }
 
       const body = await request.json()
-      const { topic, grade, subject, difficulty, questionCount, questionTypes, resourceType } = body
+      const { topic, grade, subject, difficulty, questionCount, questionTypes, resourceType, sourceText } = body
 
       if (!topic || !grade || !subject || !difficulty) {
         return handleCORS(NextResponse.json(
@@ -1204,7 +1433,11 @@ Gib:
               ? 'Dies ist eine formale Prüfung. Vergib sinnvolle Punkte pro Aufgabe: einfache Fragen 1P, mittlere 2P, komplexe 3P. Berechne total_points als Summe. Das Format muss professionell und prüfungstauglich sein.'
               : 'Setze "points" bei jeder Frage auf 1 (Arbeitsblätter zeigen keine Punkte an). Setze total_points auf die Anzahl Fragen.'
 
-            const userPrompt = `Erstelle ${materialType} mit ${questionCount || 10} Fragen zum Thema: ${topic}\n\nDas Material ist für die ${grade}. Klasse in der Schweiz. Formuliere die Fragen klar, abwechslungsreich und didaktisch sinnvoll. Die Sprache soll natürlich klingen, nicht wie ein KI-Generator.${questionTypeInstruction}\n\n${pointsInstruction}`
+            const sourceInstruction = sourceText
+              ? `\n\n=== QUELLMATERIAL (hochgeladen) ===\nDie folgenden Inhalte stammen aus einem hochgeladenen Dokument. Stütze deine Fragen und Antworten AUF DIESES MATERIAL. Erfinde keine Fakten, die nicht im Quellmaterial stehen. Wenn das Material nicht ausreicht, kennzeichne unsichere Inhalte oder reduziere die Fragenanzahl.\n\n${sourceText.substring(0, 8000)}\n=== ENDE QUELLMATERIAL ===`
+              : ''
+
+            const userPrompt = `Erstelle ${materialType} mit ${questionCount || 10} Fragen zum Thema: ${topic}\n\nDas Material ist für die ${grade}. Klasse in der Schweiz. Formuliere die Fragen klar, abwechslungsreich und didaktisch sinnvoll. Die Sprache soll natürlich klingen, nicht wie ein KI-Generator.${questionTypeInstruction}\n\n${pointsInstruction}${sourceInstruction}`
 
             const stream = await openai.chat.completions.create({
               model: "gpt-4o-mini",
@@ -1490,22 +1723,56 @@ Gib:
         const fileName = file.name || 'unknown'
         const fileType = file.type || ''
         const fileSize = file.size || 0
-
-        // Read file content
         const buffer = Buffer.from(await file.arrayBuffer())
 
-        let analysisPrompt = ''
+        // Phase 1 & 2: Extract structured content (with OCR fallback)
+        const extraction = await extractFileContent(buffer, fileName, fileType, fileSize)
         let messages = []
 
-        if (fileType.startsWith('image/') || fileType === 'application/pdf') {
-          // Use Vision API for images and PDFs
+        const useVision = extraction.method === 'image-needs-ocr' || extraction.method === 'pdf-needs-ocr'
+
+        if (useVision) {
+          // OCR path: use Vision API for scanned PDFs and images
           const base64 = buffer.toString('base64')
           const mediaType = fileType.startsWith('image/') ? fileType : 'image/png'
 
           messages = [
             {
               role: 'system',
-              content: `Du bist ein erfahrener Schweizer Lehrperson-Assistent. Analysiere das hochgeladene Dokument/Bild und extrahiere den Lehrinhalt daraus.
+              content: `Du bist ein erfahrener Schweizer Lehrperson-Assistent. Analysiere das hochgeladene Dokument/Bild. Extrahiere den vollständigen Lehrinhalt – bewahre Struktur (Titel, Überschriften, Absätze, Listen, Tabellen, Aufgaben) wo erkennbar.
+
+Antworte als JSON:
+{
+  "title": "Erkannter Titel oder Thema",
+  "subject": "Erkanntes Fach (Deutsch/Mathematik/NMG/Englisch/Französisch/etc.)",
+  "grade_suggestion": "Empfohlene Klassenstufe (1-9)",
+  "content_summary": "Kurze Zusammenfassung des Inhalts (2-3 Sätze)",
+  "key_topics": ["Thema 1", "Thema 2", "Thema 3"],
+  "suggested_questions": ["Mögliche Frage 1", "Mögliche Frage 2", "Mögliche Frage 3"],
+  "difficulty_suggestion": "easy/medium/hard",
+  "material_type_suggestion": "worksheet/exam/quiz/vocabulary",
+  "extracted_text": "Der vollständig erkannte Text des Dokuments, strukturiert mit Zeilenumbrüchen",
+  "extracted_sections": [{"type": "heading|paragraph|list|table|exercise", "content": "Inhalt der Sektion"}]
+}${instructions ? `\n\nZusätzliche Anweisungen: ${instructions}` : ''}`
+            },
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: `Analysiere und extrahiere den vollständigen Inhalt dieses Dokuments: "${fileName}" (${(fileSize/1024).toFixed(0)} KB)` },
+                { type: 'image_url', image_url: { url: `data:${mediaType};base64,${base64}` } }
+              ]
+            }
+          ]
+        } else {
+          // Text extraction succeeded — send structured content for AI analysis
+          const structuredPreview = extraction.sections.length > 0
+            ? extraction.sections.slice(0, 30).map(s => `[${s.type}] ${s.content}`).join('\n\n')
+            : extraction.text.substring(0, 10000)
+
+          messages = [
+            {
+              role: 'system',
+              content: `Du bist ein erfahrener Schweizer Lehrperson-Assistent. Der Textinhalt wurde bereits aus dem Dokument extrahiert. Analysiere ihn und identifiziere den Lehrinhalt.
 
 Antworte als JSON:
 {
@@ -1521,45 +1788,7 @@ Antworte als JSON:
             },
             {
               role: 'user',
-              content: [
-                { type: 'text', text: `Analysiere dieses Dokument: "${fileName}" (${(fileSize/1024).toFixed(0)} KB)` },
-                { type: 'image_url', image_url: { url: `data:${mediaType};base64,${base64}` } }
-              ]
-            }
-          ]
-        } else {
-          // For text-based files (txt, docx content, csv etc.), extract text and send to GPT
-          let textContent = ''
-
-          if (fileType === 'text/plain' || fileName.endsWith('.txt') || fileName.endsWith('.csv')) {
-            textContent = buffer.toString('utf-8').substring(0, 8000)
-          } else if (fileName.endsWith('.rtf')) {
-            textContent = buffer.toString('utf-8').replace(/\\[a-z]+\d*\s?/g, '').replace(/[{}]/g, '').substring(0, 8000)
-          } else {
-            // For binary files (docx, pptx, xlsx, audio, video), extract what we can
-            textContent = `[Binärdatei: ${fileName}, Typ: ${fileType}, Grösse: ${(fileSize/1024).toFixed(0)} KB. Textextraktion nicht möglich – bitte beschreiben Sie den gewünschten Inhalt in den Anweisungen.]`
-          }
-
-          messages = [
-            {
-              role: 'system',
-              content: `Du bist ein erfahrener Schweizer Lehrperson-Assistent. Analysiere den folgenden Textinhalt eines hochgeladenen Dokuments und extrahiere den Lehrinhalt daraus.
-
-Antworte als JSON:
-{
-  "title": "Erkannter Titel oder Thema",
-  "subject": "Erkanntes Fach",
-  "grade_suggestion": "Empfohlene Klassenstufe (1-9)",
-  "content_summary": "Kurze Zusammenfassung des Inhalts (2-3 Sätze)",
-  "key_topics": ["Thema 1", "Thema 2", "Thema 3"],
-  "suggested_questions": ["Mögliche Frage 1", "Mögliche Frage 2", "Mögliche Frage 3"],
-  "difficulty_suggestion": "easy/medium/hard",
-  "material_type_suggestion": "worksheet/exam/quiz/vocabulary"
-}${instructions ? `\n\nZusätzliche Anweisungen: ${instructions}` : ''}`
-            },
-            {
-              role: 'user',
-              content: `Datei: "${fileName}" (${fileType}, ${(fileSize/1024).toFixed(0)} KB)\n\nInhalt:\n${textContent}`
+              content: `Datei: "${fileName}" (${fileType}, ${(fileSize/1024).toFixed(0)} KB)\nExtraktionsmethode: ${extraction.method}\n\nExtrahierter Inhalt:\n${structuredPreview}`
             }
           ]
         }
@@ -1569,11 +1798,25 @@ Antworte als JSON:
           messages,
           temperature: 0.5,
           response_format: { type: 'json_object' },
-          max_tokens: 1000,
+          max_tokens: 1500,
         })
 
-        const analysis = JSON.parse(completion.choices[0].message.content)
-        return handleCORS(NextResponse.json({ analysis }))
+        const aiAnalysis = JSON.parse(completion.choices[0].message.content)
+
+        // Phase 3 & 4: Build structured source (intermediate format)
+        // For Vision/OCR path, use AI-extracted text if our extraction was empty
+        if (useVision && aiAnalysis.extracted_text) {
+          extraction.text = aiAnalysis.extracted_text
+          extraction.sections = aiAnalysis.extracted_sections || splitTextIntoSections(aiAnalysis.extracted_text)
+          extraction.method = extraction.method.replace('needs-ocr', 'vision-ocr')
+        }
+
+        const structuredSource = buildStructuredSource(extraction, aiAnalysis, fileName)
+
+        return handleCORS(NextResponse.json({
+          analysis: aiAnalysis,
+          structured_source: structuredSource
+        }))
       } catch (analyzeError) {
         console.error('File analysis error:', analyzeError)
         return handleCORS(NextResponse.json({
@@ -1587,7 +1830,8 @@ Antworte als JSON:
             suggested_questions: [],
             difficulty_suggestion: 'medium',
             material_type_suggestion: 'worksheet'
-          }
+          },
+          structured_source: null
         }))
       }
     }
@@ -2740,11 +2984,15 @@ Bitte gib:
       }
 
       const body = await request.json()
-      const { topic, grade, subject, difficulty, theme, competency_codes } = body
+      const { topic, grade, subject, difficulty, theme, competency_codes, sourceText } = body
 
       if (!topic || !grade || !subject) {
         return handleCORS(NextResponse.json({ error: "Thema, Klasse und Fach sind erforderlich." }, { status: 400 }))
       }
+
+      const sourceContext = sourceText
+        ? `\n\n=== QUELLMATERIAL ===\nDas folgende Material wurde hochgeladen. Nutze es als Grundlage für das Dossier. Stütze Theorie, Übungen und Inhalte auf dieses Material. Erfinde keine Fakten ausserhalb des Quellmaterials.\n\n${sourceText.substring(0, 8000)}\n=== ENDE QUELLMATERIAL ===`
+        : ''
 
       const encoder = new TextEncoder()
       const stream = new ReadableStream({
@@ -2762,7 +3010,7 @@ Bitte gib:
 Thema: ${topic}
 Klassenstufe: ${grade}. Klasse (Primarschule Schweiz)
 Fach: ${subject}
-Schwierigkeit: ${difficulty || 'medium'}${competenciesText}
+Schwierigkeit: ${difficulty || 'medium'}${competenciesText}${sourceContext}
 
 Erstelle einen JSON-Strukturplan mit 7-10 Sektionen. Das Dossier soll 15-20 Seiten umfassen.
 
@@ -2895,7 +3143,7 @@ Schwierigkeit: ${difficulty || 'medium'}
 
 Lernziele des Dossiers:
 ${objectivesText}
-${contextText}
+${contextText}${sourceContext}
 
 === AKTUELLE SEKTION ===
 Typ: ${sectionType}

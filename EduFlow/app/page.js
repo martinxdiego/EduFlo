@@ -599,7 +599,7 @@ const Home = () => {
       const response = await fetch('/api/generate-worksheet-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ ...form, questionTypes: selectedQuestionTypes.length > 0 ? selectedQuestionTypes : undefined })
+        body: JSON.stringify({ ...form, questionTypes: selectedQuestionTypes.length > 0 ? selectedQuestionTypes : undefined, sourceText: uploadStructuredSource?.full_text || undefined })
       })
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}))
@@ -717,7 +717,8 @@ const Home = () => {
           subject: form.subject,
           difficulty: form.difficulty,
           theme: form.theme,
-          competency_codes: form.competencyCode ? [form.competencyCode] : []
+          competency_codes: form.competencyCode ? [form.competencyCode] : [],
+          sourceText: uploadStructuredSource?.full_text || undefined
         })
       })
       if (!response.ok) {
@@ -1983,6 +1984,7 @@ const Home = () => {
   const handleRemoveFile = (index) => setUploadedFiles(prev => prev.filter((_, i) => i !== index))
 
   const [uploadAnalysisResult, setUploadAnalysisResult] = useState(null)
+  const [uploadStructuredSource, setUploadStructuredSource] = useState(null)
 
   const handleAnalyzeUpload = async () => {
     if (uploadedFiles.length === 0) return
@@ -2004,6 +2006,7 @@ const Home = () => {
       if (response.ok) {
         const data = await response.json()
         setUploadAnalysisResult(data.analysis)
+        setUploadStructuredSource(data.structured_source || null)
         setUploadAnalysisComplete(true)
         setSuccessMessage('Analyse abgeschlossen! Die KI hat den Inhalt erkannt.')
       } else {
@@ -5116,6 +5119,11 @@ const Home = () => {
                             {uploadAnalysisResult.subject && <Badge variant="outline" className="text-xs">{uploadAnalysisResult.subject}</Badge>}
                             {uploadAnalysisResult.grade_suggestion && <Badge variant="outline" className="text-xs">{uploadAnalysisResult.grade_suggestion}. Klasse empfohlen</Badge>}
                             {uploadAnalysisResult.difficulty_suggestion && <Badge variant="outline" className="text-xs">{DIFFICULTY_LABELS[uploadAnalysisResult.difficulty_suggestion] || uploadAnalysisResult.difficulty_suggestion}</Badge>}
+                            {uploadStructuredSource && (
+                              <Badge variant="outline" className={`text-xs ${uploadStructuredSource.content_quality === 'good' ? 'border-green-300 text-green-700' : uploadStructuredSource.content_quality === 'partial' ? 'border-yellow-300 text-yellow-700' : 'border-red-300 text-red-700'}`}>
+                                {uploadStructuredSource.content_quality === 'good' ? 'Textextraktion vollständig' : uploadStructuredSource.content_quality === 'partial' ? 'Teilweise extrahiert' : 'Schwache Extraktion'}
+                              </Badge>
+                            )}
                           </div>
                           {uploadAnalysisResult.key_topics?.length > 0 && (
                             <div>
