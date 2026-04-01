@@ -1030,6 +1030,7 @@ class MaterialTransformRequest(BaseModel):
     questionCount: Optional[int] = 10
     mode: Optional[str] = 'worksheet'
     customInstructions: Optional[str] = ''
+    source_text_override: Optional[str] = None  # Corrected extraction text from teacher review
 
 class EditorAssistRequest(BaseModel):
     instruction: str
@@ -1198,7 +1199,8 @@ async def transform_material(data: MaterialTransformRequest, user = Depends(get_
     if not material:
         raise HTTPException(status_code=404, detail="Material nicht gefunden")
     
-    source_text = material.get("full_text", "")
+    # Use teacher-corrected text if provided, otherwise fall back to stored extraction
+    source_text = data.source_text_override if data.source_text_override else material.get("full_text", "")
     if not source_text:
         raise HTTPException(status_code=400, detail="Material enthält keinen Text")
     

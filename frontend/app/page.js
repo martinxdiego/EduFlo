@@ -204,10 +204,19 @@ const EduFlowApp = () => {
   const [uploadingFile, setUploadingFile] = useState(false)
   const [analyzingMaterial, setAnalyzingMaterial] = useState(false)
   const [transformingMaterial, setTransformingMaterial] = useState(false)
-  const [uploadStep, setUploadStep] = useState(1) // 1: upload, 2: analysis, 3: action
+  const [uploadStep, setUploadStep] = useState(1) // 1: upload, 2: analysis, 3: extraction preview, 4: action
   const [selectedAction, setSelectedAction] = useState(null)
   const [dragActive, setDragActive] = useState(false)
   const [uploadInstructions, setUploadInstructions] = useState('')
+  // Extraction Preview & Correction
+  const [extractedFullText, setExtractedFullText] = useState('') // original from backend
+  const [correctedText, setCorrectedText] = useState('') // teacher-edited version
+  const [correctedTitle, setCorrectedTitle] = useState('')
+  const [correctedSubject, setCorrectedSubject] = useState('')
+  const [correctedGrade, setCorrectedGrade] = useState('')
+  const [extractionConfirmed, setExtractionConfirmed] = useState(false)
+  const [fetchingFullText, setFetchingFullText] = useState(false)
+  const [extractionSectionsCollapsed, setExtractionSectionsCollapsed] = useState({})
 
   // Settings
   const [settings, setSettings] = useState({
@@ -412,8 +421,30 @@ const EduFlowApp = () => {
           ...prev,
           analysis: data.analysis
         }))
+
+        // Fetch full text for extraction preview
+        setFetchingFullText(true)
+        try {
+          const matResponse = await fetch(`/api/materials/${materialId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          })
+          const matData = await matResponse.json()
+          if (matResponse.ok && matData.full_text) {
+            setExtractedFullText(matData.full_text)
+            setCorrectedText(matData.full_text)
+            setCorrectedTitle(data.analysis?.detected_topic || '')
+            setCorrectedSubject(data.analysis?.detected_subject || '')
+            setCorrectedGrade(data.analysis?.detected_grade || '')
+          }
+        } catch (e) {
+          console.error('Failed to fetch full text:', e)
+        } finally {
+          setFetchingFullText(false)
+        }
+
+        setExtractionConfirmed(false)
         setUploadStep(3)
-        toast.success('Analyse abgeschlossen')
+        toast.success('Analyse abgeschlossen – bitte Extraktion prüfen')
       } else {
         throw new Error(data.detail || 'Analyse fehlgeschlagen')
       }
@@ -441,12 +472,13 @@ const EduFlowApp = () => {
         body: JSON.stringify({
           material_id: selectedMaterial.material_id,
           action: action,
-          grade: form.grade,
-          subject: selectedMaterial.analysis?.detected_subject || form.subject,
+          grade: correctedGrade || form.grade,
+          subject: correctedSubject || selectedMaterial.analysis?.detected_subject || form.subject,
           difficulty: form.difficulty,
           questionCount: form.questionCount,
           mode: action === 'exam' ? 'exam' : 'worksheet',
-          customInstructions: ''
+          customInstructions: '',
+          source_text_override: extractionConfirmed && correctedText ? correctedText : null
         })
       })
       
@@ -484,6 +516,9 @@ const EduFlowApp = () => {
         if (selectedMaterial?.material_id === materialId) {
           setSelectedMaterial(null)
           setUploadStep(1)
+          setExtractionConfirmed(false)
+          setExtractedFullText('')
+          setCorrectedText('')
         }
       }
     } catch (error) {
@@ -2105,7 +2140,8 @@ const EduFlowApp = () => {
                         {[
                           { step: 1, label: 'Hochladen' },
                           { step: 2, label: 'Analyse' },
-                          { step: 3, label: 'Aktionen' },
+                          { step: 3, label: 'Extraktion prüfen' },
+                          { step: 4, label: 'Aktionen' },
                         ].map((s, i) => (
                           <div key={s.step} className="flex items-center">
                             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${
@@ -2118,7 +2154,7 @@ const EduFlowApp = () => {
                             <span className={`ml-2 text-sm font-medium ${uploadStep >= s.step ? 'text-gray-900' : 'text-gray-400'}`}>
                               {s.label}
                             </span>
-                            {i < 2 && <ChevronRight className="h-4 w-4 mx-3 text-gray-300" />}
+                            {i < 3 && <ChevronRight className="h-4 w-4 mx-3 text-gray-300" />}
                           </div>
                         ))}
                       </div>
@@ -2216,8 +2252,252 @@ const EduFlowApp = () => {
                         </Card>
                       )}
 
-                      {/* Step 3: Analysis Result + Smart Actions */}
+                      {/* Step 3: Extraction Preview & Correction */}
                       {uploadStep === 3 && selectedMaterial?.analysis && (
+                        <Card data-testid="extraction-preview-card">
+                          <CardHeader>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-amber-50 rounded-lg flex items-center justify-center">
+                                  <Eye className="h-5 w-5 text-amber-600" />
+                                </div>
+                                <div>
+                                  <CardTitle className="text-base">Extraktion prüfen</CardTitle>
+                                  <CardDescription>Prüfen und korrigieren Sie den extrahierten Inhalt vor der Generierung</CardDescription>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setUploadStep(1)
+                                    setSelectedMaterial(null)
+                                    setExtractionConfirmed(false)
+                                  }}
+                                >
+                                  <ArrowLeft className="h-4 w-4 mr-1" />
+                                  Zurück
+                                </Button>
+                              </div>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="space-y-5">
+                            {/* Quality Warning */}
+                            {selectedMaterial.analysis.source_quality === 'überarbeiten' && (
+                              <Alert className="border-amber-200 bg-amber-50">
+                                <AlertCircle className="h-4 w-4 text-amber-600" />
+                                <AlertDescription className="text-amber-800">
+                                  <span className="font-medium">Extraktionsqualität: überarbeiten</span> — Die automatische Extraktion ist möglicherweise unvollständig oder fehlerhaft. Bitte prüfen Sie den Text sorgfältig und korrigieren Sie Fehler.
+                                </AlertDescription>
+                              </Alert>
+                            )}
+                            {selectedMaterial.analysis.source_quality === 'mittel' && (
+                              <Alert className="border-blue-200 bg-blue-50">
+                                <Info className="h-4 w-4 text-blue-600" />
+                                <AlertDescription className="text-blue-800">
+                                  <span className="font-medium">Extraktionsqualität: mittel</span> — Einige Stellen könnten ungenau extrahiert worden sein. Wir empfehlen eine kurze Prüfung.
+                                </AlertDescription>
+                              </Alert>
+                            )}
+
+                            {/* Metadata Corrections */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                              <div className="space-y-1.5">
+                                <Label className="text-xs text-gray-500">Erkannter Titel / Thema</Label>
+                                <Input
+                                  value={correctedTitle}
+                                  onChange={(e) => setCorrectedTitle(e.target.value)}
+                                  placeholder="Thema des Materials"
+                                  data-testid="extraction-title-input"
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label className="text-xs text-gray-500">Erkanntes Fach</Label>
+                                <Select value={correctedSubject} onValueChange={setCorrectedSubject}>
+                                  <SelectTrigger data-testid="extraction-subject-select">
+                                    <SelectValue placeholder="Fach wählen" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {SUBJECTS.map((s) => (
+                                      <SelectItem key={s.value} value={s.value}>{s.icon} {s.label}</SelectItem>
+                                    ))}
+                                    <SelectItem value="Andere">Andere</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label className="text-xs text-gray-500">Erkannte Klassenstufe</Label>
+                                <Select value={correctedGrade} onValueChange={setCorrectedGrade}>
+                                  <SelectTrigger data-testid="extraction-grade-select">
+                                    <SelectValue placeholder="Klasse wählen" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {GRADES.map((g) => (
+                                      <SelectItem key={g.value} value={g.value}>{g.label}</SelectItem>
+                                    ))}
+                                    <SelectItem value="unklar">Nicht erkannt</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+
+                            {/* Extraction Info Row */}
+                            <div className="flex flex-wrap items-center gap-3">
+                              {selectedMaterial.analysis.document_type && (
+                                <Badge variant="secondary" className="text-xs">
+                                  <FileText className="h-3 w-3 mr-1" />
+                                  {selectedMaterial.analysis.document_type}
+                                </Badge>
+                              )}
+                              {selectedMaterial.page_count && (
+                                <Badge variant="secondary" className="text-xs">
+                                  {selectedMaterial.page_count} Seite{selectedMaterial.page_count !== 1 ? 'n' : ''}
+                                </Badge>
+                              )}
+                              {selectedMaterial.analysis.source_quality && (
+                                <Badge variant="secondary" className={`text-xs ${
+                                  selectedMaterial.analysis.source_quality === 'gut' ? 'bg-green-50 text-green-700' :
+                                  selectedMaterial.analysis.source_quality === 'mittel' ? 'bg-amber-50 text-amber-700' :
+                                  'bg-red-50 text-red-700'
+                                }`}>
+                                  Qualität: {selectedMaterial.analysis.source_quality}
+                                </Badge>
+                              )}
+                              {selectedMaterial.char_count && (
+                                <Badge variant="secondary" className="text-xs">
+                                  {selectedMaterial.char_count.toLocaleString()} Zeichen (Original)
+                                </Badge>
+                              )}
+                            </div>
+
+                            {/* Keywords (collapsible) */}
+                            {selectedMaterial.analysis.keywords?.length > 0 && (
+                              <div>
+                                <button
+                                  className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 mb-2"
+                                  onClick={() => setExtractionSectionsCollapsed(prev => ({ ...prev, keywords: !prev.keywords }))}
+                                >
+                                  {extractionSectionsCollapsed.keywords ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                                  Erkannte Schlüsselwörter ({selectedMaterial.analysis.keywords.length})
+                                </button>
+                                {!extractionSectionsCollapsed.keywords && (
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {selectedMaterial.analysis.keywords.map((kw, i) => (
+                                      <Badge key={i} variant="secondary" className="text-xs">{kw}</Badge>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Summary (collapsible) */}
+                            {selectedMaterial.analysis.content_summary && (
+                              <div>
+                                <button
+                                  className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 mb-2"
+                                  onClick={() => setExtractionSectionsCollapsed(prev => ({ ...prev, summary: !prev.summary }))}
+                                >
+                                  {extractionSectionsCollapsed.summary ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                                  KI-Zusammenfassung
+                                </button>
+                                {!extractionSectionsCollapsed.summary && (
+                                  <div className="bg-blue-50 rounded-lg p-3">
+                                    <p className="text-sm text-blue-800">{selectedMaterial.analysis.content_summary}</p>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Full Extracted Text (editable) */}
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <Label className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                                  <Edit className="h-3.5 w-3.5" />
+                                  Extrahierter Text (editierbar)
+                                </Label>
+                                <div className="flex items-center gap-3">
+                                  <span className="text-xs text-gray-400">
+                                    {correctedText.length.toLocaleString()} Zeichen
+                                  </span>
+                                  {correctedText !== extractedFullText && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="text-xs h-7"
+                                      onClick={() => setCorrectedText(extractedFullText)}
+                                    >
+                                      <RotateCcw className="h-3 w-3 mr-1" />
+                                      Original wiederherstellen
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                              {fetchingFullText ? (
+                                <div className="flex items-center justify-center py-8">
+                                  <Loader2 className="h-6 w-6 text-blue-500 animate-spin mr-2" />
+                                  <span className="text-sm text-gray-500">Text wird geladen...</span>
+                                </div>
+                              ) : (
+                                <Textarea
+                                  value={correctedText}
+                                  onChange={(e) => setCorrectedText(e.target.value)}
+                                  className="min-h-[280px] text-sm font-mono leading-relaxed"
+                                  placeholder="Extrahierter Text..."
+                                  data-testid="extraction-text-editor"
+                                />
+                              )}
+                              {correctedText !== extractedFullText && (
+                                <p className="text-xs text-amber-600 flex items-center gap-1">
+                                  <Edit className="h-3 w-3" />
+                                  Text wurde bearbeitet — die korrigierte Version wird für die Generierung verwendet.
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div className="flex items-center justify-between pt-3 border-t">
+                              <Button
+                                variant="outline"
+                                onClick={() => {
+                                  setUploadStep(1)
+                                  setSelectedMaterial(null)
+                                  setExtractionConfirmed(false)
+                                }}
+                              >
+                                <ArrowLeft className="h-4 w-4 mr-2" />
+                                Zurück
+                              </Button>
+                              <Button
+                                onClick={() => {
+                                  setExtractionConfirmed(true)
+                                  // Apply corrections to selectedMaterial analysis
+                                  setSelectedMaterial(prev => ({
+                                    ...prev,
+                                    analysis: {
+                                      ...prev.analysis,
+                                      detected_topic: correctedTitle || prev.analysis.detected_topic,
+                                      detected_subject: correctedSubject || prev.analysis.detected_subject,
+                                      detected_grade: correctedGrade || prev.analysis.detected_grade,
+                                    }
+                                  }))
+                                  setUploadStep(4)
+                                  toast.success('Extraktion bestätigt — bereit zur Generierung')
+                                }}
+                                disabled={!correctedText.trim() || fetchingFullText}
+                                className="bg-blue-600 hover:bg-blue-700"
+                                data-testid="confirm-extraction-btn"
+                              >
+                                <CheckCircle className="h-4 w-4 mr-2" />
+                                Für Generierung verwenden
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )}
+
+                      {/* Step 4: Analysis Result + Smart Actions */}
+                      {uploadStep === 4 && selectedMaterial?.analysis && (
                         <>
                           {/* Analysis Summary */}
                           <Card data-testid="analysis-result-card">
@@ -2228,22 +2508,49 @@ const EduFlowApp = () => {
                                     <CheckCircle className="h-5 w-5 text-green-600" />
                                   </div>
                                   <div>
-                                    <CardTitle className="text-base">Analyse abgeschlossen</CardTitle>
-                                    <CardDescription>{selectedMaterial.filename}</CardDescription>
+                                    <CardTitle className="text-base flex items-center gap-2">
+                                      Analyse abgeschlossen
+                                      {extractionConfirmed && (
+                                        <Badge className="bg-green-100 text-green-700 text-xs font-normal">
+                                          <CheckCircle className="h-3 w-3 mr-1" />
+                                          Extraktion geprüft
+                                        </Badge>
+                                      )}
+                                    </CardTitle>
+                                    <CardDescription>
+                                      {selectedMaterial.filename}
+                                      {extractionConfirmed && correctedText !== extractedFullText && ' (korrigiert)'}
+                                    </CardDescription>
                                   </div>
                                 </div>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => {
-                                    setSelectedMaterial(null)
-                                    setUploadStep(1)
-                                  }}
-                                  data-testid="upload-new-material-btn"
-                                >
-                                  <FileUp className="h-4 w-4 mr-2" />
-                                  Neues Material
-                                </Button>
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      setUploadStep(3)
+                                      setExtractionConfirmed(false)
+                                    }}
+                                  >
+                                    <ArrowLeft className="h-4 w-4 mr-1" />
+                                    Extraktion bearbeiten
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      setSelectedMaterial(null)
+                                      setUploadStep(1)
+                                      setExtractionConfirmed(false)
+                                      setExtractedFullText('')
+                                      setCorrectedText('')
+                                    }}
+                                    data-testid="upload-new-material-btn"
+                                  >
+                                    <FileUp className="h-4 w-4 mr-2" />
+                                    Neues Material
+                                  </Button>
+                                </div>
                               </div>
                             </CardHeader>
                             <CardContent className="space-y-4">
@@ -2415,8 +2722,8 @@ const EduFlowApp = () => {
                         </>
                       )}
 
-                      {/* Preview: file text excerpt */}
-                      {uploadStep >= 2 && selectedMaterial?.preview && !analyzingMaterial && (
+                      {/* Preview: file text excerpt (hidden during extraction preview step) */}
+                      {uploadStep !== 3 && uploadStep >= 2 && selectedMaterial?.preview && !analyzingMaterial && (
                         <Card>
                           <CardHeader className="pb-2">
                             <CardTitle className="text-sm flex items-center gap-2">
@@ -2463,7 +2770,31 @@ const EduFlowApp = () => {
                                         analysis: mat.analysis,
                                         preview: mat.parse_result?.full_text?.slice(0, 500) || ''
                                       })
-                                      setUploadStep(mat.status === 'analyzed' ? 3 : 1)
+                                      if (mat.status === 'analyzed') {
+                                        setExtractionConfirmed(false)
+                                        // Fetch full text for extraction preview
+                                        setFetchingFullText(true)
+                                        try {
+                                          const matResp = await fetch(`/api/materials/${mat.id}`, {
+                                            headers: { 'Authorization': `Bearer ${token}` }
+                                          })
+                                          const matData = await matResp.json()
+                                          if (matResp.ok && matData.full_text) {
+                                            setExtractedFullText(matData.full_text)
+                                            setCorrectedText(matData.full_text)
+                                            setCorrectedTitle(mat.analysis?.detected_topic || '')
+                                            setCorrectedSubject(mat.analysis?.detected_subject || '')
+                                            setCorrectedGrade(mat.analysis?.detected_grade || '')
+                                          }
+                                        } catch (e) {
+                                          console.error('Failed to fetch full text:', e)
+                                        } finally {
+                                          setFetchingFullText(false)
+                                        }
+                                        setUploadStep(3)
+                                      } else {
+                                        setUploadStep(1)
+                                      }
                                     }}
                                     data-testid={`material-item-${mat.id}`}
                                   >
