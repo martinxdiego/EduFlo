@@ -270,6 +270,8 @@ const Home = () => {
   const [uploadAnalyzing, setUploadAnalyzing] = useState(false)
   const [uploadAnalysisComplete, setUploadAnalysisComplete] = useState(false)
   const fileInputRef = useRef(null)
+  // Multi-file extraction results: [{ file, fileName, analysis, structuredSource, included, collapsed, correctedText, correctedTitle, correctedSubject, correctedGrade, analyzing, error }]
+  const [uploadFileResults, setUploadFileResults] = useState([])
 
   // Template state
   const [templateSearch, setTemplateSearch] = useState('')
@@ -599,7 +601,7 @@ const Home = () => {
       const response = await fetch('/api/generate-worksheet-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ ...form, questionTypes: selectedQuestionTypes.length > 0 ? selectedQuestionTypes : undefined, sourceText: uploadStructuredSource?.full_text || undefined })
+        body: JSON.stringify({ ...form, questionTypes: selectedQuestionTypes.length > 0 ? selectedQuestionTypes : undefined, sourceText: getCombinedSourceText() })
       })
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}))
@@ -718,7 +720,7 @@ const Home = () => {
           difficulty: form.difficulty,
           theme: form.theme,
           competency_codes: form.competencyCode ? [form.competencyCode] : [],
-          sourceText: uploadStructuredSource?.full_text || undefined
+          sourceText: getCombinedSourceText()
         })
       })
       if (!response.ok) {
@@ -1986,50 +1988,114 @@ const Home = () => {
   const [uploadAnalysisResult, setUploadAnalysisResult] = useState(null)
   const [uploadStructuredSource, setUploadStructuredSource] = useState(null)
 
+  // Analyze a single file — returns { analysis, structuredSource } or fallback
+  const analyzeSingleFile = async (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    if (uploadInstructions) formData.append('instructions', uploadInstructions)
+
+    const response = await fetch('/api/analyze-upload', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: formData
+    })
+
+    if (response.ok) {
+      const data = await response.json()
+      return { analysis: data.analysis, structuredSource: data.structured_source || null }
+    }
+    // Fallback
+    return {
+      analysis: {
+        title: file.name,
+        subject: 'Allgemein',
+        grade_suggestion: '5',
+        content_summary: 'Datei konnte nicht vollständig analysiert werden.',
+        key_topics: [],
+        suggested_questions: [],
+        difficulty_suggestion: 'medium',
+        material_type_suggestion: 'worksheet'
+      },
+      structuredSource: null
+    }
+  }
+
   const handleAnalyzeUpload = async () => {
     if (uploadedFiles.length === 0) return
     setUploadAnalyzing(true)
     setUploadAnalysisResult(null)
+    setUploadStructuredSource(null)
 
-    try {
-      // Analyze the first file via API
-      const formData = new FormData()
-      formData.append('file', uploadedFiles[0])
-      if (uploadInstructions) formData.append('instructions', uploadInstructions)
+    // Initialize per-file result slots
+    const initialResults = uploadedFiles.map((file) => ({
+      file,
+      fileName: file.name,
+      analysis: null,
+      structuredSource: null,
+      included: true,
+      collapsed: uploadedFiles.length > 1, // auto-collapse when multiple
+      correctedText: null, // null = use original
+      correctedTitle: null,
+      correctedSubject: null,
+      correctedGrade: null,
+      analyzing: true,
+      error: null,
+    }))
+    setUploadFileResults(initialResults)
 
-      const response = await fetch('/api/analyze-upload', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-        body: formData
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        setUploadAnalysisResult(data.analysis)
-        setUploadStructuredSource(data.structured_source || null)
-        setUploadAnalysisComplete(true)
-        setSuccessMessage('Analyse abgeschlossen! Die KI hat den Inhalt erkannt.')
-      } else {
-        // Fallback on API error
-        setUploadAnalysisComplete(true)
-        setUploadAnalysisResult({
-          title: uploadedFiles.map(f => f.name).join(', '),
-          subject: 'Allgemein',
-          grade_suggestion: '5',
-          content_summary: 'Datei wurde hochgeladen. Geben Sie ein Thema ein, um Material zu generieren.',
-          key_topics: [],
-          suggested_questions: [],
-          difficulty_suggestion: 'medium',
-          material_type_suggestion: 'worksheet'
-        })
-        setSuccessMessage('Analyse abgeschlossen. Sie können nun Materialien erstellen.')
+    // Analyze all files in parallel
+    const promises = uploadedFiles.map(async (file, idx) => {
+      try {
+        const result = await analyzeSingleFile(file)
+        return { idx, ...result, error: null }
+      } catch (err) {
+        console.error(`Upload analysis error for ${file.name}:`, err)
+        return { idx, analysis: { title: file.name, subject: 'Allgemein', grade_suggestion: '5', content_summary: 'Analyse fehlgeschlagen.', key_topics: [], suggested_questions: [], difficulty_suggestion: 'medium', material_type_suggestion: 'worksheet' }, structuredSource: null, error: err.message }
       }
-    } catch (err) {
-      console.error('Upload analysis error:', err)
-      setUploadAnalysisComplete(true)
-      setSuccessMessage('Analyse abgeschlossen. Sie können nun Materialien erstellen.')
+    })
+
+    const results = await Promise.all(promises)
+
+    // Build final results array
+    const finalResults = initialResults.map((item, idx) => {
+      const r = results.find(res => res.idx === idx)
+      return { ...item, analysis: r.analysis, structuredSource: r.structuredSource, analyzing: false, error: r.error }
+    })
+    setUploadFileResults(finalResults)
+
+    // For backwards compat with single-file: use first successful result
+    const firstGood = finalResults.find(r => r.analysis)
+    if (firstGood) {
+      setUploadAnalysisResult(firstGood.analysis)
+      setUploadStructuredSource(firstGood.structuredSource)
     }
+
+    setUploadAnalysisComplete(true)
+    const successCount = finalResults.filter(r => r.structuredSource).length
+    setSuccessMessage(`Analyse abgeschlossen! ${successCount} von ${finalResults.length} Datei${finalResults.length > 1 ? 'en' : ''} erfolgreich analysiert.`)
     setUploadAnalyzing(false)
+  }
+
+  // Helper: get combined source text from all included files
+  const getCombinedSourceText = () => {
+    const included = uploadFileResults.filter(r => r.included && (r.structuredSource || r.correctedText))
+    if (included.length === 0) return uploadStructuredSource?.full_text || undefined
+    if (included.length === 1) {
+      const r = included[0]
+      return r.correctedText || r.structuredSource?.full_text || undefined
+    }
+    // Multiple files: combine with clear boundaries
+    const parts = included.map((r, i) => {
+      const title = r.correctedTitle || r.structuredSource?.document_title || r.fileName
+      const text = r.correctedText || r.structuredSource?.full_text || ''
+      return `--- QUELLE ${i + 1}: ${title} (${r.fileName}) ---\n${text}\n--- ENDE QUELLE ${i + 1} ---`
+    })
+    return parts.join('\n\n')
+  }
+
+  // Helper: update a single file result field
+  const updateFileResult = (idx, updates) => {
+    setUploadFileResults(prev => prev.map((r, i) => i === idx ? { ...r, ...updates } : r))
   }
 
   // ============================================================
@@ -5100,10 +5166,147 @@ const Home = () => {
                   <div className="flex items-center gap-2 mb-3"><div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-sm font-semibold text-blue-700">3</div><Label className="text-sm font-semibold">Material analysieren & generieren</Label></div>
                   {uploadAnalysisComplete ? (
                     <div className="bg-green-50 border border-green-200 rounded-xl p-4 space-y-4">
-                      <div className="flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-green-600" /><p className="font-medium text-green-800">Analyse abgeschlossen</p></div>
+                      <div className="flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-green-600" /><p className="font-medium text-green-800">Analyse abgeschlossen — {uploadFileResults.filter(r => r.included).length} von {uploadFileResults.length} Datei{uploadFileResults.length > 1 ? 'en' : ''} ausgewählt</p></div>
 
-                      {/* Show analysis results */}
-                      {uploadAnalysisResult && (
+                      {/* Per-file extraction results */}
+                      {uploadFileResults.length > 0 && (
+                        <div className="space-y-3">
+                          {uploadFileResults.map((fr, idx) => {
+                            const quality = fr.structuredSource?.content_quality
+                            const qualityColor = quality === 'good' ? 'border-green-300 text-green-700' : quality === 'partial' ? 'border-yellow-300 text-yellow-700' : 'border-red-300 text-red-700'
+                            const qualityLabel = quality === 'good' ? 'Vollständig' : quality === 'partial' ? 'Teilweise' : 'Schwach'
+                            const isEditing = fr._editing
+                            const displayTitle = fr.correctedTitle || fr.analysis?.title || fr.fileName
+                            const displaySubject = fr.correctedSubject || fr.analysis?.subject || ''
+                            const displayGrade = fr.correctedGrade || fr.analysis?.grade_suggestion || ''
+                            const charCount = (fr.correctedText || fr.structuredSource?.full_text || '').length
+
+                            return (
+                              <div key={idx} className={`bg-white rounded-lg border transition-all ${fr.included ? 'border-green-200' : 'border-gray-200 opacity-60'}`}>
+                                {/* File header — always visible */}
+                                <div className="flex items-center gap-3 p-3 cursor-pointer" onClick={() => updateFileResult(idx, { collapsed: !fr.collapsed })}>
+                                  <button onClick={(e) => { e.stopPropagation(); updateFileResult(idx, { included: !fr.included }) }}
+                                    className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${fr.included ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300 bg-white'}`}>
+                                    {fr.included && <Check className="h-3 w-3" />}
+                                  </button>
+                                  <FileType className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-gray-900 truncate">{displayTitle}</p>
+                                    <p className="text-xs text-gray-500">{fr.fileName} • {(fr.file.size / 1024).toFixed(0)} KB{charCount > 0 ? ` • ${charCount.toLocaleString('de-CH')} Zeichen` : ''}</p>
+                                  </div>
+                                  <div className="flex items-center gap-2 flex-shrink-0">
+                                    {fr.analyzing && <RefreshCw className="h-4 w-4 text-blue-500 animate-spin" />}
+                                    {quality && <Badge variant="outline" className={`text-[10px] ${qualityColor}`}>{qualityLabel}</Badge>}
+                                    {displaySubject && <Badge variant="outline" className="text-[10px]">{displaySubject}</Badge>}
+                                    {fr.collapsed ? <ChevronRight className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
+                                  </div>
+                                </div>
+
+                                {/* Expanded detail */}
+                                {!fr.collapsed && fr.analysis && (
+                                  <div className="px-3 pb-3 border-t border-gray-100 space-y-3">
+                                    {fr.analysis.content_summary && (
+                                      <div className="pt-3">
+                                        <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold">Zusammenfassung</p>
+                                        <p className="text-sm text-gray-700">{fr.analysis.content_summary}</p>
+                                      </div>
+                                    )}
+                                    <div className="flex flex-wrap gap-2">
+                                      {displaySubject && <Badge variant="outline" className="text-xs">{displaySubject}</Badge>}
+                                      {displayGrade && <Badge variant="outline" className="text-xs">{displayGrade}. Klasse</Badge>}
+                                      {fr.analysis.difficulty_suggestion && <Badge variant="outline" className="text-xs">{DIFFICULTY_LABELS[fr.analysis.difficulty_suggestion] || fr.analysis.difficulty_suggestion}</Badge>}
+                                      {quality && <Badge variant="outline" className={`text-xs ${qualityColor}`}>{quality === 'good' ? 'Textextraktion vollständig' : quality === 'partial' ? 'Teilweise extrahiert' : 'Schwache Extraktion'}</Badge>}
+                                    </div>
+                                    {fr.analysis.key_topics?.length > 0 && (
+                                      <div>
+                                        <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold mb-1">Erkannte Themen</p>
+                                        <div className="flex flex-wrap gap-1.5">
+                                          {fr.analysis.key_topics.map((topic, i) => (
+                                            <span key={i} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">{topic}</span>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Edit / Reset controls */}
+                                    {!isEditing ? (
+                                      <div className="flex gap-2 pt-1">
+                                        <Button variant="outline" size="sm" className="text-xs" onClick={() => updateFileResult(idx, { _editing: true, _editTitle: displayTitle, _editSubject: displaySubject, _editGrade: displayGrade, _editText: fr.correctedText || fr.structuredSource?.full_text || '' })}>
+                                          <Edit className="h-3 w-3 mr-1" /> Bearbeiten
+                                        </Button>
+                                        {(fr.correctedText !== null || fr.correctedTitle !== null) && (
+                                          <Button variant="outline" size="sm" className="text-xs text-orange-600 hover:text-orange-700" onClick={() => updateFileResult(idx, { correctedText: null, correctedTitle: null, correctedSubject: null, correctedGrade: null })}>
+                                            <RotateCcw className="h-3 w-3 mr-1" /> Zurücksetzen
+                                          </Button>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <div className="space-y-2 pt-1">
+                                        <div className="grid grid-cols-3 gap-2">
+                                          <div>
+                                            <Label className="text-xs text-gray-500">Titel</Label>
+                                            <Input value={fr._editTitle || ''} onChange={(e) => updateFileResult(idx, { _editTitle: e.target.value })} className="text-sm h-8" />
+                                          </div>
+                                          <div>
+                                            <Label className="text-xs text-gray-500">Fach</Label>
+                                            <Input value={fr._editSubject || ''} onChange={(e) => updateFileResult(idx, { _editSubject: e.target.value })} className="text-sm h-8" />
+                                          </div>
+                                          <div>
+                                            <Label className="text-xs text-gray-500">Klasse</Label>
+                                            <Input value={fr._editGrade || ''} onChange={(e) => updateFileResult(idx, { _editGrade: e.target.value })} className="text-sm h-8" />
+                                          </div>
+                                        </div>
+                                        <div>
+                                          <Label className="text-xs text-gray-500">Extrahierter Text</Label>
+                                          <Textarea value={fr._editText || ''} onChange={(e) => updateFileResult(idx, { _editText: e.target.value })} className="text-sm min-h-[120px] font-mono" />
+                                          <p className="text-xs text-gray-400 mt-1">{(fr._editText || '').length.toLocaleString('de-CH')} Zeichen</p>
+                                        </div>
+                                        <div className="flex gap-2">
+                                          <Button size="sm" className="text-xs" onClick={() => updateFileResult(idx, { correctedTitle: fr._editTitle, correctedSubject: fr._editSubject, correctedGrade: fr._editGrade, correctedText: fr._editText, _editing: false, _editTitle: undefined, _editSubject: undefined, _editGrade: undefined, _editText: undefined })}>
+                                            <Check className="h-3 w-3 mr-1" /> Übernehmen
+                                          </Button>
+                                          <Button variant="outline" size="sm" className="text-xs" onClick={() => updateFileResult(idx, { _editing: false, _editTitle: undefined, _editSubject: undefined, _editGrade: undefined, _editText: undefined })}>
+                                            Abbrechen
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Weak quality warning */}
+                                    {quality === 'weak' && (
+                                      <div className="flex items-center gap-2 p-2 bg-red-50 rounded-lg border border-red-100">
+                                        <Info className="h-4 w-4 text-red-500 flex-shrink-0" />
+                                        <p className="text-xs text-red-700">Schwache Extraktion — der Text konnte nicht vollständig gelesen werden. Bitte manuell prüfen oder durch Bearbeiten ergänzen.</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+
+                          {/* Combined summary */}
+                          {uploadFileResults.length > 1 && (() => {
+                            const included = uploadFileResults.filter(r => r.included)
+                            const totalChars = included.reduce((sum, r) => sum + (r.correctedText || r.structuredSource?.full_text || '').length, 0)
+                            const weakCount = included.filter(r => r.structuredSource?.content_quality === 'weak').length
+                            return (
+                              <div className="bg-gray-50 rounded-lg p-3 border border-gray-200 space-y-1">
+                                <div className="flex items-center justify-between">
+                                  <p className="text-sm font-medium text-gray-700">{included.length} von {uploadFileResults.length} Quellen ausgewählt</p>
+                                  <p className="text-xs text-gray-500">{totalChars.toLocaleString('de-CH')} Zeichen gesamt</p>
+                                </div>
+                                {weakCount > 0 && (
+                                  <p className="text-xs text-orange-600">{weakCount} Quelle{weakCount > 1 ? 'n' : ''} mit schwacher Extraktion — bitte prüfen.</p>
+                                )}
+                              </div>
+                            )
+                          })()}
+                        </div>
+                      )}
+
+                      {/* Fallback: show single-file result if no multi-file results (backwards compat) */}
+                      {uploadFileResults.length === 0 && uploadAnalysisResult && (
                         <div className="bg-white rounded-lg p-4 border border-green-100 space-y-3">
                           <div>
                             <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold">Erkanntes Thema</p>
@@ -5118,51 +5321,52 @@ const Home = () => {
                           <div className="flex flex-wrap gap-2">
                             {uploadAnalysisResult.subject && <Badge variant="outline" className="text-xs">{uploadAnalysisResult.subject}</Badge>}
                             {uploadAnalysisResult.grade_suggestion && <Badge variant="outline" className="text-xs">{uploadAnalysisResult.grade_suggestion}. Klasse empfohlen</Badge>}
-                            {uploadAnalysisResult.difficulty_suggestion && <Badge variant="outline" className="text-xs">{DIFFICULTY_LABELS[uploadAnalysisResult.difficulty_suggestion] || uploadAnalysisResult.difficulty_suggestion}</Badge>}
                             {uploadStructuredSource && (
                               <Badge variant="outline" className={`text-xs ${uploadStructuredSource.content_quality === 'good' ? 'border-green-300 text-green-700' : uploadStructuredSource.content_quality === 'partial' ? 'border-yellow-300 text-yellow-700' : 'border-red-300 text-red-700'}`}>
                                 {uploadStructuredSource.content_quality === 'good' ? 'Textextraktion vollständig' : uploadStructuredSource.content_quality === 'partial' ? 'Teilweise extrahiert' : 'Schwache Extraktion'}
                               </Badge>
                             )}
                           </div>
-                          {uploadAnalysisResult.key_topics?.length > 0 && (
-                            <div>
-                              <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold mb-1">Erkannte Themen</p>
-                              <div className="flex flex-wrap gap-1.5">
-                                {uploadAnalysisResult.key_topics.map((topic, i) => (
-                                  <span key={i} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">{topic}</span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
                         </div>
                       )}
 
                       <p className="text-sm text-green-700 font-medium">Wählen Sie nun, was daraus erstellt werden soll:</p>
                       <div className="flex flex-wrap gap-2">
-                        {RESOURCE_TYPES.map(rt => (
-                          <Button key={rt.id} variant={rt.id === (uploadAnalysisResult?.material_type_suggestion || 'worksheet') ? 'default' : 'outline'} size="sm" onClick={() => {
-                            const analysis = uploadAnalysisResult || {}
-                            const topicText = analysis.title || uploadedFiles.map(f => f.name).join(', ')
-                            const topicsStr = (analysis.key_topics || []).join(', ')
-                            setForm(prev => ({
-                              ...prev,
-                              resourceType: rt.id,
-                              topic: topicText + (topicsStr ? ` – Schwerpunkte: ${topicsStr}` : '') + (uploadInstructions ? ` – ${uploadInstructions}` : ''),
-                              subject: analysis.subject && SUBJECTS.includes(analysis.subject) ? analysis.subject : prev.subject,
-                              grade: analysis.grade_suggestion || prev.grade,
-                              difficulty: analysis.difficulty_suggestion || prev.difficulty,
-                            }))
-                            setActiveView('create')
-                          }}>
-                            <rt.icon className="h-4 w-4 mr-1.5" /> {rt.label} erstellen
-                          </Button>
-                        ))}
+                        {RESOURCE_TYPES.map(rt => {
+                          // Gather combined analysis from all included files
+                          const included = uploadFileResults.filter(r => r.included && r.analysis)
+                          const firstAnalysis = included[0]?.analysis || uploadAnalysisResult || {}
+                          const allTopics = [...new Set(included.flatMap(r => r.analysis?.key_topics || []))]
+                          const topicText = included.length > 1
+                            ? included.map(r => r.correctedTitle || r.analysis?.title || r.fileName).join('; ')
+                            : (firstAnalysis.title || uploadedFiles.map(f => f.name).join(', '))
+                          const topicsStr = allTopics.join(', ')
+                          // Use first file's suggestions as defaults
+                          const suggestedType = firstAnalysis.material_type_suggestion || 'worksheet'
+                          const suggestedSubject = included.length === 1 ? (included[0]?.correctedSubject || firstAnalysis.subject) : firstAnalysis.subject
+                          const suggestedGrade = included.length === 1 ? (included[0]?.correctedGrade || firstAnalysis.grade_suggestion) : firstAnalysis.grade_suggestion
+
+                          return (
+                            <Button key={rt.id} variant={rt.id === suggestedType ? 'default' : 'outline'} size="sm" onClick={() => {
+                              setForm(prev => ({
+                                ...prev,
+                                resourceType: rt.id,
+                                topic: topicText + (topicsStr ? ` – Schwerpunkte: ${topicsStr}` : '') + (uploadInstructions ? ` – ${uploadInstructions}` : ''),
+                                subject: suggestedSubject && SUBJECTS.includes(suggestedSubject) ? suggestedSubject : prev.subject,
+                                grade: suggestedGrade || prev.grade,
+                                difficulty: firstAnalysis.difficulty_suggestion || prev.difficulty,
+                              }))
+                              setActiveView('create')
+                            }}>
+                              <rt.icon className="h-4 w-4 mr-1.5" /> {rt.label} erstellen
+                            </Button>
+                          )
+                        })}
                       </div>
                     </div>
                   ) : (
                     <Button className="w-full btn-premium" disabled={uploadedFiles.length === 0 || uploadAnalyzing} onClick={handleAnalyzeUpload}>
-                      {uploadAnalyzing ? (<><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Wird analysiert...</>) : (<><Sparkles className="h-4 w-4 mr-2" /> {uploadedFiles.length === 0 ? 'Zuerst Dateien hochladen' : `${uploadedFiles.length} Datei${uploadedFiles.length > 1 ? 'en' : ''} analysieren`}</>)}
+                      {uploadAnalyzing ? (<><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Wird analysiert... ({uploadFileResults.filter(r => !r.analyzing).length}/{uploadedFiles.length})</>) : (<><Sparkles className="h-4 w-4 mr-2" /> {uploadedFiles.length === 0 ? 'Zuerst Dateien hochladen' : `${uploadedFiles.length} Datei${uploadedFiles.length > 1 ? 'en' : ''} analysieren`}</>)}
                     </Button>
                   )}
                 </div>
