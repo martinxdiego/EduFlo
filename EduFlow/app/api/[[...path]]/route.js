@@ -319,6 +319,15 @@ function splitTextIntoSections(text) {
  * Build the intermediate structured document from extraction + AI analysis
  */
 function buildStructuredSource(extraction, aiAnalysis, fileName) {
+  // Build structured content blocks from sections
+  const content_blocks = extraction.sections.map(section => {
+    // Detect exercise/question patterns
+    if (section.type === 'paragraph' && /^(\d+[\.)]\s|Aufgabe|Frage|Exercise|Task)/i.test(section.content)) {
+      return { type: 'question', content: section.content, parent_heading: section.parent_heading || null }
+    }
+    return { type: section.type === 'heading' ? 'text' : section.type, content: section.content, parent_heading: section.parent_heading || null }
+  }).filter(b => b.content && b.content.trim().length > 0)
+
   return {
     document_title: aiAnalysis?.title || fileName,
     detected_subject: aiAnalysis?.subject || null,
@@ -326,8 +335,9 @@ function buildStructuredSource(extraction, aiAnalysis, fileName) {
     extraction_method: extraction.method,
     page_count: extraction.pageCount || null,
     content_quality: extraction.text.length > 200 ? 'good' : extraction.text.length > 20 ? 'partial' : 'weak',
-    sections: extraction.sections.slice(0, 50), // cap sections
-    full_text: extraction.text.substring(0, 12000), // bounded for prompt inclusion
+    content_blocks,
+    sections: extraction.sections.slice(0, 50),
+    full_text: extraction.text.substring(0, 12000),
     key_topics: aiAnalysis?.key_topics || [],
     content_summary: aiAnalysis?.content_summary || '',
     difficulty_suggestion: aiAnalysis?.difficulty_suggestion || 'medium',
@@ -1433,9 +1443,38 @@ Gib:
               ? 'Dies ist eine formale Prüfung. Vergib sinnvolle Punkte pro Aufgabe: einfache Fragen 1P, mittlere 2P, komplexe 3P. Berechne total_points als Summe. Das Format muss professionell und prüfungstauglich sein.'
               : 'Setze "points" bei jeder Frage auf 1 (Arbeitsblätter zeigen keine Punkte an). Setze total_points auf die Anzahl Fragen.'
 
-            const sourceInstruction = sourceText
-              ? `\n\n=== QUELLMATERIAL (hochgeladen) ===\nDie folgenden Inhalte stammen aus einem hochgeladenen Dokument. Stütze deine Fragen und Antworten AUF DIESES MATERIAL. Erfinde keine Fakten, die nicht im Quellmaterial stehen. Wenn das Material nicht ausreicht, kennzeichne unsichere Inhalte oder reduziere die Fragenanzahl.\n\n${sourceText.substring(0, 8000)}\n=== ENDE QUELLMATERIAL ===`
-              : ''
+            let sourceInstruction = ''
+            if (sourceText) {
+              // Try to parse structured sources (new format)
+              let structuredSources = null
+              try { structuredSources = JSON.parse(sourceText) } catch(e) { /* plain text fallback */ }
+
+              if (structuredSources?.sources) {
+                // Structured multi-source format
+                const sourceParts = structuredSources.sources.map((src, i) => {
+                  const blocks = (src.content_blocks || []).map(b => {
+                    if (b.type === 'question') return `[AUFGABE] ${b.content}`
+                    if (b.type === 'table') return `[TABELLE] ${b.content}`
+                    if (b.type === 'list') return `[LISTE] ${b.content}`
+                    if (b.type === 'heading') return `[TITEL] ${b.content}`
+                    return b.content
+                  }).join('\n\n')
+                  return `--- QUELLE ${i + 1}: ${src.title} (${src.type || 'Dokument'}) ---\n${blocks}\n--- ENDE QUELLE ${i + 1} ---`
+                })
+                sourceInstruction = `\n\n=== QUELLMATERIAL (${structuredSources.sources.length} Quelle${structuredSources.sources.length > 1 ? 'n' : ''}) ===
+WICHTIG: Die folgenden Inhalte stammen aus hochgeladenen Dokumenten. Stütze deine Fragen und Antworten AUF DIESES MATERIAL.
+- Verwende die erkannten Aufgaben, Texte und Tabellen als Grundlage.
+- Referenziere intern die Quellen (z.B. "Laut Text 1..." oder "Basierend auf der Tabelle...").
+- Erfinde keine Fakten, die nicht im Quellmaterial stehen.
+- Wenn das Material nicht ausreicht, kennzeichne unsichere Inhalte.
+
+${sourceParts.join('\n\n')}
+=== ENDE QUELLMATERIAL ===`
+              } else {
+                // Plain text fallback (legacy)
+                sourceInstruction = `\n\n=== QUELLMATERIAL (hochgeladen) ===\nDie folgenden Inhalte stammen aus einem hochgeladenen Dokument. Stütze deine Fragen und Antworten AUF DIESES MATERIAL. Erfinde keine Fakten, die nicht im Quellmaterial stehen. Wenn das Material nicht ausreicht, kennzeichne unsichere Inhalte oder reduziere die Fragenanzahl.\n\n${sourceText.substring(0, 8000)}\n=== ENDE QUELLMATERIAL ===`
+              }
+            }
 
             const userPrompt = `Erstelle ${materialType} mit ${questionCount || 10} Fragen zum Thema: ${topic}\n\nDas Material ist für die ${grade}. Klasse in der Schweiz. Formuliere die Fragen klar, abwechslungsreich und didaktisch sinnvoll. Die Sprache soll natürlich klingen, nicht wie ein KI-Generator.${questionTypeInstruction}\n\n${pointsInstruction}${sourceInstruction}`
 
@@ -2990,9 +3029,27 @@ Bitte gib:
         return handleCORS(NextResponse.json({ error: "Thema, Klasse und Fach sind erforderlich." }, { status: 400 }))
       }
 
-      const sourceContext = sourceText
-        ? `\n\n=== QUELLMATERIAL ===\nDas folgende Material wurde hochgeladen. Nutze es als Grundlage für das Dossier. Stütze Theorie, Übungen und Inhalte auf dieses Material. Erfinde keine Fakten ausserhalb des Quellmaterials.\n\n${sourceText.substring(0, 8000)}\n=== ENDE QUELLMATERIAL ===`
-        : ''
+      let sourceContext = ''
+      if (sourceText) {
+        let structuredSources = null
+        try { structuredSources = JSON.parse(sourceText) } catch(e) {}
+
+        if (structuredSources?.sources) {
+          const sourceParts = structuredSources.sources.map((src, i) => {
+            const blocks = (src.content_blocks || []).map(b => {
+              if (b.type === 'question') return `[AUFGABE] ${b.content}`
+              if (b.type === 'table') return `[TABELLE] ${b.content}`
+              if (b.type === 'list') return `[LISTE] ${b.content}`
+              if (b.type === 'heading') return `[TITEL] ${b.content}`
+              return b.content
+            }).join('\n\n')
+            return `--- QUELLE ${i + 1}: ${src.title} ---\n${blocks}\n--- ENDE QUELLE ${i + 1} ---`
+          })
+          sourceContext = `\n\n=== QUELLMATERIAL (${structuredSources.sources.length} Quellen) ===\nNutze diese Materialien als Grundlage für das Dossier. Stütze Theorie, Übungen und Inhalte auf dieses Material.\n\n${sourceParts.join('\n\n')}\n=== ENDE QUELLMATERIAL ===`
+        } else {
+          sourceContext = `\n\n=== QUELLMATERIAL ===\nDas folgende Material wurde hochgeladen. Nutze es als Grundlage für das Dossier.\n\n${sourceText.substring(0, 8000)}\n=== ENDE QUELLMATERIAL ===`
+        }
+      }
 
       const encoder = new TextEncoder()
       const stream = new ReadableStream({
