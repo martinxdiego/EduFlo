@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/ui/badge'
 import { Separator } from '@/ui/separator'
 import { Alert, AlertDescription } from '@/ui/alert'
+import LandingPage from './LandingPage'
 import {
   BookOpen, FileText, PlusCircle, Download, Trash2, RefreshCw,
   Crown, LogOut, Sparkles, Settings, Command as CommandIcon,
@@ -303,6 +304,9 @@ const AppContent = () => {
     sharedWithMe, setSharedWithMe,
     // Gamification
     studentProgress, setStudentProgress,
+    // Editor
+    editMode, setEditMode, editedQuestions, setEditedQuestions,
+    saveStatus, setSaveStatus, hasUnsavedChanges, setHasUnsavedChanges,
   } = useEduFlow()
 
   // Wrappers for context functions that use callback patterns
@@ -2682,76 +2686,15 @@ const AppContent = () => {
 
   if (!token) {
     return (
-      <div className="min-h-screen gradient-liquid overflow-hidden">
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <motion.div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-200 rounded-full mix-blend-multiply filter blur-3xl opacity-30" animate={{ x: [0, 100, 0], y: [0, 50, 0] }} transition={{ duration: 20, repeat: Infinity, ease: "easeInOut" }} />
-          <motion.div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-200 rounded-full mix-blend-multiply filter blur-3xl opacity-30" animate={{ x: [0, -100, 0], y: [0, -50, 0] }} transition={{ duration: 25, repeat: Infinity, ease: "easeInOut" }} />
-        </div>
-        <div className="container mx-auto px-4 py-16 relative z-10">
-          <motion.div className="text-center mb-12" initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }}>
-            <div className="flex items-center justify-center mb-6">
-              <motion.div initial={{ scale: 0 }} animate={{ scale: 1, rotate: 360 }} transition={{ type: "spring", stiffness: 200, damping: 20 }}>
-                <BookOpen className="h-16 w-16 text-blue-500 mr-4" />
-              </motion.div>
-              <h1 className="text-5xl sm:text-7xl font-bold text-gradient">EduFlow</h1>
-            </div>
-            <motion.p className="text-xl sm:text-2xl text-gray-700 max-w-3xl mx-auto leading-relaxed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
-              Erstellen Sie in Sekunden perfekte Arbeitsblätter mit KI – abgestimmt auf den <span className="font-semibold text-blue-600">Lehrplan 21</span>
-            </motion.p>
-          </motion.div>
-
-          <motion.div className="grid sm:grid-cols-2 md:grid-cols-4 gap-6 mb-16 max-w-6xl mx-auto" initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}>
-            {[
-              { icon: Sparkles, title: 'KI-Generierung', description: 'Arbeitsblätter, Prüfungen, Quizze und Vokabellisten in Sekunden' },
-              { icon: Target, title: 'Lehrplan 21', description: 'Alle Inhalte an den Schweizer Lehrplan angepasst' },
-              { icon: Layers, title: 'Differenzierung', description: 'Drei Schwierigkeitsstufen für jeden Lernenden' },
-              { icon: Download, title: 'PDF-Export', description: 'Schüler- und Lehrerversion direkt als PDF' },
-            ].map((feature, index) => (
-              <motion.div key={index} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 + index * 0.1 }} whileHover={{ y: -8 }}>
-                <Card className="glass-card hover-lift border-0 h-full">
-                  <CardHeader className="pb-3">
-                    <feature.icon className="h-10 w-10 text-blue-500 mb-3" />
-                    <CardTitle className="text-lg">{feature.title}</CardTitle>
-                  </CardHeader>
-                  <CardContent><p className="text-gray-600 text-sm">{feature.description}</p></CardContent>
-                </Card>
-              </motion.div>
-            ))}
-          </motion.div>
-
-          <motion.div className="max-w-md mx-auto" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.8 }}>
-            <Card className="glass-card border-0">
-              <CardHeader className="space-y-2">
-                <CardTitle className="text-2xl">{authMode === 'login' ? 'Anmelden' : 'Konto erstellen'}</CardTitle>
-                <CardDescription className="text-base">{authMode === 'login' ? 'Willkommen zurück bei EduFlow.' : 'Kostenlos starten – 5 Materialien gratis pro Monat.'}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <form onSubmit={handleAuth} className="space-y-5">
-                  {authMode === 'register' && (
-                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
-                      <Label className="text-sm font-medium">Ihr Name</Label>
-                      <Input type="text" placeholder="z.B. Anna Müller" value={authForm.name} onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })} required className="input-premium mt-1.5" />
-                    </motion.div>
-                  )}
-                  <div>
-                    <Label className="text-sm font-medium">E-Mail-Adresse</Label>
-                    <Input type="email" placeholder="name@schule.ch" value={authForm.email} onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })} required className="input-premium mt-1.5" />
-                  </div>
-                  <div>
-                    <Label className="text-sm font-medium">Passwort</Label>
-                    <Input type="password" placeholder="Mindestens 8 Zeichen" value={authForm.password} onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })} required className="input-premium mt-1.5" />
-                  </div>
-                  {error && (<motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}><Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert></motion.div>)}
-                  <Button type="submit" className="w-full btn-premium">{authMode === 'login' ? 'Anmelden' : 'Kostenlos registrieren'}</Button>
-                  <Button type="button" variant="ghost" className="w-full" onClick={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setError('') }}>
-                    {authMode === 'login' ? 'Noch kein Konto? Jetzt registrieren' : 'Bereits registriert? Anmelden'}
-                  </Button>
-                </form>
-              </CardContent>
-            </Card>
-          </motion.div>
-        </div>
-      </div>
+      <LandingPage
+        authMode={authMode}
+        setAuthMode={setAuthMode}
+        authForm={authForm}
+        setAuthForm={setAuthForm}
+        handleAuth={handleAuth}
+        error={error}
+        setError={setError}
+      />
     )
   }
 
