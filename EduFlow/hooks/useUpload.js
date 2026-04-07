@@ -138,35 +138,27 @@ export function useUpload(token) {
       }
 
       // Use structured content_blocks if available
-      const blocks = r.structuredSource?.content_blocks || r.structuredSource?.sections?.map(s => ({
+      const blocks = (r.structuredSource?.content_blocks || r.structuredSource?.sections?.map(s => ({
         type: s.type === 'heading' ? 'text' : s.type,
         content: s.content
-      })) || [{ type: 'text', content: r.structuredSource?.full_text || '' }]
+      })) || [{ type: 'text', content: r.structuredSource?.full_text || '' }])
+        .filter(b => b.content && b.content.trim().length > 0)
+
+      // Skip sources with no usable content
+      if (blocks.length === 0) return null
 
       return { title, type, content_blocks: blocks }
     })
 
-    return JSON.stringify({ sources })
+    const validSources = sources.filter(Boolean)
+    if (validSources.length === 0) return undefined
+    return JSON.stringify({ sources: validSources })
   }, [uploadFileResults, uploadStructuredSource])
 
-  // Legacy plain-text fallback for backwards compatibility
+  // Get source text for generation — always uses structured format when possible
   const getCombinedSourceText = useCallback(() => {
-    const structured = getStructuredSources()
-    if (structured) return structured
-
-    const included = uploadFileResults.filter(r => r.included && (r.structuredSource || r.correctedText))
-    if (included.length === 0) return uploadStructuredSource?.full_text || undefined
-    if (included.length === 1) {
-      const r = included[0]
-      return r.correctedText || r.structuredSource?.full_text || undefined
-    }
-    const parts = included.map((r, i) => {
-      const title = r.correctedTitle || r.structuredSource?.document_title || r.fileName
-      const text = r.correctedText || r.structuredSource?.full_text || ''
-      return `--- QUELLE ${i + 1}: ${title} (${r.fileName}) ---\n${text}\n--- ENDE QUELLE ${i + 1} ---`
-    })
-    return parts.join('\n\n')
-  }, [uploadFileResults, uploadStructuredSource, getStructuredSources])
+    return getStructuredSources() || uploadStructuredSource?.full_text || undefined
+  }, [getStructuredSources, uploadStructuredSource])
 
   // Reset upload state for new analysis
   const resetUpload = useCallback(() => {
@@ -178,10 +170,77 @@ export function useUpload(token) {
     setUploadInstructions('')
   }, [])
 
-  // Add more files after analysis (keep existing results)
+  // Add more files after analysis (keep existing results, only analyze new ones)
   const addMoreFiles = useCallback(() => {
     setUploadAnalysisComplete(false)
   }, [])
+
+  // Re-analyze: only process files that haven't been analyzed yet
+  const handleReAnalyze = useCallback(async () => {
+    if (uploadedFiles.length === 0) return
+    setUploadAnalyzing(true)
+
+    // Find files that already have results
+    const existingFileNames = new Set(uploadFileResults.map(r => r.fileName))
+    const newFiles = uploadedFiles.filter(f => !existingFileNames.has(f.name))
+
+    if (newFiles.length === 0) {
+      // All files already analyzed, just mark complete
+      setUploadAnalysisComplete(true)
+      setUploadAnalyzing(false)
+      return uploadFileResults
+    }
+
+    // Create initial results for new files only
+    const newInitialResults = newFiles.map((file) => ({
+      file, fileName: file.name,
+      analysis: null, structuredSource: null,
+      included: true, collapsed: (uploadFileResults.length + newFiles.length) > 1,
+      correctedText: null, correctedTitle: null, correctedSubject: null, correctedGrade: null,
+      analyzing: true, error: null,
+    }))
+
+    // Merge existing + new pending
+    const mergedResults = [...uploadFileResults, ...newInitialResults]
+    setUploadFileResults(mergedResults)
+
+    // Analyze only new files
+    const promises = newFiles.map(async (file, i) => {
+      try {
+        const result = await analyzeSingleFile(file)
+        return { localIdx: i, ...result, error: null }
+      } catch (err) {
+        return {
+          localIdx: i,
+          analysis: { title: file.name, subject: 'Allgemein', grade_suggestion: '5', content_summary: 'Analyse fehlgeschlagen.', key_topics: [], suggested_questions: [], difficulty_suggestion: 'medium', material_type_suggestion: 'worksheet' },
+          structuredSource: null, error: err.message
+        }
+      }
+    })
+
+    const results = await Promise.all(promises)
+    const existingCount = uploadFileResults.length
+
+    setUploadFileResults(prev => prev.map((item, idx) => {
+      if (idx < existingCount) return item // keep existing
+      const localIdx = idx - existingCount
+      const r = results.find(res => res.localIdx === localIdx)
+      if (!r) return item
+      return { ...item, analysis: r.analysis, structuredSource: r.structuredSource, analyzing: false, error: r.error }
+    }))
+
+    // Update overall analysis from first good result if not set
+    if (!uploadAnalysisResult) {
+      const firstGood = results.find(r => r.analysis)
+      if (firstGood) {
+        setUploadAnalysisResult(firstGood.analysis)
+        setUploadStructuredSource(firstGood.structuredSource)
+      }
+    }
+
+    setUploadAnalysisComplete(true)
+    setUploadAnalyzing(false)
+  }, [uploadedFiles, uploadFileResults, uploadAnalysisResult, analyzeSingleFile])
 
   return {
     uploadDragOver, setUploadDragOver,
@@ -192,7 +251,7 @@ export function useUpload(token) {
     uploadAnalysisResult, uploadStructuredSource,
     fileInputRef,
     handleFileDrop, handleRemoveFile,
-    handleAnalyzeUpload, updateFileResult,
+    handleAnalyzeUpload, handleReAnalyze, updateFileResult,
     getCombinedSourceText, getStructuredSources,
     resetUpload, addMoreFiles,
   }

@@ -321,11 +321,13 @@ function splitTextIntoSections(text) {
 function buildStructuredSource(extraction, aiAnalysis, fileName) {
   // Build structured content blocks from sections
   const content_blocks = extraction.sections.map(section => {
-    // Detect exercise/question patterns
-    if (section.type === 'paragraph' && /^(\d+[\.)]\s|Aufgabe|Frage|Exercise|Task)/i.test(section.content)) {
+    // Map exercise type from Vision/OCR and detect exercise/question patterns
+    if (section.type === 'exercise' || (section.type === 'paragraph' && /^(\d+[\.)]\s|Aufgabe|Frage|Exercise|Task)/i.test(section.content))) {
       return { type: 'question', content: section.content, parent_heading: section.parent_heading || null }
     }
-    return { type: section.type === 'heading' ? 'text' : section.type, content: section.content, parent_heading: section.parent_heading || null }
+    // Normalize heading → text for content blocks
+    const type = section.type === 'heading' ? 'text' : section.type
+    return { type, content: section.content, parent_heading: section.parent_heading || null }
   }).filter(b => b.content && b.content.trim().length > 0)
 
   return {

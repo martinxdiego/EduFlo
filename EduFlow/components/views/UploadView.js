@@ -22,7 +22,7 @@ export default function UploadView({ RESOURCE_TYPES, SUBJECTS }) {
     uploadAnalyzing, uploadAnalysisComplete,
     uploadFileResults, uploadAnalysisResult, uploadStructuredSource,
     fileInputRef,
-    handleFileDrop, handleRemoveFile, handleAnalyzeUpload, updateFileResult,
+    handleFileDrop, handleRemoveFile, handleAnalyzeUpload, handleReAnalyze, updateFileResult,
     resetUpload, addMoreFiles,
     setForm, setActiveView, setSuccessMessage,
   } = ctx
@@ -202,11 +202,11 @@ export default function UploadView({ RESOURCE_TYPES, SUBJECTS }) {
               </div>
             </div>
           ) : (
-            <Button className="w-full btn-premium" disabled={uploadedFiles.length === 0 || uploadAnalyzing} onClick={handleAnalyzeUpload}>
+            <Button className="w-full btn-premium" disabled={uploadedFiles.length === 0 || uploadAnalyzing} onClick={uploadFileResults.length > 0 ? handleReAnalyze : handleAnalyzeUpload}>
               {uploadAnalyzing ? (
                 <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Wird analysiert... ({uploadFileResults.filter(r => !r.analyzing).length}/{uploadedFiles.length})</>
               ) : (
-                <><Sparkles className="h-4 w-4 mr-2" /> {uploadedFiles.length === 0 ? 'Zuerst Dateien hochladen' : `${uploadedFiles.length} Datei${uploadedFiles.length > 1 ? 'en' : ''} analysieren`}</>
+                <><Sparkles className="h-4 w-4 mr-2" /> {uploadedFiles.length === 0 ? 'Zuerst Dateien hochladen' : uploadFileResults.length > 0 ? `Neue Dateien analysieren` : `${uploadedFiles.length} Datei${uploadedFiles.length > 1 ? 'en' : ''} analysieren`}</>
               )}
             </Button>
           )}
