@@ -307,6 +307,10 @@ const AppContent = () => {
     // Editor
     editMode, setEditMode, editedQuestions, setEditedQuestions,
     saveStatus, setSaveStatus, hasUnsavedChanges, setHasUnsavedChanges,
+    // Library filters
+    librarySearch, setLibrarySearch,
+    libraryFilterSubject, setLibraryFilterSubject,
+    libraryFilterGrade, setLibraryFilterGrade,
   } = useEduFlow()
 
   // Wrappers for context functions that use callback patterns
