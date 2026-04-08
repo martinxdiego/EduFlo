@@ -123,8 +123,33 @@ export function EduFlowProvider({ children }) {
   // EFFECTS
   // ============================================================
 
-  // Init from storage
+  // Init from storage or Google OAuth callback
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const googleCode = params.get('google_code')
+    const googleError = params.get('google_error')
+
+    // Clean up URL params
+    if (googleCode || googleError) {
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+
+    if (googleCode) {
+      auth.handleGoogleCallback(googleCode).then(result => {
+        if (result?.success && result.token) {
+          auth.fetchCurrentUser(result.token).then(userData => {
+            if (userData?.teacher_type) {
+              worksheetsMgr.fetchWorksheets(result.token)
+              fetchDossiers(result.token)
+              loadAssignments(result.token)
+              loadTeacherClasses(result.token)
+            }
+          })
+        }
+      })
+      return
+    }
+
     const savedToken = auth.initFromStorage()
     if (savedToken) {
       auth.fetchCurrentUser(savedToken).then(userData => {

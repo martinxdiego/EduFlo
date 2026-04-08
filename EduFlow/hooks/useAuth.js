@@ -57,6 +57,48 @@ export function useAuth() {
     return { success: false, error: errorMsg }
   }, [authMode, authForm])
 
+  const handleGoogleLogin = useCallback(() => {
+    const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
+    const redirectUri = `${window.location.origin}/api/auth/google/callback`
+
+    const params = new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'email profile',
+      access_type: 'offline',
+      prompt: 'select_account',
+    })
+
+    // Redirect to Google (no popup — avoids COOP issues)
+    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`
+  }, [])
+
+  const handleGoogleCallback = useCallback(async (code) => {
+    try {
+      const response = await fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      })
+      const data = await response.json()
+
+      if (response.ok) {
+        setToken(data.token)
+        setUser(data.user)
+        localStorage.setItem('teachertime_token', data.token)
+        if (!data.user.teacher_type) {
+          setShowOnboarding(true)
+        }
+        return { success: true, token: data.token, user: data.user }
+      } else {
+        return { success: false, error: data.error || 'Google-Anmeldung fehlgeschlagen.' }
+      }
+    } catch (err) {
+      return { success: false, error: 'Verbindungsfehler bei Google-Anmeldung.' }
+    }
+  }, [])
+
   const handleLogout = useCallback(() => {
     localStorage.removeItem('teachertime_token')
     setToken(null)
@@ -99,7 +141,7 @@ export function useAuth() {
     showOnboarding, setShowOnboarding,
     selectedTeacherType, setSelectedTeacherType,
     savingTeacherType,
-    fetchCurrentUser, handleAuth, handleLogout, handleSaveTeacherType,
+    fetchCurrentUser, handleAuth, handleGoogleLogin, handleGoogleCallback, handleLogout, handleSaveTeacherType,
     initFromStorage,
   }
 }

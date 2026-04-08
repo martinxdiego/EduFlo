@@ -504,6 +504,93 @@ async function handleRoute(request, { params }) {
       return handleCORS(NextResponse.json({ success: true, teacher_type }))
     }
 
+    // Google OAuth - POST /api/auth/google
+    if (route === '/auth/google' && method === 'POST') {
+      const body = await request.json()
+      const { code } = body
+
+      if (!code) {
+        return handleCORS(NextResponse.json(
+          { error: 'Authorization code is required' },
+          { status: 400 }
+        ))
+      }
+
+      // Exchange authorization code for tokens
+      const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code,
+          client_id: process.env.GOOGLE_CLIENT_ID,
+          client_secret: process.env.GOOGLE_CLIENT_SECRET,
+          redirect_uri: `${request.headers.get('x-forwarded-proto') || 'http'}://${request.headers.get('host')}/api/auth/google/callback`,
+          grant_type: 'authorization_code',
+        }),
+      })
+
+      const tokenData = await tokenResponse.json()
+
+      if (tokenData.error) {
+        return handleCORS(NextResponse.json(
+          { error: `Google OAuth error: ${tokenData.error_description || tokenData.error}` },
+          { status: 400 }
+        ))
+      }
+
+      // Get user info from Google
+      const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      })
+
+      const googleUser = await userInfoResponse.json()
+
+      if (!googleUser.email) {
+        return handleCORS(NextResponse.json(
+          { error: 'Could not retrieve email from Google' },
+          { status: 400 }
+        ))
+      }
+
+      // Check if user exists by google_id or email
+      let user = await db.collection('users').findOne({
+        $or: [{ google_id: googleUser.id }, { email: googleUser.email }]
+      })
+
+      if (user) {
+        // Existing user — merge google_id if not set yet
+        if (!user.google_id) {
+          await db.collection('users').updateOne(
+            { id: user.id },
+            { $set: { google_id: googleUser.id } }
+          )
+        }
+      } else {
+        // New user — create account
+        user = {
+          id: uuidv4(),
+          email: googleUser.email,
+          name: googleUser.name || googleUser.email.split('@')[0],
+          google_id: googleUser.id,
+          subscription_tier: 'free',
+          worksheets_used_this_month: 0,
+          created_at: new Date(),
+          month_reset_date: new Date(),
+        }
+        await db.collection('users').insertOne(user)
+      }
+
+      // Generate JWT
+      const token = jwt.sign(
+        { userId: user.id, email: user.email },
+        process.env.JWT_SECRET,
+        { expiresIn: '7d' }
+      )
+
+      const { password_hash: _, _id: __, ...userWithoutPassword } = user
+      return handleCORS(NextResponse.json({ user: userWithoutPassword, token }))
+    }
+
     // ========== STUDENT AUTH ==========
 
     // Register student - POST /api/student/register

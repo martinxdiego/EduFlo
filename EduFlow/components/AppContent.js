@@ -240,7 +240,7 @@ const AppContent = () => {
     // Auth
     token, user, setUser, authMode, setAuthMode, authForm, setAuthForm,
     showOnboarding, setShowOnboarding, selectedTeacherType, setSelectedTeacherType,
-    savingTeacherType, handleAuth: _ctxHandleAuth, handleLogout,
+    savingTeacherType, handleAuth: _ctxHandleAuth, handleGoogleLogin, handleLogout,
     handleSaveTeacherType: _ctxHandleSaveTeacherType,
     fetchCurrentUser, onAuthSuccess,
     // Worksheets
@@ -2696,6 +2696,7 @@ const AppContent = () => {
         authForm={authForm}
         setAuthForm={setAuthForm}
         handleAuth={handleAuth}
+        handleGoogleLogin={handleGoogleLogin}
         error={error}
         setError={setError}
       />
