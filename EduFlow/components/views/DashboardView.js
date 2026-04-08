@@ -6,6 +6,7 @@ import {
   PlusCircle, FileText, ChevronRight, Send, Users, GraduationCap
 } from 'lucide-react'
 import { useEduFlow } from '@/contexts/EduFlowContext'
+import { WelcomeBanner } from '@/components/OnboardingHint'
 
 export default function DashboardView({ STARTER_TEMPLATES, handleUseTemplate }) {
   const ctx = useEduFlow()
@@ -22,6 +23,7 @@ export default function DashboardView({ STARTER_TEMPLATES, handleUseTemplate }) 
 
   return (
     <motion.div key="home" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.4 }} className="max-w-6xl mx-auto">
+      <WelcomeBanner />
       {/* Hero greeting */}
       <div className="mb-8">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>

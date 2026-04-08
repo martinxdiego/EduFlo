@@ -40,6 +40,7 @@ import { LEHRPLAN_CYCLES, searchCompetencies, getAllSubjects, getSubjectsForCycl
 import { getThemeById } from '@/data/worksheetThemes'
 import { DashboardView, GeneratorView, LibraryView, UploadView, SettingsView } from '@/components/views'
 import { useEduFlow } from '@/contexts/EduFlowContext'
+import OnboardingHint from '@/components/OnboardingHint'
 
 // ============================================================
 // CONSTANTS
@@ -3305,6 +3306,9 @@ const AppContent = () => {
           {/* ============ SCHULJAHRESPLANER VIEW ============ */}
           {activeView === 'planner' && (
             <motion.div key="planner" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-6xl mx-auto">
+              <OnboardingHint id="planner">
+                Planen Sie hier Ihr gesamtes Schuljahr — ordnen Sie Themen den Kalenderwochen zu und behalten Sie den Überblick über Ihre Materialien und Prüfungen.
+              </OnboardingHint>
               <div className="mb-6 flex items-end justify-between flex-wrap gap-4">
                 <div>
                   <h2 className="text-3xl font-bold text-gradient mb-1">Schuljahresplaner</h2>
@@ -3599,6 +3603,9 @@ const AppContent = () => {
           {/* ============ SCHÜLER-MODUS VIEW ============ */}
           {activeView === 'students' && (
             <motion.div key="students" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-6xl mx-auto">
+              <OnboardingHint id="students">
+                Weisen Sie hier Arbeitsblätter an Ihre Klassen zu. Ihre Schüler:innen können die Aufgaben online lösen — Sie sehen die Ergebnisse und häufige Fehler auf einen Blick.
+              </OnboardingHint>
               <div className="mb-6 flex items-end justify-between flex-wrap gap-4">
                 <div>
                   <h2 className="text-3xl font-bold text-gradient mb-1">Schüler-Modus</h2>
@@ -4171,6 +4178,9 @@ const AppContent = () => {
           {/* ============ KLASSEN VIEW ============ */}
           {activeView === 'classes' && (
             <motion.div key="classes" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-6xl mx-auto">
+              <OnboardingHint id="classes">
+                Erstellen Sie Klassen und fügen Sie Ihre Schüler:innen hinzu. So können Sie Materialien gezielt zuweisen und den Lernfortschritt pro Klasse verfolgen.
+              </OnboardingHint>
               <div className="mb-6 flex items-end justify-between flex-wrap gap-4">
                 <div>
                   <h2 className="text-3xl font-bold text-gradient mb-1">Klassenverwaltung</h2>
