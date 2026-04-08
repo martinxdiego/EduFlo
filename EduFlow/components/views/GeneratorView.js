@@ -23,7 +23,7 @@ import {
   Wand2, Save, GripVertical, ArrowUp, ArrowDown,
   Shuffle, CircleDot, Palette,
   Pen, PanelRightOpen, Send, Minus, User,
-  Table2
+  Table2, ImagePlus, AlignLeft, AlignCenter, AlignRight
 } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { LEHRPLAN_CYCLES } from '@/data/lehrplan21'
@@ -81,6 +81,20 @@ const QUESTION_TYPES = [
   { id: 'ordering', label: 'Reihenfolge', icon: ListOrdered, description: 'Elemente in die richtige Reihenfolge bringen', color: 'indigo' },
   { id: 'either_or', label: 'Entweder-Oder', icon: GitBranch, description: 'Zwischen zwei Optionen entscheiden', color: 'red' },
   { id: 'table', label: 'Tabelle', icon: Table2, description: 'Vergleichstabelle, Zuordnung oder Ausfülltabelle', color: 'slate' },
+  { id: 'image_block', label: 'Bildfeld', icon: ImagePlus, description: 'Bild einfügen mit Grösse und Ausrichtung', color: 'teal' },
+]
+
+const IMAGE_SIZES = [
+  { id: 'small', label: 'Klein', width: '25%', pdfWidth: 40 },
+  { id: 'medium', label: 'Mittel', width: '50%', pdfWidth: 80 },
+  { id: 'large', label: 'Gross', width: '75%', pdfWidth: 120 },
+  { id: 'full', label: 'Volle Breite', width: '100%', pdfWidth: 160 },
+]
+
+const IMAGE_ALIGNMENTS = [
+  { id: 'left', label: 'Links', icon: AlignLeft },
+  { id: 'center', label: 'Mitte', icon: AlignCenter },
+  { id: 'right', label: 'Rechts', icon: AlignRight },
 ]
 
 const KI_ACTIONS = [
@@ -139,7 +153,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
   const saveEdits = async () => {
     if (selectedWorksheet && editedQuestions.length > 0) {
       setSaveStatus('saving')
-      const totalPoints = editedQuestions.reduce((sum, q) => sum + (q.points || 1), 0)
+      const totalPoints = editedQuestions.reduce((sum, q) => q.type === 'image_block' ? sum : sum + (q.points || 1), 0)
       const updatedContent = {
         ...selectedWorksheet.content,
         questions: editedQuestions,
@@ -175,7 +189,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
   const saveDraft = async () => {
     if (selectedWorksheet && editedQuestions.length > 0) {
       setSaveStatus('saving')
-      const totalPoints = editedQuestions.reduce((sum, q) => sum + (q.points || 1), 0)
+      const totalPoints = editedQuestions.reduce((sum, q) => q.type === 'image_block' ? sum : sum + (q.points || 1), 0)
       const updatedContent = { ...selectedWorksheet.content, questions: editedQuestions, total_points: totalPoints }
       const updated = { ...selectedWorksheet, content: updatedContent }
 
@@ -273,11 +287,12 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
       ordering: { question: 'Bringe die folgenden Schritte in die richtige Reihenfolge:', answer: '', type: 'ordering' },
       either_or: { question: 'Wähle die richtige Aussage:', options: ['A) Erste Aussage', 'B) Zweite Aussage'], answer: 'A) Erste Aussage', type: 'either_or' },
       table: { question: 'Fülle die Tabelle aus:', answer: '', type: 'table', tableHeaders: ['Spalte 1', 'Spalte 2', 'Spalte 3'], tableRows: [['', '', ''], ['', '', '']] },
+      image_block: { question: '', answer: '', type: 'image_block', imageUrl: '', imageSize: 'medium', imageAlignment: 'center', imageCaption: '' },
     }
     const template = templates[type] || templates.open
     setEditedQuestions(prev => {
       const insertAt = afterIndex >= 0 ? afterIndex + 1 : prev.length
-      const newQ = { ...template, number: insertAt + 1, points: 1 }
+      const newQ = { ...template, number: insertAt + 1, points: type === 'image_block' ? 0 : 1 }
       const result = [...prev.slice(0, insertAt), newQ, ...prev.slice(insertAt)]
       return result.map((q, i) => ({ ...q, number: i + 1 }))
     })
@@ -321,7 +336,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
         else if (newType === 'either_or') q.options = ['A) Erste Aussage', 'B) Zweite Aussage']
         else q.options = ['A) Option 1', 'B) Option 2', 'C) Option 3', 'D) Option 4']
       }
-      if (['open', 'math', 'image', 'fill_blank', 'ordering', 'matching'].includes(newType)) {
+      if (['open', 'math', 'image', 'fill_blank', 'ordering', 'matching', 'image_block'].includes(newType)) {
         delete q.options
       }
       updated[index] = q
@@ -361,7 +376,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
             answer: updatedQ.answer || updated[questionIndex].answer,
             points: updatedQ.points || updated[questionIndex].points,
           }
-          if (['open', 'math', 'image', 'fill_blank', 'ordering', 'matching'].includes(updatedQ.type)) {
+          if (['open', 'math', 'image', 'fill_blank', 'ordering', 'matching', 'image_block'].includes(updatedQ.type)) {
             delete updated[questionIndex].options
           }
           return updated
@@ -658,7 +673,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
 
                       {/* Question Body */}
                       <div className="p-4 space-y-3">
-                        {useRichEditor ? (
+                        {q.type !== 'image_block' && (useRichEditor ? (
                           <RichTextEditor
                             content={q.question}
                             onChange={(html) => updateEditedQuestion(index, 'question', html.replace(/<[^>]*>/g, '').trim() ? html : '')}
@@ -668,7 +683,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                         ) : (
                           <Textarea value={q.question} onChange={(e) => updateEditedQuestion(index, 'question', e.target.value)}
                             placeholder="Fragetext eingeben..." className="text-sm min-h-[50px] bg-gray-50 border-gray-200 focus:bg-white resize-y" />
-                        )}
+                        ))}
 
                         {/* MC / True-False / Either-Or: Options editor */}
                         {(q.type === 'multiple_choice' || q.type === 'true_false' || q.type === 'either_or' || (q.options && !['matching', 'ordering', 'fill_blank'].includes(q.type))) && q.options && (
@@ -1012,8 +1027,137 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                           </div>
                         )}
 
+                        {/* Image Block editor */}
+                        {q.type === 'image_block' && (
+                          <div className="space-y-3">
+                            <Label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Bildfeld</Label>
+
+                            {/* Size & Alignment controls */}
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1.5">Grösse</p>
+                                <div className="grid grid-cols-2 gap-1.5">
+                                  {IMAGE_SIZES.map(s => (
+                                    <button key={s.id} onClick={() => updateEditedQuestion(index, 'imageSize', s.id)}
+                                      className={`text-[10px] px-2 py-1.5 rounded-lg border transition-all text-center ${(q.imageSize || 'medium') === s.id ? 'bg-teal-100 border-teal-300 text-teal-700 shadow-sm' : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-teal-200'}`}>
+                                      {s.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              <div>
+                                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1.5">Ausrichtung</p>
+                                <div className="flex gap-1.5">
+                                  {IMAGE_ALIGNMENTS.map(a => (
+                                    <button key={a.id} onClick={() => updateEditedQuestion(index, 'imageAlignment', a.id)}
+                                      className={`flex-1 flex items-center justify-center gap-1 text-[10px] px-2 py-1.5 rounded-lg border transition-all ${(q.imageAlignment || 'center') === a.id ? 'bg-teal-100 border-teal-300 text-teal-700 shadow-sm' : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-teal-200'}`}>
+                                      <a.icon className="h-3 w-3" />
+                                      {a.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Image content: upload or AI generate */}
+                            <div className="bg-teal-50 border-2 border-dashed border-teal-300 rounded-lg p-4 text-center">
+                              {q.imageUrl ? (
+                                <div className="space-y-2">
+                                  <div className={`flex ${q.imageAlignment === 'left' ? 'justify-start' : q.imageAlignment === 'right' ? 'justify-end' : 'justify-center'}`}>
+                                    <img src={q.imageUrl} alt="Bild" className="rounded-lg object-contain shadow-sm border"
+                                      style={{ maxWidth: IMAGE_SIZES.find(s => s.id === (q.imageSize || 'medium'))?.width || '50%', maxHeight: '200px' }} />
+                                  </div>
+                                  <div className="flex items-center justify-center gap-2">
+                                    <Button variant="ghost" size="sm" onClick={() => updateEditedQuestion(index, 'imageUrl', '')} className="text-xs text-red-500">
+                                      <Trash2 className="h-3 w-3 mr-1" /> Entfernen
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="space-y-3">
+                                  <ImagePlus className="h-10 w-10 mx-auto text-teal-400 mb-1" />
+
+                                  {/* File Upload */}
+                                  <div>
+                                    <label className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-teal-200 rounded-lg cursor-pointer hover:bg-teal-50 transition-colors">
+                                      <Upload className="h-4 w-4 text-teal-600" />
+                                      <span className="text-xs font-medium text-teal-700">Bild hochladen</span>
+                                      <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                                        const file = e.target.files?.[0]
+                                        if (!file) return
+                                        const reader = new FileReader()
+                                        reader.onload = (ev) => updateEditedQuestion(index, 'imageUrl', ev.target.result)
+                                        reader.readAsDataURL(file)
+                                      }} />
+                                    </label>
+                                  </div>
+
+                                  {/* AI Generate */}
+                                  <div className="bg-white rounded-xl p-4 border border-teal-200 max-w-md mx-auto text-left space-y-3">
+                                    <p className="text-xs font-semibold text-gray-700 flex items-center gap-1.5">
+                                      <Sparkles className="h-3.5 w-3.5 text-purple-500" /> KI-Bild generieren
+                                    </p>
+                                    <Textarea
+                                      placeholder="Beschreiben Sie das gewünschte Bild, z.B.&#10;• Ein Schmetterling im Garten&#10;• Verdauungssystem des Menschen"
+                                      value={imagePrompt}
+                                      onChange={(e) => setImagePrompt(e.target.value)}
+                                      className="text-xs min-h-[60px] resize-none"
+                                    />
+                                    <div>
+                                      <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1.5">Stil wählen</p>
+                                      <div className="grid grid-cols-4 gap-1.5">
+                                        {[
+                                          { id: 'educational', label: 'Lehr-Illustration', emoji: '\u{1F4DA}' },
+                                          { id: 'kindgerecht', label: 'Kindgerecht', emoji: '\u{1F9D2}' },
+                                          { id: 'cartoon', label: 'Cartoon', emoji: '\u{1F3A8}' },
+                                          { id: 'realistic', label: 'Realistisch', emoji: '\u{1F4F7}' },
+                                          { id: 'diagram', label: 'Diagramm', emoji: '\u{1F4CA}' },
+                                          { id: 'line-art', label: 'Strichzeichnung', emoji: '\u{270F}\u{FE0F}' },
+                                          { id: 'schwarz-weiss', label: 'Schwarz-Weiss', emoji: '\u{1F5A4}' },
+                                          { id: 'druckfreundlich', label: 'Druckfreundlich', emoji: '\u{1F5A8}\u{FE0F}' },
+                                        ].map(s => (
+                                          <button key={s.id} onClick={() => setImageStyle(s.id)}
+                                            className={`text-[10px] px-2 py-1.5 rounded-lg border transition-all text-center ${imageStyle === s.id ? 'bg-purple-100 border-purple-300 text-purple-700 shadow-sm' : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-purple-200 hover:bg-purple-50/50'}`}>
+                                            <span className="block text-sm mb-0.5">{s.emoji}</span>
+                                            {s.label}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+                                    <Button size="sm" className="w-full btn-premium text-xs h-9"
+                                      disabled={imageGenerating || !imagePrompt.trim()}
+                                      onClick={() => handleGenerateImage(index, imagePrompt, imageStyle)}>
+                                      {imageGenerating ? (
+                                        <><RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Bild wird generiert...</>
+                                      ) : (
+                                        <><Sparkles className="h-3.5 w-3.5 mr-1.5" /> Bild generieren</>
+                                      )}
+                                    </Button>
+                                  </div>
+
+                                  {/* URL input */}
+                                  <div className="flex items-center gap-2 text-[10px] text-gray-400">
+                                    <div className="flex-1 h-px bg-gray-200" />
+                                    <span>oder Bild-URL einfügen</span>
+                                    <div className="flex-1 h-px bg-gray-200" />
+                                  </div>
+                                  <Input placeholder="https://..." onChange={(e) => updateEditedQuestion(index, 'imageUrl', e.target.value)}
+                                    className="text-xs bg-white max-w-sm mx-auto" />
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Caption */}
+                            <div>
+                              <Label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Bildunterschrift (optional)</Label>
+                              <Input value={q.imageCaption || ''} onChange={(e) => updateEditedQuestion(index, 'imageCaption', e.target.value)}
+                                placeholder="z.B. Abbildung 1: Der Wasserkreislauf" className="text-sm mt-1" />
+                            </div>
+                          </div>
+                        )}
+
                         {/* Open / Generic answer field */}
-                        {(q.type === 'open' || (!['multiple_choice', 'true_false', 'either_or', 'fill_blank', 'matching', 'ordering', 'math', 'image'].includes(q.type) && !q.options)) && (
+                        {(q.type === 'open' || (!['multiple_choice', 'true_false', 'either_or', 'fill_blank', 'matching', 'ordering', 'math', 'image', 'image_block'].includes(q.type) && !q.options)) && (
                           <div>
                             <Label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Erwartete Antwort / Lösung</Label>
                             <Textarea value={q.answer || ''} onChange={(e) => updateEditedQuestion(index, 'answer', e.target.value)}
@@ -1023,7 +1167,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                       </div>
 
                       {/* KI Actions Bar */}
-                      <div className="px-4 py-2 border-t bg-gradient-to-r from-purple-50/50 to-blue-50/50">
+                      {q.type !== 'image_block' && <div className="px-4 py-2 border-t bg-gradient-to-r from-purple-50/50 to-blue-50/50">
                         <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
                           <Wand2 className="h-3.5 w-3.5 text-purple-500 flex-shrink-0 mr-1" />
                           {KI_ACTIONS.slice(0, 6).map(action => (
@@ -1048,7 +1192,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                             </SelectContent>
                           </Select>
                         </div>
-                      </div>
+                      </div>}
 
                       {/* KI Action Loading overlay */}
                       {activeKiAction?.questionIndex === index && (
@@ -1104,6 +1248,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                         borderLeftWidth: wsTheme.styles.questionStyle.includes('border-l-4') ? '4px' : undefined,
                         borderStyle: wsTheme.styles.questionStyle.includes('dashed') ? 'dashed' : undefined,
                       }}>
+                      {q.type !== 'image_block' ? (
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <p className={`font-semibold text-base text-gray-900 flex-1 ${wsTheme.styles.fontFamily}`}>
                           {qDecoration && <span className="mr-1.5">{qDecoration}</span>}
@@ -1115,6 +1260,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /></svg>
                         </button>
                       </div>
+                      ) : null}
 
                       {/* MC / True-False / Either-Or options */}
                       {q.options && ['multiple_choice', 'true_false', 'either_or'].includes(q.type || 'multiple_choice') && (
@@ -1248,8 +1394,27 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                         </div>
                       )}
 
+                      {/* Image block preview */}
+                      {q.type === 'image_block' && (
+                        <div className={`mt-3 flex ${q.imageAlignment === 'left' ? 'justify-start' : q.imageAlignment === 'right' ? 'justify-end' : 'justify-center'}`}>
+                          <div style={{ width: IMAGE_SIZES.find(s => s.id === (q.imageSize || 'medium'))?.width || '50%' }}>
+                            {q.imageUrl ? (
+                              <img src={q.imageUrl} alt={q.imageCaption || 'Bild'} className="w-full rounded-lg object-contain border shadow-sm" />
+                            ) : (
+                              <div className="border-2 border-dashed rounded-lg p-8 text-center" style={{ backgroundColor: wsTheme.colors.primaryLight + '20', borderColor: wsTheme.colors.accent + '40' }}>
+                                <ImagePlus className="h-10 w-10 mx-auto mb-2" style={{ color: wsTheme.colors.accent + '80' }} />
+                                <p className="text-xs" style={{ color: wsTheme.colors.accent }}>Bildfeld – Bild einfügen</p>
+                              </div>
+                            )}
+                            {q.imageCaption && (
+                              <p className="text-xs text-gray-500 italic mt-1.5 text-center">{q.imageCaption}</p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Writing lines for open/generic questions */}
-                      {(q.type === 'open' || (!q.options && !['fill_blank', 'matching', 'ordering', 'math', 'image', 'table'].includes(q.type))) && (
+                      {(q.type === 'open' || (!q.options && !['fill_blank', 'matching', 'ordering', 'math', 'image', 'image_block', 'table'].includes(q.type))) && (
                         <div className="mt-3 ml-1 space-y-3">
                           {Array.from({ length: (q.points || 1) >= 3 ? 4 : (q.points || 1) >= 2 ? 3 : 2 }).map((_, i) => (
                             <div key={i} className="h-6" style={{ borderBottom: `1px solid ${wsTheme.colors.accent}40` }} />

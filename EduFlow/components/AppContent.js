@@ -27,7 +27,7 @@ import {
   ArrowLeftRight, Type, ListOrdered, GitBranch,
   ChevronUp, Save, Shuffle, Bot, CircleDot,
   Users, UserMinus, LayoutDashboard,
-  Table2, School, Check
+  Table2, School, Check, ImagePlus
 } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import jsPDF from 'jspdf'
@@ -95,6 +95,7 @@ const QUESTION_TYPES = [
   { id: 'ordering', label: 'Reihenfolge', icon: ListOrdered, description: 'Elemente in die richtige Reihenfolge bringen', color: 'indigo' },
   { id: 'either_or', label: 'Entweder-Oder', icon: GitBranch, description: 'Zwischen zwei Optionen entscheiden', color: 'red' },
   { id: 'table', label: 'Tabelle', icon: Table2, description: 'Vergleichstabelle, Zuordnung oder Ausfülltabelle', color: 'slate' },
+  { id: 'image_block', label: 'Bildfeld', icon: ImagePlus, description: 'Bild einfügen mit Grösse und Ausrichtung', color: 'teal' },
 ]
 
 const KI_ACTIONS = [
@@ -610,6 +611,68 @@ const AppContent = () => {
     worksheet.content?.questions?.forEach((q, qIdx) => {
       checkPage(60)
       const qType = q.type || (q.options ? 'multiple_choice' : 'open')
+
+      // === Image Block: standalone image with size/alignment ===
+      if (qType === 'image_block') {
+        const sizeMap = { small: 40, medium: 80, large: 120, full: pageWidth - 40 }
+        const imgW = sizeMap[q.imageSize || 'medium'] || 80
+        const imgH = imgW * 0.6 // aspect ratio placeholder
+        const align = q.imageAlignment || 'center'
+        const imgX = align === 'left' ? 20 : align === 'right' ? pageWidth - 20 - imgW : (pageWidth - imgW) / 2
+        checkPage(imgH + 15)
+
+        if (q.imageUrl && q.imageUrl.startsWith('data:image')) {
+          try {
+            doc.addImage(q.imageUrl, 'PNG', imgX, yPosition, imgW, imgH)
+          } catch (e) {
+            // Fallback: placeholder box
+            setDrawHex(tc.accent + '60')
+            setFillHex(tc.primaryLight)
+            doc.setLineWidth(0.3)
+            doc.roundedRect(imgX, yPosition, imgW, imgH, 2, 2, 'FD')
+            doc.setFontSize(8)
+            doc.setFont('helvetica', 'italic')
+            doc.setTextColor(140, 140, 140)
+            doc.text('[Bild konnte nicht geladen werden]', imgX + imgW / 2, yPosition + imgH / 2, { align: 'center' })
+          }
+        } else if (q.imageUrl) {
+          // External URL - show placeholder with note
+          setDrawHex(tc.accent + '60')
+          setFillHex(tc.primaryLight)
+          doc.setLineWidth(0.3)
+          doc.roundedRect(imgX, yPosition, imgW, imgH, 2, 2, 'FD')
+          doc.setFontSize(8)
+          doc.setFont('helvetica', 'italic')
+          doc.setTextColor(140, 140, 140)
+          doc.text('[Externes Bild]', imgX + imgW / 2, yPosition + imgH / 2, { align: 'center' })
+        } else {
+          // Empty placeholder
+          setDrawHex(tc.accent + '60')
+          setFillHex(tc.primaryLight)
+          doc.setLineWidth(0.3)
+          doc.roundedRect(imgX, yPosition, imgW, imgH, 2, 2, 'FD')
+          doc.setFontSize(8)
+          doc.setFont('helvetica', 'italic')
+          doc.setTextColor(140, 140, 140)
+          doc.text('[Bildfeld]', imgX + imgW / 2, yPosition + imgH / 2, { align: 'center' })
+        }
+        yPosition += imgH + 3
+        doc.setLineWidth(0.2)
+
+        // Caption
+        if (q.imageCaption) {
+          doc.setFontSize(8)
+          doc.setFont('helvetica', 'italic')
+          doc.setTextColor(100, 100, 100)
+          const captionX = align === 'left' ? 20 : align === 'right' ? pageWidth - 20 : pageWidth / 2
+          const captionAlign = align === 'left' ? 'left' : align === 'right' ? 'right' : 'center'
+          doc.text(sanitizePdfText(q.imageCaption), captionX, yPosition, { align: captionAlign })
+          yPosition += 6
+        }
+        doc.setTextColor(0, 0, 0)
+        yPosition += 5
+        return // skip normal question rendering
+      }
 
       // Question number in themed circle/badge
       setFillHex(tc.accent)
@@ -1194,6 +1257,29 @@ const AppContent = () => {
     questions.forEach((q) => {
       const qType = q.type || (q.options ? 'multiple_choice' : 'open')
       const pointsSuffix = showPoints ? `  (${q.points || 1}P)` : ''
+
+      // === Image Block: standalone image placeholder ===
+      if (qType === 'image_block') {
+        const alignMap = { left: AlignmentType.LEFT, center: AlignmentType.CENTER, right: AlignmentType.RIGHT }
+        children.push(
+          new Paragraph({
+            children: [new TextRun({ text: '[Bildfeld]', italics: true, size: 20, color: '999999' })],
+            alignment: alignMap[q.imageAlignment || 'center'] || AlignmentType.CENTER,
+            spacing: { before: 200, after: 60 },
+            border: thinBorder,
+          })
+        )
+        if (q.imageCaption) {
+          children.push(
+            new Paragraph({
+              children: [new TextRun({ text: q.imageCaption, italics: true, size: 16, color: '666666' })],
+              alignment: alignMap[q.imageAlignment || 'center'] || AlignmentType.CENTER,
+              spacing: { after: 120 },
+            })
+          )
+        }
+        return
+      }
 
       // Question text
       children.push(
@@ -1901,11 +1987,12 @@ const AppContent = () => {
       ordering: { question: 'Bringe die folgenden Schritte in die richtige Reihenfolge:', answer: '', type: 'ordering' },
       either_or: { question: 'Wähle die richtige Aussage:', options: ['A) Erste Aussage', 'B) Zweite Aussage'], answer: 'A) Erste Aussage', type: 'either_or' },
       table: { question: 'Fülle die Tabelle aus:', answer: '', type: 'table', tableHeaders: ['Spalte 1', 'Spalte 2', 'Spalte 3'], tableRows: [['', '', ''], ['', '', '']] },
+      image_block: { question: '', answer: '', type: 'image_block', imageUrl: '', imageSize: 'medium', imageAlignment: 'center', imageCaption: '' },
     }
     const template = templates[type] || templates.open
     setEditedQuestions(prev => {
       const insertAt = afterIndex >= 0 ? afterIndex + 1 : prev.length
-      const newQ = { ...template, number: insertAt + 1, points: 1 }
+      const newQ = { ...template, number: insertAt + 1, points: type === 'image_block' ? 0 : 1 }
       const result = [...prev.slice(0, insertAt), newQ, ...prev.slice(insertAt)]
       return result.map((q, i) => ({ ...q, number: i + 1 }))
     })
@@ -1950,7 +2037,7 @@ const AppContent = () => {
         else if (newType === 'either_or') q.options = ['A) Erste Aussage', 'B) Zweite Aussage']
         else q.options = ['A) Option 1', 'B) Option 2', 'C) Option 3', 'D) Option 4']
       }
-      if (['open', 'math', 'image', 'fill_blank', 'ordering', 'matching'].includes(newType)) {
+      if (['open', 'math', 'image', 'fill_blank', 'ordering', 'matching', 'image_block'].includes(newType)) {
         delete q.options
       }
       updated[index] = q
@@ -1992,7 +2079,7 @@ const AppContent = () => {
             points: updatedQ.points || updated[questionIndex].points,
           }
           // Remove options for types that don't need them
-          if (['open', 'math', 'image', 'fill_blank', 'ordering', 'matching'].includes(updatedQ.type)) {
+          if (['open', 'math', 'image', 'fill_blank', 'ordering', 'matching', 'image_block'].includes(updatedQ.type)) {
             delete updated[questionIndex].options
           }
           return updated

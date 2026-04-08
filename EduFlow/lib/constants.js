@@ -1,6 +1,6 @@
 import {
   FileText, ClipboardList, Lightbulb, Languages, BookOpen,
-  ListChecks, ToggleLeft, MessageSquare, Calculator, Image,
+  ListChecks, ToggleLeft, MessageSquare, Calculator, Image, ImagePlus,
   ArrowLeftRight, Type, ListOrdered, GitBranch, Table2,
   ChevronUp, ChevronDown, PlusCircle, Shuffle, Target, Sparkles
 } from 'lucide-react'
@@ -64,6 +64,7 @@ export const QUESTION_TYPES = [
   { id: 'ordering', label: 'Reihenfolge', icon: ListOrdered, description: 'Elemente in die richtige Reihenfolge bringen', color: 'indigo' },
   { id: 'either_or', label: 'Entweder-Oder', icon: GitBranch, description: 'Zwischen zwei Optionen entscheiden', color: 'red' },
   { id: 'table', label: 'Tabelle', icon: Table2, description: 'Vergleichstabelle, Zuordnung oder Ausfülltabelle', color: 'slate' },
+  { id: 'image_block', label: 'Bildfeld', icon: ImagePlus, description: 'Bild einfügen mit Grösse und Ausrichtung', color: 'teal' },
 ]
 
 // ============================================================
