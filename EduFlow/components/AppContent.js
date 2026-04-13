@@ -285,6 +285,8 @@ const AppContent = () => {
     plannerMonth, setPlannerMonth, plannerYear, setPlannerYear,
     plannerView, setPlannerView, plannerWeekStart, setPlannerWeekStart,
     quickAddForm, setQuickAddForm,
+    plannerSelectedDay, setPlannerSelectedDay,
+    draggedEvent, setDraggedEvent,
     // Assignments
     assignments, setAssignments, selectedAssignment, setSelectedAssignment,
     assignmentSubmissions, setAssignmentSubmissions, errorAnalysis, setErrorAnalysis,
@@ -710,8 +712,39 @@ const AppContent = () => {
 
       yPosition += questionLines.length * 5 + 4
 
-      // === MC / True-False / Either-Or: clean print-friendly style ===
-      if (['multiple_choice', 'true_false', 'either_or'].includes(qType) && q.options) {
+      // === True-False: always exactly Wahr + Falsch boxes ===
+      if (qType === 'true_false') {
+        checkPage(18)
+        yPosition += 4
+        const boxWidth = 35
+        const boxHeight = 10
+        const startX = 30
+        const gap = 8
+        const tfLabels = ['Wahr', 'Falsch']
+
+        tfLabels.forEach((label, oi) => {
+          const xPos = startX + oi * (boxWidth + gap)
+
+          // Rounded box
+          doc.setDrawColor(oi === 0 ? 76 : 220, oi === 0 ? 175 : 80, oi === 0 ? 80 : 80)
+          doc.setLineWidth(0.5)
+          doc.roundedRect(xPos, yPosition - 3, boxWidth, boxHeight, 2, 2)
+
+          // Circle to mark
+          doc.setDrawColor(oi === 0 ? 76 : 220, oi === 0 ? 175 : 80, oi === 0 ? 80 : 80)
+          doc.circle(xPos + 5, yPosition + 2, 2.2)
+
+          // Label text
+          doc.setFont('helvetica', 'bold')
+          doc.setFontSize(10)
+          doc.setTextColor(oi === 0 ? 34 : 153, oi === 0 ? 120 : 27, oi === 0 ? 34 : 27)
+          doc.text(label, xPos + 10, yPosition + 3.5)
+        })
+        yPosition += boxHeight + 5
+      }
+
+      // === MC / Either-Or: clean print-friendly style ===
+      if (['multiple_choice', 'either_or'].includes(qType) && q.options) {
         doc.setFont('helvetica', 'normal')
         doc.setFontSize(10)
         yPosition += 3
@@ -957,7 +990,7 @@ const AppContent = () => {
       // === Open questions: writing lines ===
       if (qType === 'open' && version === 'student') {
         const pts = q.points || 1
-        const lineCount = pts >= 3 ? 5 : pts >= 2 ? 3 : 2
+        const lineCount = q.lineCount || (pts >= 3 ? 5 : pts >= 2 ? 3 : 2)
         setDrawHex(tp_pdf.lineColor)
         for (let i = 0; i < lineCount; i++) {
           checkPage(10)
@@ -1470,7 +1503,7 @@ const AppContent = () => {
       // === Open questions: writing lines ===
       if (qType === 'open' && version === 'student') {
         const pts = q.points || 1
-        const lineCount = pts >= 3 ? 5 : pts >= 2 ? 3 : 2
+        const lineCount = q.lineCount || (pts >= 3 ? 5 : pts >= 2 ? 3 : 2)
         for (let i = 0; i < lineCount; i++) {
           children.push(
             new Paragraph({
@@ -1886,7 +1919,6 @@ const AppContent = () => {
       setHasUnsavedChanges(false)
       setEditMode(false)
       setEditedQuestions([])
-      setUseRichEditor(false)
       setSuccessMessage('Gespeichert! Vorschau wird angezeigt.')
     }
   }
@@ -2225,6 +2257,44 @@ const AppContent = () => {
 
   const removePlannerEvent = (eventId) => {
     setPlannerEvents(prev => prev.filter(e => e.id !== eventId))
+  }
+
+  const movePlannerEvent = (eventId, newDate) => {
+    setPlannerEvents(prev => prev.map(e => e.id === eventId ? { ...e, date: newDate } : e))
+  }
+
+  const handleDragStart = (e, event) => {
+    setDraggedEvent(event)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', event.id)
+    e.currentTarget.style.opacity = '0.5'
+  }
+
+  const handleDragEnd = (e) => {
+    e.currentTarget.style.opacity = '1'
+    setDraggedEvent(null)
+  }
+
+  const handleDragOver = (e) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+  }
+
+  const handleDrop = (e, targetDate) => {
+    e.preventDefault()
+    const eventId = e.dataTransfer.getData('text/plain')
+    if (eventId && targetDate) {
+      movePlannerEvent(eventId, targetDate)
+      setSuccessMessage('Termin verschoben!')
+    }
+    setDraggedEvent(null)
+  }
+
+  const getDayEvents = (dateStr) => {
+    return plannerEvents.filter(e => e.date === dateStr).sort((a, b) => {
+      const typeOrder = { exam: 0, deadline: 1, lesson: 2, project: 3, material: 4, holiday: 5 }
+      return (typeOrder[a.type] || 4) - (typeOrder[b.type] || 4)
+    })
   }
 
   const getPlannerDays = () => {
@@ -2972,7 +3042,7 @@ const AppContent = () => {
       </AnimatePresence>
 
       {/* MAIN CONTENT */}
-      <main className="container mx-auto px-4 pt-20 pb-32" role="main">
+      <main className="container mx-auto px-3 sm:px-4 pt-16 sm:pt-20 pb-24 sm:pb-32" role="main">
         <AnimatePresence mode="wait">
 
           {/* ============ HOME VIEW ============ */}
@@ -3434,8 +3504,9 @@ const AppContent = () => {
                   <div className="flex bg-gray-100 rounded-lg p-0.5">
                     <button onClick={() => setPlannerView('month')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${plannerView === 'month' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}>Monat</button>
                     <button onClick={() => setPlannerView('week')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${plannerView === 'week' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}>Woche</button>
+                    <button onClick={() => { setPlannerView('day'); setPlannerSelectedDay(new Date().toISOString().split('T')[0]) }} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${plannerView === 'day' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}>Tag</button>
                   </div>
-                  <Button variant="outline" size="sm" className="text-xs" onClick={() => { setPlannerMonth(new Date().getMonth()); setPlannerYear(new Date().getFullYear()); const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); setPlannerWeekStart(d.toISOString().split('T')[0]) }}>
+                  <Button variant="outline" size="sm" className="text-xs" onClick={() => { setPlannerMonth(new Date().getMonth()); setPlannerYear(new Date().getFullYear()); const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); setPlannerWeekStart(d.toISOString().split('T')[0]); setPlannerSelectedDay(new Date().toISOString().split('T')[0]) }}>
                     Heute
                   </Button>
                 </div>
@@ -3443,7 +3514,7 @@ const AppContent = () => {
 
               {/* Navigation */}
               <div className="glass-card rounded-xl p-4 mb-6">
-                {plannerView === 'month' ? (
+                {plannerView === 'month' && (
                   <>
                     <div className="flex items-center justify-between">
                       <Button variant="outline" size="sm" onClick={() => { if (plannerMonth === 0) { setPlannerMonth(11); setPlannerYear(plannerYear - 1) } else setPlannerMonth(plannerMonth - 1) }}>
@@ -3466,7 +3537,8 @@ const AppContent = () => {
                       ))}
                     </div>
                   </>
-                ) : (
+                )}
+                {plannerView === 'week' && (
                   <div className="flex items-center justify-between">
                     <Button variant="outline" size="sm" onClick={() => { const d = new Date(plannerWeekStart); d.setDate(d.getDate() - 7); setPlannerWeekStart(d.toISOString().split('T')[0]) }}>
                       <ChevronRight className="h-4 w-4 rotate-180" />
@@ -3477,6 +3549,22 @@ const AppContent = () => {
                       </h3>
                     </div>
                     <Button variant="outline" size="sm" onClick={() => { const d = new Date(plannerWeekStart); d.setDate(d.getDate() + 7); setPlannerWeekStart(d.toISOString().split('T')[0]) }}>
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+                {plannerView === 'day' && (
+                  <div className="flex items-center justify-between">
+                    <Button variant="outline" size="sm" onClick={() => { const d = new Date(plannerSelectedDay); d.setDate(d.getDate() - 1); setPlannerSelectedDay(d.toISOString().split('T')[0]) }}>
+                      <ChevronRight className="h-4 w-4 rotate-180" />
+                    </Button>
+                    <div className="text-center">
+                      <h3 className="text-lg font-bold text-gray-900">
+                        {new Date(plannerSelectedDay).toLocaleDateString('de-CH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                      </h3>
+                      <p className="text-xs text-gray-500">{getDayEvents(plannerSelectedDay).length} Einträge</p>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => { const d = new Date(plannerSelectedDay); d.setDate(d.getDate() + 1); setPlannerSelectedDay(d.toISOString().split('T')[0]) }}>
                       <ChevronRight className="h-4 w-4" />
                     </Button>
                   </div>
@@ -3498,16 +3586,23 @@ const AppContent = () => {
                           const isWeekend = (idx % 7) >= 5
                           return (
                             <div key={cell.date}
-                              className={`min-h-[85px] border-b border-r border-gray-100 p-1.5 transition-colors cursor-pointer hover:bg-blue-50/50 ${isToday ? 'bg-blue-50 ring-1 ring-inset ring-blue-300' : isWeekend ? 'bg-gray-50/50' : ''}`}
+                              className={`min-h-[85px] border-b border-r border-gray-100 p-1.5 transition-colors cursor-pointer hover:bg-blue-50/50 ${isToday ? 'bg-blue-50 ring-1 ring-inset ring-blue-300' : isWeekend ? 'bg-gray-50/50' : ''} ${draggedEvent ? 'hover:ring-2 hover:ring-inset hover:ring-blue-300' : ''}`}
                               onClick={() => setQuickAddForm(prev => ({ ...prev, date: cell.date }))}
+                              onDragOver={handleDragOver}
+                              onDrop={(e) => handleDrop(e, cell.date)}
                             >
-                              <div className={`text-xs font-medium mb-1 ${isToday ? 'text-blue-700 font-bold' : 'text-gray-700'}`}>{cell.day}</div>
+                              <div className={`text-xs font-medium mb-1 cursor-pointer hover:text-blue-600 ${isToday ? 'text-blue-700 font-bold' : 'text-gray-700'}`}
+                                onClick={(e) => { e.stopPropagation(); setPlannerSelectedDay(cell.date); setPlannerView('day') }}
+                              >{cell.day}</div>
                               <div className="space-y-0.5">
                                 {cell.events.slice(0, 3).map(event => {
                                   const subjectColor = event.subject && SUBJECT_COLORS[event.subject]
                                   return (
                                     <div key={event.id}
-                                      className={`text-[9px] px-1 py-0.5 rounded truncate font-medium ${
+                                      draggable
+                                      onDragStart={(e) => handleDragStart(e, event)}
+                                      onDragEnd={handleDragEnd}
+                                      className={`text-[9px] px-1 py-0.5 rounded truncate font-medium cursor-grab active:cursor-grabbing ${
                                         subjectColor ? `${subjectColor.bg} ${subjectColor.text}` :
                                         event.type === 'exam' ? 'bg-red-100 text-red-700' :
                                         event.type === 'deadline' ? 'bg-amber-100 text-amber-700' :
@@ -3538,10 +3633,15 @@ const AppContent = () => {
                         {getWeekDays(plannerWeekStart).map(day => {
                           const isToday = day.date === new Date().toISOString().split('T')[0]
                           return (
-                            <div key={day.date} className={`p-3 ${isToday ? 'bg-blue-50/50' : ''} hover:bg-gray-50/50 transition-colors cursor-pointer`}
-                              onClick={() => setQuickAddForm(prev => ({ ...prev, date: day.date }))}>
+                            <div key={day.date}
+                              className={`p-3 ${isToday ? 'bg-blue-50/50' : ''} hover:bg-gray-50/50 transition-colors cursor-pointer ${draggedEvent ? 'border-2 border-dashed border-transparent hover:border-blue-300' : ''}`}
+                              onClick={() => setQuickAddForm(prev => ({ ...prev, date: day.date }))}
+                              onDragOver={handleDragOver}
+                              onDrop={(e) => handleDrop(e, day.date)}
+                            >
                               <div className="flex items-center gap-3 mb-2">
-                                <div className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center ${isToday ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                                <div className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center cursor-pointer ${isToday ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-blue-100'}`}
+                                  onClick={(e) => { e.stopPropagation(); setPlannerSelectedDay(day.date); setPlannerView('day') }}>
                                   <span className="text-[10px] font-medium leading-none">{day.dayName}</span>
                                   <span className="text-sm font-bold leading-none">{day.day}</span>
                                 </div>
@@ -3553,7 +3653,11 @@ const AppContent = () => {
                                       {day.events.map(event => {
                                         const subjectColor = event.subject && SUBJECT_COLORS[event.subject]
                                         return (
-                                          <div key={event.id} className={`text-xs px-2.5 py-1 rounded-lg font-medium flex items-center gap-1.5 ${
+                                          <div key={event.id}
+                                            draggable
+                                            onDragStart={(e) => handleDragStart(e, event)}
+                                            onDragEnd={handleDragEnd}
+                                            className={`text-xs px-2.5 py-1 rounded-lg font-medium flex items-center gap-1.5 cursor-grab active:cursor-grabbing ${
                                             subjectColor ? `${subjectColor.bg} ${subjectColor.text}` :
                                             event.type === 'exam' ? 'bg-red-100 text-red-700' :
                                             event.type === 'deadline' ? 'bg-amber-100 text-amber-700' :
@@ -3572,6 +3676,80 @@ const AppContent = () => {
                             </div>
                           )
                         })}
+                      </div>
+                    </Card>
+                  )}
+
+                  {/* Day View */}
+                  {plannerView === 'day' && (
+                    <Card className="glass-card border-0 overflow-hidden">
+                      <div className="p-6"
+                        onDragOver={handleDragOver}
+                        onDrop={(e) => handleDrop(e, plannerSelectedDay)}
+                      >
+                        <div className="flex items-center gap-3 mb-6">
+                          <div className={`w-16 h-16 rounded-2xl flex flex-col items-center justify-center ${plannerSelectedDay === new Date().toISOString().split('T')[0] ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                            <span className="text-xs font-medium leading-none">{new Date(plannerSelectedDay).toLocaleDateString('de-CH', { weekday: 'short' })}</span>
+                            <span className="text-2xl font-bold leading-none mt-0.5">{new Date(plannerSelectedDay).getDate()}</span>
+                          </div>
+                          <div>
+                            <h3 className="text-lg font-bold text-gray-900">{new Date(plannerSelectedDay).toLocaleDateString('de-CH', { weekday: 'long' })}</h3>
+                            <p className="text-sm text-gray-500">{getDayEvents(plannerSelectedDay).length} Einträge für diesen Tag</p>
+                          </div>
+                        </div>
+
+                        {getDayEvents(plannerSelectedDay).length === 0 ? (
+                          <div className="text-center py-12">
+                            <Calendar className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                            <p className="text-gray-500 text-sm">Keine Einträge für diesen Tag.</p>
+                            <p className="text-gray-400 text-xs mt-1">Klicken Sie rechts auf "Hinzufügen" oder ziehen Sie einen Termin hierher.</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            {getDayEvents(plannerSelectedDay).map(event => {
+                              const subjectColor = event.subject && SUBJECT_COLORS[event.subject]
+                              const typeLabels = { material: 'Material', exam: 'Prüfung', deadline: 'Frist', holiday: 'Ferien', lesson: 'Lektion', project: 'Projekt' }
+                              return (
+                                <div key={event.id}
+                                  draggable
+                                  onDragStart={(e) => handleDragStart(e, event)}
+                                  onDragEnd={handleDragEnd}
+                                  className={`p-4 rounded-xl border-l-4 cursor-grab active:cursor-grabbing transition-all hover:shadow-md ${
+                                    subjectColor ? `bg-white ${subjectColor.border.replace('border-', 'border-l-')}` :
+                                    event.type === 'exam' ? 'bg-white border-l-red-500' :
+                                    event.type === 'deadline' ? 'bg-white border-l-amber-500' :
+                                    event.type === 'holiday' ? 'bg-white border-l-green-500' :
+                                    event.type === 'project' ? 'bg-white border-l-purple-500' :
+                                    event.type === 'lesson' ? 'bg-white border-l-indigo-500' :
+                                    'bg-white border-l-blue-500'
+                                  }`}
+                                >
+                                  <div className="flex items-start justify-between">
+                                    <div className="flex-1">
+                                      <h4 className="font-semibold text-gray-900">{event.title}</h4>
+                                      <div className="flex items-center gap-2 mt-1.5">
+                                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                                          subjectColor ? `${subjectColor.bg} ${subjectColor.text}` :
+                                          event.type === 'exam' ? 'bg-red-100 text-red-700' :
+                                          event.type === 'deadline' ? 'bg-amber-100 text-amber-700' :
+                                          event.type === 'holiday' ? 'bg-green-100 text-green-700' :
+                                          event.type === 'project' ? 'bg-purple-100 text-purple-700' :
+                                          event.type === 'lesson' ? 'bg-indigo-100 text-indigo-700' :
+                                          'bg-blue-100 text-blue-700'
+                                        }`}>{typeLabels[event.type] || event.type}</span>
+                                        {event.subject && <span className="text-xs text-gray-500">{event.subject}</span>}
+                                      </div>
+                                    </div>
+                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-gray-300 hover:text-red-500"
+                                      onClick={() => { if (confirm(`"${event.title}" löschen?`)) removePlannerEvent(event.id) }}>
+                                      <X className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
                       </div>
                     </Card>
                   )}
@@ -4841,7 +5019,21 @@ const AppContent = () => {
                   <Sparkles className="h-12 w-12 text-blue-500" />
                 </motion.div>
                 <h2 className="text-2xl font-bold text-gray-900 mb-2">KI erstellt Ihr Material</h2>
-                <p className="text-gray-600 text-sm">Geschätzte Zeit: ~{Math.max(10, form.questionCount * 2)} Sekunden für {form.questionCount} Fragen</p>
+                <p className="text-gray-600 text-sm">
+                  {(() => {
+                    const currentProgress = generationProgress.length > 0 ? generationProgress[generationProgress.length - 1].progress : 0
+                    const totalEstimate = Math.max(10, form.questionCount * 2)
+                    const remaining = Math.max(1, Math.round(totalEstimate * (100 - currentProgress) / 100))
+                    if (currentProgress >= 100) return 'Fertig!'
+                    if (currentProgress > 0) return `~${remaining} Sekunden verbleibend`
+                    return `Geschätzte Zeit: ~${totalEstimate} Sekunden für ${form.questionCount} Fragen`
+                  })()}
+                </p>
+                {generationProgress.length > 0 && generationProgress[generationProgress.length - 1].progress < 100 && (
+                  <motion.p animate={{ opacity: [0.5, 1, 0.5] }} transition={{ duration: 2, repeat: Infinity }} className="text-blue-500 text-xs mt-1 font-medium">
+                    Bitte nicht schliessen...
+                  </motion.p>
+                )}
               </div>
               <div className="space-y-3 mb-8">
                 {generationProgress.map((stage, index) => (
@@ -4871,10 +5063,25 @@ const AppContent = () => {
                 </div>
               )}
               <div className="space-y-2">
-                <div className="flex justify-between text-xs text-gray-600"><span>Gesamtfortschritt</span><span>{generationProgress.length > 0 ? generationProgress[generationProgress.length - 1].progress : 0}%</span></div>
-                <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
-                  <motion.div className="h-full bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500" style={{ width: generationProgress.length > 0 ? `${generationProgress[generationProgress.length - 1].progress}%` : '0%', backgroundSize: '200% 100%' }} />
+                <div className="flex justify-between text-xs text-gray-600">
+                  <span>Gesamtfortschritt</span>
+                  <span className="font-semibold">{generationProgress.length > 0 ? generationProgress[generationProgress.length - 1].progress : 0}%</span>
                 </div>
+                <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
+                  <motion.div
+                    className="h-full bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 rounded-full"
+                    initial={{ width: '0%' }}
+                    animate={{
+                      width: generationProgress.length > 0 ? `${generationProgress[generationProgress.length - 1].progress}%` : '0%',
+                      backgroundPosition: ['0% 50%', '100% 50%'],
+                    }}
+                    transition={{ width: { duration: 0.5, ease: 'easeOut' }, backgroundPosition: { duration: 2, repeat: Infinity, ease: 'linear' } }}
+                    style={{ backgroundSize: '200% 100%' }}
+                  />
+                </div>
+                {streamingQuestions.length > 0 && (
+                  <p className="text-xs text-center text-gray-500">{streamingQuestions.length} von {form.questionCount} Fragen generiert</p>
+                )}
               </div>
             </motion.div>
           </motion.div>

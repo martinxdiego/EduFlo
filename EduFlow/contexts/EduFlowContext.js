@@ -43,6 +43,9 @@ export function EduFlowProvider({ children }) {
   const [librarySearch, setLibrarySearch] = useState('')
   const [libraryFilterSubject, setLibraryFilterSubject] = useState('all')
   const [libraryFilterGrade, setLibraryFilterGrade] = useState('all')
+  const [libraryFilterDifficulty, setLibraryFilterDifficulty] = useState('all')
+  const [libraryFilterType, setLibraryFilterType] = useState('all')
+  const [librarySortBy, setLibrarySortBy] = useState('newest')
 
   // Template state
   const [templateSearch, setTemplateSearch] = useState('')
@@ -78,6 +81,8 @@ export function EduFlowProvider({ children }) {
     const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.toISOString().split('T')[0]
   })
   const [quickAddForm, setQuickAddForm] = useState({ date: '', title: '', type: 'material', subject: '' })
+  const [plannerSelectedDay, setPlannerSelectedDay] = useState(new Date().toISOString().split('T')[0])
+  const [draggedEvent, setDraggedEvent] = useState(null)
 
   // Assignment state
   const [assignments, setAssignments] = useState([])
@@ -354,6 +359,9 @@ export function EduFlowProvider({ children }) {
     librarySearch, setLibrarySearch,
     libraryFilterSubject, setLibraryFilterSubject,
     libraryFilterGrade, setLibraryFilterGrade,
+    libraryFilterDifficulty, setLibraryFilterDifficulty,
+    libraryFilterType, setLibraryFilterType,
+    librarySortBy, setLibrarySortBy,
     // Templates
     templateSearch, setTemplateSearch,
     templateFilterSubject, setTemplateFilterSubject,
@@ -376,6 +384,8 @@ export function EduFlowProvider({ children }) {
     plannerMonth, setPlannerMonth, plannerYear, setPlannerYear,
     plannerView, setPlannerView, plannerWeekStart, setPlannerWeekStart,
     quickAddForm, setQuickAddForm,
+    plannerSelectedDay, setPlannerSelectedDay,
+    draggedEvent, setDraggedEvent,
     // Assignments
     assignments, setAssignments,
     selectedAssignment, setSelectedAssignment,
