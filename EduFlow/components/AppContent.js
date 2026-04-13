@@ -1635,6 +1635,87 @@ const AppContent = () => {
   // CHAT ASSISTANT
   // ============================================================
 
+  // Execute tool calls from AI assistant
+  const executeChatToolCall = async (toolCall) => {
+    const { name, arguments: args } = toolCall
+
+    switch (name) {
+      case 'modify_question': {
+        if (!selectedWorksheet || !editedQuestions?.length) return { success: false, message: 'Kein Arbeitsblatt im Bearbeitungsmodus.' }
+        const idx = args.questionIndex
+        if (idx < 0 || idx >= editedQuestions.length) return { success: false, message: `Frage ${idx + 1} existiert nicht.` }
+
+        // Trigger the existing KI action
+        await handleKiAction(idx, args.action)
+        return { success: true, message: `Frage ${idx + 1} wurde mit Aktion "${args.action}" bearbeitet.` }
+      }
+
+      case 'add_questions': {
+        if (!selectedWorksheet) return { success: false, message: 'Kein Arbeitsblatt ausgewählt.' }
+        // Generate questions via KI and add them
+        try {
+          const response = await fetch('/api/chat-add-questions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({
+              count: args.count,
+              type: args.type,
+              topic: args.topic || selectedWorksheet.title,
+              difficulty: args.difficulty || selectedWorksheet.difficulty,
+              subject: selectedWorksheet.subject,
+              grade: selectedWorksheet.grade,
+              existingQuestions: (selectedWorksheet.content?.questions || []).map(q => q.question)
+            })
+          })
+          if (response.ok) {
+            const data = await response.json()
+            if (data.questions?.length) {
+              setEditedQuestions(prev => [...prev, ...data.questions])
+              markUnsaved()
+              return { success: true, message: `${data.questions.length} neue ${args.type}-Fragen hinzugefügt.` }
+            }
+          }
+        } catch (e) { /* falls through to fallback */ }
+        return { success: false, message: 'Fragen konnten nicht generiert werden.' }
+      }
+
+      case 'export_worksheet': {
+        if (!selectedWorksheet) return { success: false, message: 'Kein Arbeitsblatt ausgewählt.' }
+        if (args.format === 'pdf') {
+          handleExportPDF(selectedWorksheet, args.version)
+        } else {
+          handleExportDOCX(selectedWorksheet, args.version)
+        }
+        return { success: true, message: `${args.format.toUpperCase()} (${args.version === 'student' ? 'Schülerversion' : 'Lehrerversion'}) wird exportiert.` }
+      }
+
+      case 'navigate_to': {
+        setActiveView(args.view)
+        return { success: true, message: `Navigiere zu "${args.view}".` }
+      }
+
+      case 'regenerate_worksheet': {
+        if (!selectedWorksheet) return { success: false, message: 'Kein Arbeitsblatt ausgewählt.' }
+        handleRegenerate(selectedWorksheet._id || selectedWorksheet.id, args.difficulty)
+        return { success: true, message: `Material wird mit Schwierigkeit "${args.difficulty}" neu generiert.` }
+      }
+
+      case 'create_differentiated_versions': {
+        if (!selectedWorksheet) return { success: false, message: 'Kein Arbeitsblatt ausgewählt.' }
+        // Generate for each requested difficulty level
+        for (const level of args.levels) {
+          if (level !== selectedWorksheet.difficulty) {
+            handleRegenerate(selectedWorksheet._id || selectedWorksheet.id, level)
+          }
+        }
+        return { success: true, message: `Differenzierte Versionen (${args.levels.join(', ')}) werden erstellt.` }
+      }
+
+      default:
+        return { success: false, message: `Unbekannte Aktion: ${name}` }
+    }
+  }
+
   const handleChatSend = async (directMessage) => {
     const message = (typeof directMessage === 'string' && directMessage) ? directMessage : chatInput
     if (!message || !message.trim()) return
@@ -1644,13 +1725,21 @@ const AppContent = () => {
     setChatLoading(true)
 
     try {
+      // Build rich worksheet context with full question content
       const worksheetContext = selectedWorksheet ? {
         title: selectedWorksheet.title,
         subject: selectedWorksheet.subject,
         grade: selectedWorksheet.grade,
         difficulty: selectedWorksheet.difficulty,
         questionCount: selectedWorksheet.content?.questions?.length || 0,
-        questionTypes: [...new Set((selectedWorksheet.content?.questions || []).map(q => q.type).filter(Boolean))].join(', ')
+        questionTypes: [...new Set((selectedWorksheet.content?.questions || []).map(q => q.type).filter(Boolean))].join(', '),
+        questions: (selectedWorksheet.content?.questions || []).map(q => ({
+          type: q.type,
+          question: q.question,
+          options: q.options,
+          answer: q.answer,
+          points: q.points
+        }))
       } : null
 
       const response = await fetch('/api/chat', {
@@ -1659,172 +1748,91 @@ const AppContent = () => {
         body: JSON.stringify({
           message,
           worksheetContext,
-          chatHistory: chatMessages.slice(-10)
+          chatHistory: chatMessages.slice(-30)
         })
       })
 
-      if (response.ok) {
-        const data = await response.json()
-        setChatMessages(prev => [...prev, { role: 'assistant', content: data.reply }])
-      } else {
-        // Fallback to local responses if API fails
-        setChatMessages(prev => [...prev, { role: 'assistant', content: getLocalChatResponse(message, selectedWorksheet) }])
+      if (!response.ok) {
+        setChatMessages(prev => [...prev, { role: 'assistant', content: 'Fehler bei der Verbindung zum KI-Assistenten. Bitte versuchen Sie es erneut.' }])
+        setChatLoading(false)
+        return
+      }
+
+      // Stream the response
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let assistantContent = ''
+      let toolCallsExecuted = []
+
+      // Add an empty assistant message that we'll stream into
+      setChatMessages(prev => [...prev, { role: 'assistant', content: '' }])
+
+      let buffer = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n\n')
+        buffer = lines.pop() || '' // Keep incomplete data in buffer
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const data = JSON.parse(line.slice(6))
+
+            if (data.type === 'text') {
+              assistantContent += data.content
+              setChatMessages(prev => {
+                const updated = [...prev]
+                updated[updated.length - 1] = { role: 'assistant', content: assistantContent }
+                return updated
+              })
+            }
+
+            if (data.type === 'tool_call') {
+              // Execute the tool call
+              const result = await executeChatToolCall(data)
+              toolCallsExecuted.push({ name: data.name, result })
+
+              // Show tool execution feedback
+              const toolIcon = result.success ? '✅' : '⚠️'
+              const toolMsg = `${toolIcon} ${result.message}`
+              if (assistantContent) assistantContent += '\n\n'
+              assistantContent += toolMsg
+              setChatMessages(prev => {
+                const updated = [...prev]
+                updated[updated.length - 1] = { role: 'assistant', content: assistantContent, toolCalls: toolCallsExecuted }
+                return updated
+              })
+            }
+
+            if (data.type === 'error') {
+              assistantContent += data.content
+              setChatMessages(prev => {
+                const updated = [...prev]
+                updated[updated.length - 1] = { role: 'assistant', content: assistantContent }
+                return updated
+              })
+            }
+          } catch (e) {
+            // Skip malformed SSE lines
+          }
+        }
+      }
+
+      // If we got no content at all, show an error
+      if (!assistantContent) {
+        setChatMessages(prev => {
+          const updated = [...prev]
+          updated[updated.length - 1] = { role: 'assistant', content: 'Keine Antwort erhalten. Bitte versuchen Sie es erneut.' }
+          return updated
+        })
       }
     } catch (err) {
-      // Fallback to local responses on network error
-      setChatMessages(prev => [...prev, { role: 'assistant', content: getLocalChatResponse(message, selectedWorksheet) }])
+      setChatMessages(prev => [...prev, { role: 'assistant', content: 'Netzwerkfehler. Bitte prüfen Sie Ihre Verbindung und versuchen Sie es erneut.' }])
     }
     setChatLoading(false)
-  }
-
-  // Track last response to avoid repetition
-  const lastChatResponseRef = useRef('')
-
-  // Pick a non-repeating response from array
-  const pickUnique = (responses) => {
-    const filtered = responses.filter(r => r !== lastChatResponseRef.current)
-    const pick = filtered.length > 0 ? filtered[Math.floor(Math.random() * filtered.length)] : responses[0]
-    lastChatResponseRef.current = pick
-    return pick
-  }
-
-  // Smart contextual chat responses
-  const getLocalChatResponse = (input, worksheet) => {
-    const lower = input.toLowerCase()
-    const qCount = worksheet?.content?.questions?.length || 0
-    const wsTitle = worksheet?.title || ''
-    const wsSubject = worksheet?.subject || ''
-
-    // Difficulty
-    if (lower.includes('einfacher') || lower.includes('leichter') || lower.includes('vereinfach')) {
-      if (worksheet) {
-        return pickUnique([
-          `Klar! Für "${wsTitle}" können Sie:\n\n1. Im Werkzeuge-Panel rechts auf "Einfach" klicken – dann werden alle ${qCount} Fragen neu generiert\n2. Oder: "Bearbeiten" klicken und bei einzelnen Fragen die KI-Aktion "Einfacher machen" nutzen\n\nWas passt besser?`,
-          `Gerne! Ich empfehle, zuerst in den Bearbeitungsmodus zu wechseln. Dort hat jede Frage einen "Einfacher machen"-Button. So können Sie gezielt die Fragen anpassen, die Ihren Schülern Mühe machen.`,
-        ])
-      }
-      return 'Erstellen Sie zuerst ein Material, dann können Sie es einfacher machen – entweder komplett über das Werkzeuge-Panel oder einzelne Fragen im Bearbeitungsmodus.'
-    }
-    if (lower.includes('schwieriger') || lower.includes('schwerer') || lower.includes('anspruchsvoll')) {
-      if (worksheet) {
-        return pickUnique([
-          `"${wsTitle}" anspruchsvoller gestalten? So geht's:\n\n• Werkzeuge-Panel → "Schwierig" für komplett neue Fragen\n• Bearbeitungsmodus → "Schwieriger machen" pro Frage\n• Oder: Offene Fragen statt Multiple Choice einfügen\n\nSoll ich eine bestimmte Frage schwieriger machen?`,
-          `Gute Idee! Im Bearbeitungsmodus können Sie jede der ${qCount} Fragen einzeln schwieriger machen. Tipp: Wandeln Sie einige MC-Fragen in offene Fragen um – das steigert die Schwierigkeit automatisch.`,
-        ])
-      }
-      return 'Erstellen Sie zuerst ein Material, dann kann ich den Schwierigkeitsgrad anpassen.'
-    }
-
-    // Export
-    if (lower.includes('export') || lower.includes('pdf') || lower.includes('herunterladen') || lower.includes('download')) {
-      return pickUnique([
-        'Sie haben zwei Export-Optionen:\n\n📄 Schülerversion – Sauberes Layout mit Schreiblinien, Name/Datum-Feld, ohne Lösungen\n📋 Lehrerversion – Enthält alle Lösungen (grün markiert) und Lehrernotizen\n\nBeide als PDF über den "PDF"-Button oben oder das Werkzeuge-Panel rechts.',
-        'Klicken Sie auf den "PDF"-Button oben in der Aktionsleiste für einen schnellen Export. Im Werkzeuge-Panel rechts finden Sie beide Versionen: Schüler (sauber) und Lehrer (mit Lösungen).',
-      ])
-    }
-
-    // Edit / Bearbeiten
-    if (lower.includes('bearbeiten') || lower.includes('ändern') || lower.includes('editieren')) {
-      if (worksheet) {
-        return pickUnique([
-          `Klicken Sie oben auf "Bearbeiten" – dann öffnet sich der volle Editor für "${wsTitle}":\n\n✏️ Fragen umformulieren und umschreiben\n🔄 Fragetyp ändern (z.B. MC → Offene Frage)\n➕ Neue Fragen jedes Typs hinzufügen\n🤖 KI-Aktionen pro Frage nutzen\n↕️ Fragen verschieben oder duplizieren\n\nNach dem Bearbeiten → "Speichern & Vorschau"`,
-          `Im Bearbeitungsmodus von "${wsTitle}" haben Sie volle Kontrolle:\n\n• Jede Frage hat KI-Aktionen (schwieriger, einfacher, umwandeln...)\n• Fragetyp-Wechsel per Dropdown\n• Drag-Reihenfolge ändern\n• "Als Entwurf" speichern wenn Sie noch nicht fertig sind`,
-        ])
-      }
-      return 'Wählen oder erstellen Sie zuerst ein Material, dann erscheint der "Bearbeiten"-Button oben links.'
-    }
-
-    // Lehrplan
-    if (lower.includes('lehrplan') || lower.includes('kompetenz') || lower.includes('curriculum')) {
-      return pickUnique([
-        'Unter "Lehrplan 21" finden Sie alle Kompetenzbereiche nach Zyklen:\n\n🔵 Zyklus 1 (1.–2. Klasse)\n🟢 Zyklus 2 (3.–6. Klasse)\n🟣 Zyklus 3 (7.–9. Klasse)\n\nKlicken Sie auf eine Kompetenz → "Material erstellen" und die KI generiert Aufgaben, die genau auf diese Kompetenz abgestimmt sind.',
-        'Der Lehrplan-21-Bereich ist perfekt, um gezielt Material nach Kompetenz zu erstellen. Navigieren Sie zu "Lehrplan 21", wählen Sie den Zyklus und das Fach – jede Kompetenz hat einen direkten "Material erstellen"-Button.',
-      ])
-    }
-
-    // Questions
-    if (lower.includes('frage') && (lower.includes('hinzufügen') || lower.includes('mehr') || lower.includes('zusätzlich'))) {
-      if (worksheet) {
-        return `So fügen Sie Fragen zu "${wsTitle}" hinzu:\n\n1. Klicken Sie auf "Bearbeiten"\n2. Scrollen Sie nach unten zu "Frage hinzufügen"\n3. Wählen Sie den gewünschten Fragetyp\n4. Bearbeiten Sie die neue Frage\n\nVerfügbare Fragetypen: Multiple Choice, Wahr/Falsch, Offene Frage, Rechenfrage, Lückentext, Zuordnung, Reihenfolge, Entweder-Oder, Bilderfrage.`
-      }
-      return 'Nutzen Sie den Slider beim Erstellen, um die Fragenanzahl anzupassen (3–25 Fragen). Sie können auch die gewünschten Fragetypen vorab wählen!'
-    }
-
-    // Upload
-    if (lower.includes('hochladen') || lower.includes('upload') || lower.includes('datei')) {
-      return pickUnique([
-        'Unter "Hochladen" können Sie verschiedene Dateitypen verwenden:\n\n📄 PDF, Word, PowerPoint, Text\n🖼️ Bilder (PNG, JPG, GIF, WebP)\n🎵 Audio (MP3, WAV, M4A)\n📊 Excel, CSV\n\nDie KI analysiert den Inhalt und Sie wählen dann, was daraus erstellt werden soll.',
-        'Gehen Sie zu "Hochladen", ziehen Sie Ihre Dateien rein und klicken Sie auf "Analysieren". Danach können Sie wählen: Arbeitsblatt, Prüfung, Quiz oder Vokabelliste – alles basierend auf Ihrem Material.',
-      ])
-    }
-
-    // Prüfung / Exam
-    if (lower.includes('prüfung') || lower.includes('test') || lower.includes('exam') || lower.includes('klausur')) {
-      return pickUnique([
-        'Prüfungen in EduFlow sind professionell aufgebaut:\n\n📋 Formaler Prüfungskopf (Schule, Name, Datum)\n🔢 Punkteverteilung pro Aufgabe\n📊 Schweizer Notenskala (1–6)\n✍️ Antwortboxen und Schreiblinien\n✅ Unterschriftenfelder\n\nWählen Sie beim Erstellen den Typ "Prüfung" – die KI strukturiert alles automatisch.',
-        'Wählen Sie bei "Erstellen" den Materialtyp "Prüfung". Das Layout enthält dann automatisch: Prüfungskopf, Punkteverteilung, Notenskala und Unterschriftenfelder. Soll ich Ihnen dabei helfen?',
-      ])
-    }
-
-    // Greeting
-    if (lower.includes('hallo') || lower.includes('hi') || lower.includes('hey') || lower.includes('guten')) {
-      return pickUnique([
-        `Hallo! Schön, dass Sie da sind. 🎒 ${worksheet ? `Ich sehe, Sie arbeiten an "${wsTitle}". Soll ich Ihnen dabei helfen – Fragen anpassen, Schwierigkeit ändern, oder exportieren?` : 'Was möchten Sie heute vorbereiten? Ich kann Arbeitsblätter, Prüfungen, Quizze und Vokabellisten erstellen.'}`,
-        `Grüezi! ${worksheet ? `"${wsTitle}" sieht gut aus! Brauchen Sie Hilfe beim Bearbeiten oder Exportieren?` : 'Was steht heute auf dem Programm? Ich bin bereit, Ihnen den Schulalltag zu erleichtern.'}`,
-        `Willkommen bei EduFlow! ${worksheet ? `Ich kann "${wsTitle}" für Sie optimieren – sagen Sie einfach, was geändert werden soll.` : 'Wie kann ich Ihnen helfen? Sagen Sie mir ein Thema und ich erstelle passendes Material.'}`,
-      ])
-    }
-
-    // Thanks
-    if (lower.includes('danke') || lower.includes('merci') || lower.includes('super') || lower.includes('toll')) {
-      return pickUnique([
-        `Gerne geschehen! ${worksheet ? `Tipp: Im Bearbeitungsmodus können Sie jede Frage in "${wsTitle}" noch feinjustieren. Oder soll ich eine differenzierte Version erstellen?` : 'Soll ich noch etwas für Sie vorbereiten?'}`,
-        `Freut mich! ${worksheet ? `Sie können "${wsTitle}" jetzt als PDF exportieren (Schüler- oder Lehrerversion) oder weiter bearbeiten.` : 'Falls Sie eine Idee für den Unterricht brauchen – fragen Sie einfach!'}`,
-        `Bitte sehr! Wussten Sie, dass EduFlow 9 verschiedene Fragetypen unterstützt? Probieren Sie mal Lückentext, Zuordnung oder Reihenfolge-Fragen aus!`,
-      ])
-    }
-
-    // Tip / general
-    if (lower.includes('tipp') || lower.includes('idee') || lower.includes('vorschlag')) {
-      return pickUnique([
-        `Hier ein paar Profi-Tipps:\n\n💡 Je genauer das Thema, desto besser – z.B. "Bauernleben im Mittelalter" statt nur "Mittelalter"\n💡 Im Bearbeitungsmodus: KI-Aktionen pro Frage nutzen\n💡 Mischen Sie Fragetypen für abwechslungsreiche Arbeitsblätter\n💡 Speichern Sie als Entwurf, wenn Sie noch nicht fertig sind`,
-        `Drei Ideen für diese Woche:\n\n1. 🧩 Erstellen Sie ein Quiz mit Wahr/Falsch-Fragen als Stundeneinstieg\n2. 📝 Kombinieren Sie Lückentext mit offenen Fragen\n3. 🔄 Erstellen Sie differenzierte Versionen: Leicht, Mittel, Schwer\n\nSoll ich eines davon direkt umsetzen?`,
-        `${worksheet ? `Für "${wsTitle}" schlage ich vor:\n\n• Fügen Sie 2-3 Zuordnungsfragen hinzu\n• Erstellen Sie eine Lehrerversion als PDF\n• Nutzen Sie "Als Entwurf speichern" wenn Sie noch nicht fertig sind` : 'Starten Sie mit einer Vorlage unter "Vorlagen" – das geht am schnellsten! Sie können danach alles im Bearbeitungsmodus anpassen.'}`,
-      ])
-    }
-
-    // Material erstellen
-    if (lower.includes('arbeitsblatt') || lower.includes('erstellen') || lower.includes('neues material') || lower.includes('generieren')) {
-      if (worksheet) {
-        return pickUnique([
-          `Sie haben "${wsTitle}" (${wsSubject}, ${qCount} Fragen) offen. Möchten Sie:\n\n✏️ Im Bearbeitungsmodus optimieren?\n🆕 Ein neues Material zum gleichen Thema?\n📊 Die Schwierigkeit anpassen?\n📥 Als PDF exportieren?\n\nOder geben Sie mir ein neues Thema!`,
-          `"${wsTitle}" ist bereit! Sie können:\n\n• Oben auf "Neues Material" klicken für etwas Neues\n• "Bearbeiten" für Feinjustierung\n• "PDF" für den Export\n\nWas soll es sein?`,
-        ])
-      }
-      return 'Gehen Sie zu "Erstellen" in der Navigation. Wählen Sie Thema, Klasse, Fach und Fragetypen – die KI erstellt in Sekunden passendes Material!\n\n💡 Tipp: Unter "Vorlagen" finden Sie vorgefertigte Strukturen für den schnellen Start.'
-    }
-
-    // Differenzierung
-    if (lower.includes('differenz') || lower.includes('niveau')) {
-      return pickUnique([
-        'Differenzierung in 3 Schritten:\n\n1️⃣ Erstellen Sie ein Material auf mittlerem Niveau\n2️⃣ Bearbeitungsmodus → einzelne Fragen "Einfacher machen"\n3️⃣ Neues Material mit Schwierigkeit "Schwierig" erstellen\n\nSo haben Sie schnell 3 Niveaus. Soll ich damit starten?',
-        'Im Bearbeitungsmodus können Sie jede Frage einzeln anpassen:\n\n• "Einfacher machen" für schwächere Schüler\n• "Schwieriger machen" für stärkere Schüler\n• Fragetyp wechseln (z.B. offene Frage → MC)\n\nSo differenzieren Sie innerhalb eines Arbeitsblatts!',
-      ])
-    }
-
-    // Fragetypen
-    if (lower.includes('fragetyp') || lower.includes('fragen')) {
-      return 'EduFlow unterstützt 9 Fragetypen:\n\n📝 Multiple Choice • ✅ Wahr/Falsch\n💬 Offene Frage • 🧮 Rechenfrage\n🖼️ Bilderfrage • 🔗 Zuordnung\n📝 Lückentext • 📋 Reihenfolge\n⚡ Entweder-Oder\n\nSie können beim Erstellen gewünschte Typen vorauswählen oder im Bearbeitungsmodus nachträglich ändern.'
-
-    }
-
-    // Default - context-aware, non-repeating
-    const defaults = [
-      `${worksheet ? `Ich arbeite gerade mit Ihnen an "${wsTitle}". ` : ''}Was kann ich für Sie tun? Ich helfe bei:\n\n📝 Material erstellen & bearbeiten\n📊 Schwierigkeit anpassen\n📥 PDF exportieren (Schüler- & Lehrerversion)\n💡 Ideen und Tipps für den Unterricht\n\nFragen Sie einfach drauflos!`,
-      `${worksheet ? `"${wsTitle}" hat ${qCount} Fragen in ${wsSubject}. ` : ''}Hier ein paar Möglichkeiten:\n\n• Neues Material erstellen lassen\n• Vorlagen durchstöbern\n• Bestehendes Material optimieren\n• Lehrplan-21-Kompetenzen nutzen\n\nWomit soll ich starten?`,
-      `Ich bin Ihr EduFlow-Assistent und helfe Ihnen bei allem rund um Unterrichtsmaterial. ${worksheet ? `Aktuell offen: "${wsTitle}". Soll ich etwas daran anpassen?` : 'Geben Sie mir ein Thema und eine Klassenstufe – ich erstelle sofort passendes Material!'}`
-    ]
-    return pickUnique(defaults)
   }
 
   // ============================================================
@@ -2751,23 +2759,23 @@ const AppContent = () => {
     ] : [])
   ]
 
+  const [hoveredNav, setHoveredNav] = useState(null)
+
   const navGroups = [
-    { label: 'Inhalte', items: [
-      { id: 'home', label: 'Start', icon: LayoutDashboard },
+    { label: 'Material', items: [
       { id: 'create', label: 'Erstellen', icon: PlusCircle },
       { id: 'library', label: 'Bibliothek', icon: FolderOpen },
       { id: 'upload', label: 'Hochladen', icon: Upload },
       { id: 'templates', label: 'Vorlagen', icon: LayoutTemplate },
+      { id: 'exports', label: 'Exporte', icon: Clock },
     ]},
-    { label: 'Unterricht', items: [
+    { label: 'Planung', items: [
       { id: 'curriculum', label: 'Lehrplan 21', icon: GraduationCap },
       { id: 'planner', label: 'Jahresplaner', icon: Calendar },
-      { id: 'students', label: 'Schüler', icon: User },
-      { id: 'classes', label: 'Klassen', icon: Users },
     ]},
-    { label: 'System', items: [
-      { id: 'exports', label: 'Exporte', icon: Clock },
-      { id: 'settings', label: 'Einstellungen', icon: Settings },
+    { label: 'Classroom', items: [
+      { id: 'classes', label: 'Klassen', icon: Users },
+      { id: 'students', label: 'Schüler', icon: User },
     ]},
   ]
   const navItems = navGroups.flatMap(g => g.items)
@@ -2875,21 +2883,39 @@ const AppContent = () => {
               <h1 className="text-xl font-bold text-gradient">EduFlow</h1>
             </button>
 
-            <nav className="hidden xl:flex items-center gap-0.5" role="navigation">
-              {navGroups.map((group, gi) => (
-                <div key={group.label} className="flex items-center">
-                  {gi > 0 && <div className="w-px h-5 bg-gray-300/50 mx-1.5" />}
-                  {group.items.map(item => (
-                    <Button key={item.id} variant="ghost" size="sm" onClick={() => { setActiveView(item.id); setMobileNavOpen(false) }} className={`transition-smooth text-xs ${activeView === item.id ? 'bg-blue-50 text-blue-700 font-semibold shadow-sm ring-1 ring-blue-200/60' : 'text-gray-600 hover:text-gray-900'}`}>
-                      <item.icon className={`h-3.5 w-3.5 mr-1.5 ${activeView === item.id ? 'text-blue-600' : ''}`} />
-                      {item.label}
-                    </Button>
-                  ))}
-                </div>
-              ))}
+            <nav className="hidden sm:flex items-center gap-1" role="navigation">
+              {navGroups.map((group) => {
+                const isGroupActive = group.items.some(item => item.id === activeView)
+                return (
+                  <div key={group.label} className="relative" onMouseEnter={() => setHoveredNav(group.label)} onMouseLeave={() => setHoveredNav(null)}>
+                    <button className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${isGroupActive ? 'bg-blue-50 text-blue-700 shadow-sm ring-1 ring-blue-200/60' : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'}`}>
+                      {group.label}
+                      <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${hoveredNav === group.label ? 'rotate-180' : ''}`} />
+                    </button>
+                    <AnimatePresence>
+                      {hoveredNav === group.label && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -4, scale: 0.98 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                          transition={{ duration: 0.15, ease: 'easeOut' }}
+                          className="absolute top-full left-0 mt-1 min-w-[180px] py-1.5 rounded-xl bg-white/95 backdrop-blur-xl shadow-xl border border-gray-200/60 z-50"
+                        >
+                          {group.items.map(item => (
+                            <button key={item.id} onClick={() => { setActiveView(item.id); setHoveredNav(null) }} className={`w-full flex items-center gap-2.5 px-3.5 py-2 text-sm transition-colors duration-150 ${activeView === item.id ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'}`}>
+                              <item.icon className={`h-4 w-4 ${activeView === item.id ? 'text-blue-600' : 'text-gray-400'}`} />
+                              {item.label}
+                            </button>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                )
+              })}
             </nav>
 
-            <Button variant="ghost" size="sm" className="xl:hidden" onClick={() => setMobileNavOpen(!mobileNavOpen)} aria-label="Navigation öffnen">
+            <Button variant="ghost" size="sm" className="sm:hidden" onClick={() => setMobileNavOpen(!mobileNavOpen)} aria-label="Navigation öffnen">
               <MoreHorizontal className="h-5 w-5" />
             </Button>
           </div>
@@ -2897,6 +2923,9 @@ const AppContent = () => {
           <div className="flex items-center gap-2 sm:gap-4">
             <Button variant="outline" size="sm" onClick={() => setCommandOpen(true)} className="hidden sm:flex items-center gap-2 glass-card border-0" aria-label="Befehlspalette öffnen">
               <CommandIcon className="h-4 w-4" /><kbd className="text-xs opacity-60">Ctrl+K</kbd>
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setActiveView('settings')} className={`transition-smooth ${activeView === 'settings' ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-200/60' : 'text-gray-600 hover:text-gray-900'}`} aria-label="Einstellungen" title="Einstellungen">
+              <Settings className="h-4 w-4" />
             </Button>
             <div className="text-right hidden sm:block">
               <p className="font-medium text-sm text-gray-900">{user?.name}</p>
@@ -2913,7 +2942,7 @@ const AppContent = () => {
         {/* Mobile nav dropdown */}
         <AnimatePresence>
           {mobileNavOpen && (
-            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="xl:hidden glass p-3 shadow-lg border-b border-white/20">
+            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="sm:hidden glass p-3 shadow-lg border-b border-white/20">
               <nav className="space-y-3">
                 {navGroups.map(group => (
                   <div key={group.label}>
@@ -4643,12 +4672,17 @@ const AppContent = () => {
                     <div>
                       <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-2">Schnellaktionen</p>
                       <div className="grid grid-cols-2 gap-2">
-                        {[
-                          { text: 'Arbeitsblatt erstellen', icon: FileText },
-                          { text: 'Fragen vereinfachen', icon: ChevronDown },
-                          { text: 'Prüfung vorbereiten', icon: ClipboardList },
-                          { text: 'Lehrplan 21 nutzen', icon: GraduationCap },
-                        ].map((action, i) => (
+                        {(selectedWorksheet ? [
+                          { text: 'Mach alle Fragen einfacher', icon: ChevronDown },
+                          { text: 'Exportiere als PDF Schülerversion', icon: Download },
+                          { text: 'Füge 3 Multiple-Choice-Fragen hinzu', icon: PlusCircle },
+                          { text: 'Erstelle differenzierte Versionen', icon: Layers },
+                        ] : [
+                          { text: 'Gehe zu Erstellen', icon: PlusCircle },
+                          { text: 'Zeig mir die Vorlagen', icon: LayoutTemplate },
+                          { text: 'Öffne den Lehrplan 21', icon: GraduationCap },
+                          { text: 'Gehe zur Bibliothek', icon: FolderOpen },
+                        ]).map((action, i) => (
                           <button key={i} onClick={() => handleChatSend(action.text)}
                             className="flex items-center gap-2 p-2.5 rounded-xl bg-white border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all text-left">
                             <action.icon className="h-4 w-4 text-blue-500 flex-shrink-0" />
@@ -4663,12 +4697,12 @@ const AppContent = () => {
                         <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-2">Für «{selectedWorksheet.title}»</p>
                         <div className="space-y-1.5">
                           {[
-                            `Mach die Fragen in "${selectedWorksheet.title}" einfacher`,
-                            'Erstelle eine differenzierte Version davon',
-                            'Füge Bilderfragen hinzu',
-                            'In eine Prüfung umwandeln',
+                            'Mach Frage 1 schwieriger',
+                            'Wandle alle MC-Fragen in offene Fragen um',
+                            'Füge 2 Lückentext-Fragen zum gleichen Thema hinzu',
+                            'Exportiere die Lehrerversion als PDF',
                           ].map((s, i) => (
-                            <button key={i} onClick={() => setChatInput(s)}
+                            <button key={i} onClick={() => handleChatSend(s)}
                               className="block w-full text-left text-xs bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg px-3 py-2 transition-smooth">
                               {s}
                             </button>
@@ -4711,9 +4745,9 @@ const AppContent = () => {
               {chatMessages.length > 0 && !chatLoading && (
                 <div className="px-4 pb-2 flex gap-1.5 overflow-x-auto">
                   {(selectedWorksheet ? [
-                    'Schwieriger machen', 'PDF exportieren', 'Mehr Fragen'
+                    'Alle Fragen schwieriger', 'PDF Schülerversion', '2 Fragen hinzufügen', 'Differenzieren'
                   ] : [
-                    'Neues Material', 'Vorlagen zeigen', 'Tipps geben'
+                    'Gehe zu Erstellen', 'Vorlagen öffnen', 'Lehrplan 21'
                   ]).map((chip, i) => (
                     <button key={i} onClick={() => handleChatSend(chip)}
                       className="px-3 py-1 rounded-full text-[10px] font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 whitespace-nowrap transition-smooth flex-shrink-0">

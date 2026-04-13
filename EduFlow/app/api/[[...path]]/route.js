@@ -1966,7 +1966,7 @@ Antworte als JSON:
 
     // ========== AI CHAT ASSISTANT ==========
 
-    // Chat - POST /api/chat
+    // Chat - POST /api/chat (Streaming + Function Calling)
     if (route === '/chat' && method === 'POST') {
       const decoded = await verifyToken(request)
       if (!decoded) {
@@ -1980,50 +1980,281 @@ Antworte als JSON:
         return handleCORS(NextResponse.json({ error: "Message is required" }, { status: 400 }))
       }
 
-      const wsContext = worksheetContext
-        ? `\n\nAktuelles Material: "${worksheetContext.title}" (${worksheetContext.subject}, ${worksheetContext.grade}. Klasse, ${worksheetContext.difficulty})\nAnzahl Fragen: ${worksheetContext.questionCount}\nFragetypen: ${worksheetContext.questionTypes || 'gemischt'}`
-        : ''
+      // Build rich worksheet context with full question content
+      let wsContext = ''
+      if (worksheetContext) {
+        wsContext = `\n\n=== AKTUELLES ARBEITSBLATT ===
+Titel: "${worksheetContext.title}"
+Fach: ${worksheetContext.subject} | Klasse: ${worksheetContext.grade} | Schwierigkeit: ${worksheetContext.difficulty}
+Anzahl Fragen: ${worksheetContext.questionCount}
+Fragetypen: ${worksheetContext.questionTypes || 'gemischt'}`
 
-      const systemMsg = `Du bist der EduFlow-Assistent – ein freundlicher, kompetenter pädagogischer Helfer für Schweizer Lehrpersonen. Du sprichst Schweizer Hochdeutsch (nicht Dialekt, aber natürlich).
+        if (worksheetContext.questions && worksheetContext.questions.length > 0) {
+          wsContext += '\n\nFragen im Detail:'
+          worksheetContext.questions.forEach((q, i) => {
+            wsContext += `\n${i + 1}. [${q.type}] ${q.question}`
+            if (q.options) wsContext += `\n   Optionen: ${q.options.join(', ')}`
+            wsContext += `\n   Antwort: ${q.answer} (${q.points || 1} Pkt.)`
+          })
+        }
+        wsContext += '\n=== ENDE ARBEITSBLATT ==='
+      }
+
+      const chatTools = [
+        {
+          type: 'function',
+          function: {
+            name: 'modify_question',
+            description: 'Eine bestehende Frage im Arbeitsblatt bearbeiten (einfacher/schwieriger machen, Typ ändern, umformulieren etc.)',
+            parameters: {
+              type: 'object',
+              properties: {
+                questionIndex: { type: 'number', description: 'Index der Frage (0-basiert)' },
+                action: { type: 'string', enum: ['harder', 'easier', 'to_mc', 'to_open', 'to_fill_blank', 'to_true_false', 'child_friendly', 'swiss_context', 'more_variety', 'better_distractors', 'precise_answer'], description: 'Art der Änderung' },
+                customInstruction: { type: 'string', description: 'Optionale benutzerdefinierte Anweisung für die Änderung' }
+              },
+              required: ['questionIndex', 'action']
+            }
+          }
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'add_questions',
+            description: 'Neue Fragen zum bestehenden Arbeitsblatt hinzufügen',
+            parameters: {
+              type: 'object',
+              properties: {
+                count: { type: 'number', description: 'Anzahl neuer Fragen (1-5)' },
+                type: { type: 'string', enum: ['multiple_choice', 'true_false', 'open', 'math', 'fill_blank', 'matching', 'ordering', 'either_or', 'image'], description: 'Fragetyp' },
+                topic: { type: 'string', description: 'Spezifisches Thema für die neuen Fragen (optional, sonst passt es zum bestehenden Material)' },
+                difficulty: { type: 'string', enum: ['easy', 'medium', 'hard'], description: 'Schwierigkeitsgrad' }
+              },
+              required: ['count', 'type']
+            }
+          }
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'export_worksheet',
+            description: 'Das aktuelle Arbeitsblatt als PDF oder Word exportieren',
+            parameters: {
+              type: 'object',
+              properties: {
+                format: { type: 'string', enum: ['pdf', 'docx'], description: 'Export-Format' },
+                version: { type: 'string', enum: ['student', 'teacher'], description: 'Schüler- oder Lehrerversion' }
+              },
+              required: ['format', 'version']
+            }
+          }
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'navigate_to',
+            description: 'Zu einer bestimmten Seite/Ansicht in EduFlow navigieren',
+            parameters: {
+              type: 'object',
+              properties: {
+                view: { type: 'string', enum: ['create', 'library', 'upload', 'templates', 'curriculum', 'planner', 'students', 'classes', 'exports', 'settings', 'home'], description: 'Zielansicht' }
+              },
+              required: ['view']
+            }
+          }
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'regenerate_worksheet',
+            description: 'Das gesamte Arbeitsblatt mit neuer Schwierigkeit oder neuem Fokus neu generieren',
+            parameters: {
+              type: 'object',
+              properties: {
+                difficulty: { type: 'string', enum: ['easy', 'medium', 'hard'], description: 'Neue Schwierigkeit' },
+                focus: { type: 'string', description: 'Optionaler neuer Fokus oder Thema' }
+              },
+              required: ['difficulty']
+            }
+          }
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'create_differentiated_versions',
+            description: 'Differenzierte Versionen des Arbeitsblatts erstellen (leicht, mittel, schwer)',
+            parameters: {
+              type: 'object',
+              properties: {
+                levels: {
+                  type: 'array',
+                  items: { type: 'string', enum: ['easy', 'medium', 'hard'] },
+                  description: 'Gewünschte Schwierigkeitsstufen'
+                }
+              },
+              required: ['levels']
+            }
+          }
+        }
+      ]
+
+      const systemMsg = `Du bist der EduFlow-Assistent – ein freundlicher, kompetenter pädagogischer Helfer für Schweizer Lehrpersonen. Du sprichst Schweizer Hochdeutsch.
 
 Deine Persönlichkeit:
 - Motivierend und warmherzig, aber professionell
 - Kompetent in Didaktik und Lehrplan 21
 - Gibt konkrete, umsetzbare Tipps
-- Schlägt aktiv Verbesserungen vor
-- Nutzt gelegentlich passende Emojis (sparsam)
 - Antworte IMMER auf Deutsch
 
-Du kannst helfen bei:
-- Fragen erstellen, bearbeiten, vereinfachen, erschweren
-- Fragetypen umwandeln (MC ↔ offen ↔ Lückentext etc.)
-- Differenzierung (leichter/schwieriger)
-- Lehrplan-21-Bezug herstellen
-- Material exportieren und formatieren
-- Didaktische Tipps geben
-- Aufgaben kindgerechter formulieren
+Du hast Zugriff auf mächtige Werkzeuge, die das Arbeitsblatt DIREKT bearbeiten können:
+- modify_question: Einzelne Fragen ändern (einfacher, schwieriger, Typ wechseln, umformulieren)
+- add_questions: Neue Fragen zum Arbeitsblatt hinzufügen
+- export_worksheet: Als PDF/Word exportieren
+- navigate_to: Zu einer anderen Ansicht wechseln
+- regenerate_worksheet: Gesamtes Material neu generieren
+- create_differentiated_versions: Differenzierte Versionen erstellen
 
-WICHTIG: Halte deine Antworten kurz und hilfreich (max. 3-4 Sätze). Biete am Ende immer 1-2 konkrete nächste Schritte an.${wsContext}`
+WICHTIGE REGELN:
+1. Wenn der Benutzer eine Aktion wünscht (z.B. "mach Frage 3 einfacher"), nutze IMMER das passende Werkzeug statt nur Tipps zu geben.
+2. Wenn kein Arbeitsblatt ausgewählt ist und der Benutzer eines bearbeiten will, schlage vor, zur Bibliothek zu navigieren oder eines zu erstellen.
+3. Halte deine Textantworten kurz und hilfreich (max. 4-5 Sätze).
+4. Bei Werkzeug-Nutzung: Erkläre kurz was du tust und was das Ergebnis ist.
+5. Du kennst den vollständigen Inhalt des aktuellen Arbeitsblatts (alle Fragen, Antworten, Typen).
+6. Nummeriere Fragen für den Benutzer ab 1 (nicht ab 0).${wsContext}`
 
       const messages = [
         { role: 'system', content: systemMsg },
-        ...chatHistory.slice(-10).map(m => ({ role: m.role, content: m.content })),
+        ...chatHistory.slice(-30).map(m => ({ role: m.role, content: m.content })),
         { role: 'user', content: message }
       ]
 
       try {
-        const completion = await openai.chat.completions.create({
-          model: 'gpt-4o-mini',
+        const stream = await openai.chat.completions.create({
+          model: 'gpt-4o',
           messages,
-          temperature: 0.8,
-          max_tokens: 500,
+          tools: worksheetContext ? chatTools : [chatTools[3]], // Only navigation tool if no worksheet
+          temperature: 0.7,
+          max_tokens: 1500,
+          stream: true,
         })
 
-        const reply = completion.choices[0].message.content
-        return handleCORS(NextResponse.json({ reply }))
+        const encoder = new TextEncoder()
+        const readable = new ReadableStream({
+          async start(controller) {
+            let toolCalls = {}
+            try {
+              for await (const chunk of stream) {
+                const delta = chunk.choices[0]?.delta
+                const finishReason = chunk.choices[0]?.finish_reason
+
+                // Stream text content
+                if (delta?.content) {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: delta.content })}\n\n`))
+                }
+
+                // Collect tool call deltas
+                if (delta?.tool_calls) {
+                  for (const tc of delta.tool_calls) {
+                    const idx = tc.index
+                    if (!toolCalls[idx]) {
+                      toolCalls[idx] = { id: tc.id || '', name: tc.function?.name || '', arguments: '' }
+                    }
+                    if (tc.id) toolCalls[idx].id = tc.id
+                    if (tc.function?.name) toolCalls[idx].name = tc.function.name
+                    if (tc.function?.arguments) toolCalls[idx].arguments += tc.function.arguments
+                  }
+                }
+
+                // When done, send tool calls if any
+                if (finishReason === 'tool_calls') {
+                  for (const [, tc] of Object.entries(toolCalls)) {
+                    try {
+                      const args = JSON.parse(tc.arguments)
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'tool_call', name: tc.name, arguments: args })}\n\n`))
+                    } catch (e) {
+                      console.error('Tool call parse error:', e)
+                    }
+                  }
+                }
+
+                if (finishReason === 'stop' || finishReason === 'tool_calls') {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`))
+                }
+              }
+            } catch (streamError) {
+              console.error('Stream error:', streamError)
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', content: 'Stream-Fehler aufgetreten.' })}\n\n`))
+            } finally {
+              controller.close()
+            }
+          }
+        })
+
+        return new Response(readable, {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          },
+        })
       } catch (aiError) {
         console.error('Chat AI error:', aiError)
         return handleCORS(NextResponse.json({ error: 'KI-Fehler. Bitte versuchen Sie es erneut.' }, { status: 500 }))
+      }
+    }
+
+    // Chat - Add Questions (called by chat tool_call)
+    if (route === '/chat-add-questions' && method === 'POST') {
+      const decoded = await verifyToken(request)
+      if (!decoded) {
+        return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+      }
+
+      const body = await request.json()
+      const { count, type, topic, difficulty, subject, grade, existingQuestions = [] } = body
+
+      const systemMsg = `Du bist ein erfahrener Schweizer Primarlehrer. Erstelle genau ${count} neue Fragen.
+
+WICHTIG: Antworte NUR mit einem JSON-Objekt: { "questions": [...] }
+
+Jede Frage hat diese Struktur:
+{
+  "question": "Fragetext",
+  "type": "${type}",
+  "options": ["A) ...", "B) ...", "C) ...", "D) ..."],
+  "answer": "Korrekte Antwort",
+  "points": 1
+}
+
+- "options" nur bei multiple_choice, true_false, either_or
+- Bei fill_blank: Lücken mit ___ markieren
+- Bei matching: answer = "links1→rechts1, links2→rechts2"
+- Bei ordering: answer = "element1, element2, element3"
+- Fragen sollen sich von bestehenden unterscheiden
+- Schweizer Schulkontext, Lehrplan 21, ${difficulty} Schwierigkeit`
+
+      const userMsg = `Erstelle ${count} ${type}-Fragen zum Thema "${topic}" für ${subject}, ${grade}. Klasse.
+${existingQuestions.length > 0 ? `\nBereits vorhandene Fragen (NICHT wiederholen):\n${existingQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n')}` : ''}`
+
+      try {
+        const completion = await openai.chat.completions.create({
+          model: 'gpt-4o',
+          messages: [
+            { role: 'system', content: systemMsg },
+            { role: 'user', content: userMsg }
+          ],
+          temperature: 0.7,
+          response_format: { type: 'json_object' },
+        })
+
+        const result = JSON.parse(completion.choices[0].message.content)
+        return handleCORS(NextResponse.json({ questions: result.questions || [] }))
+      } catch (aiError) {
+        console.error('Chat add questions error:', aiError)
+        return handleCORS(NextResponse.json({ error: 'Fragen konnten nicht generiert werden.' }, { status: 500 }))
       }
     }
 

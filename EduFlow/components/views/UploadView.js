@@ -1,5 +1,6 @@
 'use client'
-import { motion } from 'framer-motion'
+import { useState, useRef, useCallback, useEffect } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { Button } from '@/ui/button'
 import { Label } from '@/ui/label'
 import { Card, CardContent } from '@/ui/card'
@@ -8,11 +9,38 @@ import { Textarea } from '@/ui/textarea'
 import { Input } from '@/ui/input'
 import {
   Upload, FileType, Info, CheckCircle2, RefreshCw, Sparkles,
-  X, ChevronRight, ChevronDown, Check, RotateCcw, Edit, PlusCircle
+  X, ChevronRight, ChevronDown, Check, RotateCcw, Edit, PlusCircle,
+  Camera, Image, SwitchCamera, Trash2, ZoomIn
 } from 'lucide-react'
 import { useEduFlow } from '@/contexts/EduFlowContext'
 
 const DIFFICULTY_LABELS = { easy: 'Einfach', medium: 'Mittel', hard: 'Schwierig' }
+
+// Compress image client-side before upload
+function compressImage(file, maxWidth = 2000, quality = 0.85) {
+  return new Promise((resolve) => {
+    const img = new window.Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      const canvas = document.createElement('canvas')
+      let w = img.width, h = img.height
+      if (w > maxWidth) { h = Math.round(h * maxWidth / w); w = maxWidth }
+      canvas.width = w
+      canvas.height = h
+      const ctx = canvas.getContext('2d')
+      // White background (for transparency)
+      ctx.fillStyle = '#FFFFFF'
+      ctx.fillRect(0, 0, w, h)
+      ctx.drawImage(img, 0, 0, w, h)
+      canvas.toBlob((blob) => {
+        const compressed = new File([blob], file.name || `foto_${Date.now()}.jpg`, { type: 'image/jpeg' })
+        resolve(compressed)
+      }, 'image/jpeg', quality)
+    }
+    img.src = url
+  })
+}
 
 export default function UploadView({ RESOURCE_TYPES, SUBJECTS }) {
   const ctx = useEduFlow()
@@ -27,6 +55,126 @@ export default function UploadView({ RESOURCE_TYPES, SUBJECTS }) {
     setForm, setActiveView, setSuccessMessage,
   } = ctx
 
+  // Camera state
+  const [cameraOpen, setCameraOpen] = useState(false)
+  const [cameraStream, setCameraStream] = useState(null)
+  const [capturedPhotos, setCapturedPhotos] = useState([])
+  const [previewPhoto, setPreviewPhoto] = useState(null)
+  const [facingMode, setFacingMode] = useState('environment')
+  const [cameraError, setCameraError] = useState(null)
+  const videoRef = useRef(null)
+  const canvasRef = useRef(null)
+  const cameraInputRef = useRef(null)
+
+  // Start camera
+  const startCamera = useCallback(async () => {
+    setCameraError(null)
+    try {
+      const constraints = { video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false }
+      const stream = await navigator.mediaDevices.getUserMedia(constraints)
+      setCameraStream(stream)
+      setCameraOpen(true)
+      // Attach stream to video element after render
+      setTimeout(() => {
+        if (videoRef.current) { videoRef.current.srcObject = stream }
+      }, 100)
+    } catch (err) {
+      if (err.name === 'NotAllowedError') {
+        setCameraError('Kamera-Zugriff wurde verweigert. Bitte erlauben Sie den Zugriff in den Browser-Einstellungen.')
+      } else if (err.name === 'NotFoundError') {
+        setCameraError('Keine Kamera gefunden. Nutzen Sie alternativ die Datei-Upload-Funktion.')
+      } else {
+        setCameraError('Kamera konnte nicht gestartet werden. Nutzen Sie alternativ den Datei-Upload.')
+      }
+    }
+  }, [facingMode])
+
+  // Stop camera
+  const stopCamera = useCallback(() => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(t => t.stop())
+      setCameraStream(null)
+    }
+    setCameraOpen(false)
+  }, [cameraStream])
+
+  // Switch camera (front/back)
+  const switchCamera = useCallback(() => {
+    if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()) }
+    setFacingMode(prev => prev === 'environment' ? 'user' : 'environment')
+  }, [cameraStream])
+
+  // Restart camera when facingMode changes
+  useEffect(() => {
+    if (cameraOpen && !cameraStream) { startCamera() }
+  }, [facingMode, cameraOpen, cameraStream, startCamera])
+
+  // Cleanup camera on unmount
+  useEffect(() => {
+    return () => {
+      if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()) }
+    }
+  }, [cameraStream])
+
+  // Capture photo from video stream
+  const capturePhoto = useCallback(() => {
+    if (!videoRef.current || !canvasRef.current) return
+    const video = videoRef.current
+    const canvas = canvasRef.current
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    const ctx2d = canvas.getContext('2d')
+    ctx2d.drawImage(video, 0, 0)
+    canvas.toBlob((blob) => {
+      const photoUrl = URL.createObjectURL(blob)
+      const file = new File([blob], `foto_${Date.now()}.jpg`, { type: 'image/jpeg' })
+      setCapturedPhotos(prev => [...prev, { url: photoUrl, file, timestamp: Date.now() }])
+    }, 'image/jpeg', 0.92)
+  }, [])
+
+  // Handle native camera input (mobile fallback)
+  const handleCameraInput = useCallback(async (e) => {
+    const files = Array.from(e.target.files || [])
+    for (const file of files) {
+      const compressed = await compressImage(file)
+      const photoUrl = URL.createObjectURL(compressed)
+      setCapturedPhotos(prev => [...prev, { url: photoUrl, file: compressed, timestamp: Date.now() }])
+    }
+    e.target.value = ''
+  }, [])
+
+  // Remove captured photo
+  const removePhoto = useCallback((idx) => {
+    setCapturedPhotos(prev => {
+      const updated = [...prev]
+      URL.revokeObjectURL(updated[idx].url)
+      updated.splice(idx, 1)
+      return updated
+    })
+  }, [])
+
+  // Add captured photos to upload pipeline
+  const addPhotosToUpload = useCallback(async () => {
+    if (capturedPhotos.length === 0) return
+
+    // Compress all photos
+    const compressedFiles = await Promise.all(
+      capturedPhotos.map(p => compressImage(p.file))
+    )
+
+    // Create a synthetic event for handleFileDrop
+    const dataTransfer = new DataTransfer()
+    compressedFiles.forEach(f => dataTransfer.items.add(f))
+    const syntheticEvent = { preventDefault: () => {}, target: { files: dataTransfer.files } }
+    handleFileDrop(syntheticEvent)
+
+    // Cleanup
+    capturedPhotos.forEach(p => URL.revokeObjectURL(p.url))
+    setCapturedPhotos([])
+    stopCamera()
+    setSuccessMessage(`${compressedFiles.length} Foto${compressedFiles.length > 1 ? 's' : ''} hinzugefügt!`)
+  }, [capturedPhotos, handleFileDrop, stopCamera, setSuccessMessage])
+
   return (
     <motion.div key="upload" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-3xl mx-auto">
       <div className="mb-8">
@@ -37,18 +185,139 @@ export default function UploadView({ RESOURCE_TYPES, SUBJECTS }) {
         <div>
           <div className="flex items-center gap-2 mb-3">
             <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-sm font-semibold text-blue-700">1</div>
-            <Label className="text-sm font-semibold">Dateien hochladen</Label>
+            <Label className="text-sm font-semibold">Material fotografieren oder hochladen</Label>
           </div>
+
+          {/* Camera Section */}
+          <div className="mb-4">
+            {!cameraOpen ? (
+              <div className="flex gap-3">
+                <button onClick={startCamera}
+                  className="flex-1 flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-dashed border-purple-300 bg-gradient-to-br from-purple-50 to-blue-50 hover:border-purple-400 hover:from-purple-100 hover:to-blue-100 transition-all cursor-pointer group">
+                  <div className="w-14 h-14 rounded-2xl bg-purple-100 group-hover:bg-purple-200 flex items-center justify-center transition-colors">
+                    <Camera className="h-7 w-7 text-purple-600" />
+                  </div>
+                  <div className="text-center">
+                    <p className="font-semibold text-gray-800 text-sm">Foto aufnehmen</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Buchseiten, Arbeitsblätter, Notizen abfotografieren</p>
+                  </div>
+                </button>
+                {/* Native camera input fallback for mobile */}
+                <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={handleCameraInput} />
+                <button onClick={() => cameraInputRef.current?.click()}
+                  className="flex-1 flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-dashed border-blue-300 bg-gradient-to-br from-blue-50 to-cyan-50 hover:border-blue-400 hover:from-blue-100 hover:to-cyan-100 transition-all cursor-pointer group">
+                  <div className="w-14 h-14 rounded-2xl bg-blue-100 group-hover:bg-blue-200 flex items-center justify-center transition-colors">
+                    <Image className="h-7 w-7 text-blue-600" />
+                  </div>
+                  <div className="text-center">
+                    <p className="font-semibold text-gray-800 text-sm">Aus Galerie wählen</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Bereits gespeicherte Fotos oder Screenshots</p>
+                  </div>
+                </button>
+              </div>
+            ) : (
+              <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="rounded-2xl overflow-hidden border-2 border-purple-300 bg-black">
+                {/* Live camera view */}
+                <div className="relative">
+                  <video ref={videoRef} autoPlay playsInline muted className="w-full max-h-[400px] object-cover" />
+                  <canvas ref={canvasRef} className="hidden" />
+
+                  {/* Camera controls overlay */}
+                  <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/70 to-transparent">
+                    <div className="flex items-center justify-center gap-6">
+                      <button onClick={switchCamera} className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors" title="Kamera wechseln">
+                        <SwitchCamera className="h-5 w-5 text-white" />
+                      </button>
+                      <button onClick={capturePhoto} className="w-16 h-16 rounded-full bg-white hover:bg-gray-100 flex items-center justify-center transition-all shadow-lg hover:scale-105 active:scale-95" title="Foto aufnehmen">
+                        <div className="w-12 h-12 rounded-full border-4 border-purple-500" />
+                      </button>
+                      <button onClick={stopCamera} className="w-10 h-10 rounded-full bg-white/20 hover:bg-red-500/60 flex items-center justify-center transition-colors" title="Kamera schliessen">
+                        <X className="h-5 w-5 text-white" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Photo counter badge */}
+                  {capturedPhotos.length > 0 && (
+                    <div className="absolute top-4 right-4 bg-purple-600 text-white text-sm font-bold px-3 py-1 rounded-full shadow-lg">
+                      {capturedPhotos.length} Foto{capturedPhotos.length > 1 ? 's' : ''}
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+
+            {/* Camera error */}
+            {cameraError && (
+              <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2">
+                <Info className="h-4 w-4 text-red-500 flex-shrink-0" />
+                <p className="text-sm text-red-700">{cameraError}</p>
+              </div>
+            )}
+
+            {/* Captured photos preview */}
+            <AnimatePresence>
+              {capturedPhotos.length > 0 && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="mt-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-semibold text-gray-700">{capturedPhotos.length} Foto{capturedPhotos.length > 1 ? 's' : ''} aufgenommen</p>
+                    <Button size="sm" onClick={addPhotosToUpload} className="btn-premium text-xs">
+                      <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" /> Fotos übernehmen & analysieren
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {capturedPhotos.map((photo, idx) => (
+                      <div key={photo.timestamp} className="relative group rounded-xl overflow-hidden border border-gray-200 aspect-[3/4]">
+                        <img src={photo.url} alt={`Foto ${idx + 1}`} className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
+                          <button onClick={() => setPreviewPhoto(photo.url)} className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center hover:bg-white" title="Vergrössern">
+                            <ZoomIn className="h-4 w-4 text-gray-700" />
+                          </button>
+                          <button onClick={() => removePhoto(idx)} className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center hover:bg-red-100" title="Löschen">
+                            <Trash2 className="h-4 w-4 text-red-500" />
+                          </button>
+                        </div>
+                        <div className="absolute bottom-1 left-1 bg-black/60 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">{idx + 1}</div>
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Photo fullscreen preview modal */}
+          <AnimatePresence>
+            {previewPhoto && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4" onClick={() => setPreviewPhoto(null)}>
+                <motion.img initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
+                  src={previewPhoto} alt="Vorschau" className="max-w-full max-h-full object-contain rounded-lg" />
+                <button className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center" onClick={() => setPreviewPhoto(null)}>
+                  <X className="h-6 w-6 text-white" />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Divider */}
+          <div className="flex items-center gap-3 my-4">
+            <div className="flex-1 h-px bg-gray-200" />
+            <span className="text-xs text-gray-400 font-medium">oder Dateien hochladen</span>
+            <div className="flex-1 h-px bg-gray-200" />
+          </div>
+
+          {/* File upload (existing) */}
           <div
             onDragOver={(e) => { e.preventDefault(); setUploadDragOver(true) }}
             onDragLeave={() => setUploadDragOver(false)}
             onDrop={handleFileDrop}
             onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-smooth ${uploadDragOver ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50/50'}`}
+            className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-smooth ${uploadDragOver ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50/50'}`}
           >
             <input ref={fileInputRef} type="file" multiple accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,.gif,.webp,.pptx,.ppt,.mp3,.wav,.m4a,.ogg,.mp4,.xlsx,.xls,.csv,.rtf" onChange={handleFileDrop} className="hidden" />
-            <Upload className={`h-12 w-12 mx-auto mb-4 ${uploadDragOver ? 'text-blue-500' : 'text-gray-400'}`} />
-            <p className="font-medium text-gray-700 mb-2">{uploadDragOver ? 'Dateien hier ablegen...' : 'Dateien hierher ziehen oder klicken'}</p>
+            <Upload className={`h-10 w-10 mx-auto mb-3 ${uploadDragOver ? 'text-blue-500' : 'text-gray-400'}`} />
+            <p className="font-medium text-gray-700 mb-1 text-sm">{uploadDragOver ? 'Dateien hier ablegen...' : 'Dateien hierher ziehen oder klicken'}</p>
             <p className="text-xs text-gray-500">PDF, Word, PowerPoint, Bilder, Audio, Excel, Text</p>
           </div>
         </div>
