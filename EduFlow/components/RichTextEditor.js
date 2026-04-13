@@ -8,7 +8,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import { Table, TableRow, TableCell, TableHeader } from '@tiptap/extension-table'
 import Image from '@tiptap/extension-image'
 import Link from '@tiptap/extension-link'
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, Fragment } from 'react'
 import {
   Bold, Italic, Underline as UnderlineIcon, List, ListOrdered,
   AlignLeft, AlignCenter, AlignRight, Heading2, Heading3,
@@ -77,12 +77,60 @@ export default function RichTextEditor({ content, onChange, placeholder = 'Text 
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
+  const fileInputRef = useRef(null)
+  const [showImageDialog, setShowImageDialog] = useState(false)
+  const [imageUrlInput, setImageUrlInput] = useState('')
+  const [imageLoading, setImageLoading] = useState(false)
+  const [imageError, setImageError] = useState('')
+
   const addImage = useCallback(() => {
-    if (!editor) return
-    const url = window.prompt('Bild-URL eingeben:')
-    if (url) {
-      editor.chain().focus().setImage({ src: url }).run()
+    setShowImageDialog(true)
+    setImageUrlInput('')
+    setImageError('')
+  }, [])
+
+  const insertImageFromUrl = useCallback(() => {
+    if (!editor || !imageUrlInput.trim()) return
+    setImageLoading(true)
+    setImageError('')
+    const img = new window.Image()
+    img.onload = () => {
+      editor.chain().focus().setImage({ src: imageUrlInput.trim() }).run()
+      setShowImageDialog(false)
+      setImageLoading(false)
     }
+    img.onerror = () => {
+      setImageError('Bild konnte nicht geladen werden. Bitte URL überprüfen.')
+      setImageLoading(false)
+    }
+    img.src = imageUrlInput.trim()
+  }, [editor, imageUrlInput])
+
+  const handleFileUpload = useCallback((e) => {
+    const file = e.target.files?.[0]
+    if (!file || !editor) return
+    if (!file.type.startsWith('image/')) {
+      setImageError('Bitte nur Bilddateien auswählen (JPG, PNG, GIF, WebP).')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setImageError('Bild ist zu gross (max. 5 MB).')
+      return
+    }
+    setImageLoading(true)
+    setImageError('')
+    const reader = new FileReader()
+    reader.onload = () => {
+      editor.chain().focus().setImage({ src: reader.result }).run()
+      setShowImageDialog(false)
+      setImageLoading(false)
+    }
+    reader.onerror = () => {
+      setImageError('Fehler beim Lesen der Datei.')
+      setImageLoading(false)
+    }
+    reader.readAsDataURL(file)
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }, [editor])
 
   const addLink = useCallback(() => {
@@ -110,8 +158,24 @@ export default function RichTextEditor({ content, onChange, placeholder = 'Text 
     )
   }
 
+  const handleEditorDrop = useCallback((e) => {
+    const files = e.dataTransfer?.files
+    if (!files?.length || !editor) return
+    const file = files[0]
+    if (!file.type.startsWith('image/')) return
+    e.preventDefault()
+    e.stopPropagation()
+    if (file.size > 5 * 1024 * 1024) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      editor.chain().focus().setImage({ src: reader.result }).run()
+    }
+    reader.readAsDataURL(file)
+  }, [editor])
+
   return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden bg-white focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-400 transition-all">
+    <div className="border border-gray-200 rounded-lg overflow-hidden bg-white focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-400 transition-all"
+      onDrop={handleEditorDrop} onDragOver={(e) => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault() }}>
       {/* Toolbar */}
       <div
         ref={toolbarRef}
@@ -198,6 +262,62 @@ export default function RichTextEditor({ content, onChange, placeholder = 'Text 
 
       {/* Editor */}
       <EditorContent editor={editor} />
+
+      {/* Image Upload Dialog */}
+      {showImageDialog && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowImageDialog(false)}>
+          <div className="bg-white rounded-xl shadow-xl p-5 max-w-md w-full space-y-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-semibold text-gray-900 text-sm">Bild einfügen</h3>
+
+            {/* File Upload */}
+            <div>
+              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={imageLoading}
+                className="w-full border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-400 hover:bg-blue-50 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <ImageIcon className="h-6 w-6 mx-auto text-gray-400 mb-1" />
+                <span className="text-sm text-gray-600">Datei auswählen oder hierher ziehen</span>
+                <span className="block text-xs text-gray-400 mt-1">JPG, PNG, GIF, WebP (max. 5 MB)</span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs text-gray-400">
+              <div className="flex-1 h-px bg-gray-200" />
+              oder
+              <div className="flex-1 h-px bg-gray-200" />
+            </div>
+
+            {/* URL Input */}
+            <div className="flex gap-2">
+              <input
+                type="url"
+                value={imageUrlInput}
+                onChange={(e) => setImageUrlInput(e.target.value)}
+                placeholder="https://beispiel.ch/bild.jpg"
+                className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-400"
+                onKeyDown={(e) => e.key === 'Enter' && insertImageFromUrl()}
+              />
+              <button
+                type="button"
+                onClick={insertImageFromUrl}
+                disabled={!imageUrlInput.trim() || imageLoading}
+                className="px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {imageLoading ? '...' : 'Einfügen'}
+              </button>
+            </div>
+
+            {imageError && <p className="text-xs text-red-500">{imageError}</p>}
+
+            <div className="flex justify-end">
+              <button type="button" onClick={() => setShowImageDialog(false)} className="text-sm text-gray-500 hover:text-gray-700">Abbrechen</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -9,7 +9,7 @@ import { Badge } from '@/ui/badge'
 import {
   Search, Filter, FolderOpen, PlusCircle, LayoutTemplate,
   FileText, Hash, Calendar, Eye, Download, Copy, Trash2,
-  BookOpen, Layers
+  BookOpen, Layers, ArrowUpDown, SlidersHorizontal, X
 } from 'lucide-react'
 import { useEduFlow } from '@/contexts/EduFlowContext'
 
@@ -23,22 +23,50 @@ export default function LibraryView({ SUBJECTS, GRADES, handleExportPDF, handleE
     librarySearch, setLibrarySearch,
     libraryFilterSubject, setLibraryFilterSubject,
     libraryFilterGrade, setLibraryFilterGrade,
+    libraryFilterDifficulty, setLibraryFilterDifficulty,
+    libraryFilterType, setLibraryFilterType,
+    librarySortBy, setLibrarySortBy,
     dossiers, setSelectedDossier,
     worksheetStatuses, setSuccessMessage, setError,
   } = ctx
 
   const getWorksheetStatus = (id) => worksheetStatuses[id] || null
 
+  const hasActiveFilters = librarySearch || libraryFilterSubject !== 'all' || libraryFilterGrade !== 'all' || libraryFilterDifficulty !== 'all' || libraryFilterType !== 'all'
+
+  const resetAllFilters = () => {
+    setLibrarySearch('')
+    setLibraryFilterSubject('all')
+    setLibraryFilterGrade('all')
+    setLibraryFilterDifficulty('all')
+    setLibraryFilterType('all')
+  }
+
   const filteredWorksheets = useMemo(() => {
-    return worksheets.filter(ws => {
+    const filtered = worksheets.filter(ws => {
       const matchesSearch = librarySearch === '' ||
         ws.title?.toLowerCase().includes(librarySearch.toLowerCase()) ||
         ws.topic?.toLowerCase().includes(librarySearch.toLowerCase())
       const matchesSubject = libraryFilterSubject === 'all' || ws.subject === libraryFilterSubject
       const matchesGrade = libraryFilterGrade === 'all' || ws.grade === libraryFilterGrade
-      return matchesSearch && matchesSubject && matchesGrade
+      const matchesDifficulty = libraryFilterDifficulty === 'all' || ws.difficulty === libraryFilterDifficulty
+      const matchesType = libraryFilterType === 'all' || ws.resourceType === libraryFilterType
+      return matchesSearch && matchesSubject && matchesGrade && matchesDifficulty && matchesType
     })
-  }, [worksheets, librarySearch, libraryFilterSubject, libraryFilterGrade])
+
+    // Sort
+    switch (librarySortBy) {
+      case 'oldest':
+        return filtered.sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      case 'title':
+        return filtered.sort((a, b) => (a.title || '').localeCompare(b.title || '', 'de'))
+      case 'questions':
+        return filtered.sort((a, b) => (b.content?.questions?.length || 0) - (a.content?.questions?.length || 0))
+      case 'newest':
+      default:
+        return filtered.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    }
+  }, [worksheets, librarySearch, libraryFilterSubject, libraryFilterGrade, libraryFilterDifficulty, libraryFilterType, librarySortBy])
 
   const handleDelete = async (id) => {
     const ok = await handleDeleteWorksheet(id)
@@ -59,7 +87,7 @@ export default function LibraryView({ SUBJECTS, GRADES, handleExportPDF, handleE
       </div>
 
       {/* Filters */}
-      <div className="glass-card rounded-xl p-4 mb-6">
+      <div className="glass-card rounded-xl p-4 mb-6 space-y-3">
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -74,13 +102,48 @@ export default function LibraryView({ SUBJECTS, GRADES, handleExportPDF, handleE
             <SelectContent><SelectItem value="all">Alle Klassen</SelectItem>{GRADES.map(n => <SelectItem key={n} value={String(n)}>{n}. Klasse</SelectItem>)}</SelectContent>
           </Select>
         </div>
+        <div className="flex flex-col sm:flex-row gap-3 items-center">
+          <Select value={libraryFilterDifficulty} onValueChange={setLibraryFilterDifficulty}>
+            <SelectTrigger className="w-full sm:w-[150px]"><SlidersHorizontal className="h-4 w-4 mr-2 text-gray-400" /><SelectValue placeholder="Schwierigkeit" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Alle Niveaus</SelectItem>
+              <SelectItem value="easy">Einfach</SelectItem>
+              <SelectItem value="medium">Mittel</SelectItem>
+              <SelectItem value="hard">Schwierig</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={libraryFilterType} onValueChange={setLibraryFilterType}>
+            <SelectTrigger className="w-full sm:w-[170px]"><FileText className="h-4 w-4 mr-2 text-gray-400" /><SelectValue placeholder="Typ" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Alle Typen</SelectItem>
+              <SelectItem value="worksheet">Arbeitsblatt</SelectItem>
+              <SelectItem value="exam">Prüfung</SelectItem>
+              <SelectItem value="quiz">Quiz</SelectItem>
+              <SelectItem value="vocabulary">Wortschatz</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={librarySortBy} onValueChange={setLibrarySortBy}>
+            <SelectTrigger className="w-full sm:w-[170px]"><ArrowUpDown className="h-4 w-4 mr-2 text-gray-400" /><SelectValue placeholder="Sortierung" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="newest">Neueste zuerst</SelectItem>
+              <SelectItem value="oldest">Älteste zuerst</SelectItem>
+              <SelectItem value="title">Alphabetisch</SelectItem>
+              <SelectItem value="questions">Meiste Fragen</SelectItem>
+            </SelectContent>
+          </Select>
+          {hasActiveFilters && (
+            <Button variant="ghost" size="sm" onClick={resetAllFilters} className="text-xs text-gray-500 hover:text-red-500 whitespace-nowrap">
+              <X className="h-3 w-3 mr-1" /> Filter zurücksetzen
+            </Button>
+          )}
+        </div>
       </div>
 
       {worksheets.length > 0 && (
         <p className="text-sm text-gray-500 mb-4">
           {filteredWorksheets.length} von {worksheets.length} Materialien
-          {(librarySearch || libraryFilterSubject !== 'all' || libraryFilterGrade !== 'all') && (
-            <Button variant="link" size="sm" className="ml-2 text-blue-600 p-0 h-auto" onClick={() => { setLibrarySearch(''); setLibraryFilterSubject('all'); setLibraryFilterGrade('all') }}>Filter zurücksetzen</Button>
+          {hasActiveFilters && (
+            <Button variant="link" size="sm" className="ml-2 text-blue-600 p-0 h-auto" onClick={resetAllFilters}>Filter zurücksetzen</Button>
           )}
         </p>
       )}
@@ -104,7 +167,7 @@ export default function LibraryView({ SUBJECTS, GRADES, handleExportPDF, handleE
               <Search className="h-12 w-12 mx-auto text-gray-300 mb-4" />
               <h3 className="text-lg font-semibold text-gray-700 mb-2">Keine Ergebnisse</h3>
               <p className="text-gray-500 mb-4">Versuchen Sie andere Suchbegriffe oder Filter.</p>
-              <Button variant="outline" onClick={() => { setLibrarySearch(''); setLibraryFilterSubject('all'); setLibraryFilterGrade('all') }}>Filter zurücksetzen</Button>
+              <Button variant="outline" onClick={resetAllFilters}>Filter zurücksetzen</Button>
             </CardContent></Card>
           </div>
         ) : (

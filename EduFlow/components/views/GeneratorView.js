@@ -1,6 +1,6 @@
 'use client'
-import { useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { motion, AnimatePresence, Reorder } from 'framer-motion'
 import { Button } from '@/ui/button'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
@@ -137,7 +137,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
 
   const startEditMode = () => {
     if (selectedWorksheet?.content?.questions) {
-      setEditedQuestions(JSON.parse(JSON.stringify(selectedWorksheet.content.questions)))
+      setEditedQuestions(JSON.parse(JSON.stringify(selectedWorksheet.content.questions)).map((q, i) => ({ ...q, _dragId: `q-${i}-${Date.now()}` })))
       setEditMode(true)
       setSaveStatus('saved')
       setHasUnsavedChanges(false)
@@ -292,24 +292,30 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
     const template = templates[type] || templates.open
     setEditedQuestions(prev => {
       const insertAt = afterIndex >= 0 ? afterIndex + 1 : prev.length
-      const newQ = { ...template, number: insertAt + 1, points: type === 'image_block' ? 0 : 1 }
+      const newQ = { ...template, number: insertAt + 1, points: type === 'image_block' ? 0 : 1, _dragId: `q-${Date.now()}-${Math.random()}` }
       const result = [...prev.slice(0, insertAt), newQ, ...prev.slice(insertAt)]
-      return result.map((q, i) => ({ ...q, number: i + 1 }))
+      result.forEach((q, i) => { q.number = i + 1 })
+      return result
     })
     setShowQuestionTypeSelector(false)
     markUnsaved()
   }
 
   const removeQuestion = (index) => {
-    setEditedQuestions(prev => prev.filter((_, i) => i !== index).map((q, i) => ({ ...q, number: i + 1 })))
+    setEditedQuestions(prev => {
+      const filtered = prev.filter((_, i) => i !== index)
+      filtered.forEach((q, i) => { q.number = i + 1 })
+      return [...filtered]
+    })
     markUnsaved()
   }
 
   const duplicateQuestion = (index) => {
     setEditedQuestions(prev => {
-      const dup = { ...JSON.parse(JSON.stringify(prev[index])) }
+      const dup = { ...JSON.parse(JSON.stringify(prev[index])), _dragId: `q-${Date.now()}-${Math.random()}` }
       const result = [...prev.slice(0, index + 1), dup, ...prev.slice(index + 1)]
-      return result.map((q, i) => ({ ...q, number: i + 1 }))
+      result.forEach((q, i) => { q.number = i + 1 })
+      return result
     })
     markUnsaved()
   }
@@ -322,7 +328,8 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
       const temp = updated[index]
       updated[index] = updated[newIndex]
       updated[newIndex] = temp
-      return updated.map((q, i) => ({ ...q, number: i + 1 }))
+      updated.forEach((q, i) => { q.number = i + 1 })
+      return updated
     })
     markUnsaved()
   }
@@ -452,6 +459,41 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
     setImageGenerating(false)
   }
 
+  // ============================================================
+  // AUTO-SAVE (10 second debounce)
+  // ============================================================
+  const autosaveTimerRef = useRef(null)
+  const [autosaveStatus, setAutosaveStatus] = useState(null) // null | 'saving' | 'saved' | 'error'
+
+  useEffect(() => {
+    if (!editMode || !hasUnsavedChanges || !selectedWorksheet || editedQuestions.length === 0) return
+
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current)
+    autosaveTimerRef.current = setTimeout(async () => {
+      setAutosaveStatus('saving')
+      const totalPoints = editedQuestions.reduce((sum, q) => q.type === 'image_block' ? sum : sum + (q.points || 1), 0)
+      const updatedContent = { ...selectedWorksheet.content, questions: editedQuestions, total_points: totalPoints }
+      try {
+        const res = await fetch(`/api/worksheets/${selectedWorksheet.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ content: updatedContent })
+        })
+        if (res.ok) {
+          setAutosaveStatus('saved')
+          setTimeout(() => setAutosaveStatus(null), 3000)
+        } else {
+          setAutosaveStatus('error')
+        }
+      } catch (err) {
+        console.error('Autosave error:', err)
+        setAutosaveStatus('error')
+      }
+    }, 10000)
+
+    return () => { if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current) }
+  }, [editMode, hasUnsavedChanges, editedQuestions, selectedWorksheet, token])
+
   const speakText = async (text) => {
     try {
       const res = await fetch('/api/tts', {
@@ -491,14 +533,14 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
           <div className={showEditorPanel ? "lg:col-span-8" : "lg:col-span-10 lg:col-start-2"}>
             {/* Top action bar */}
             <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                 {editMode ? (
                   <>
                     <Button size="sm" onClick={saveEdits} className="btn-premium text-xs">
-                      <CheckCircle2 className="h-4 w-4 mr-1" /> Speichern & Vorschau
+                      <CheckCircle2 className="h-4 w-4 sm:mr-1" /> <span className="hidden sm:inline">Speichern & Vorschau</span><span className="sm:hidden">Speichern</span>
                     </Button>
                     <Button variant="outline" size="sm" onClick={saveDraft} className="text-xs border-amber-300 text-amber-700 hover:bg-amber-50">
-                      <Save className="h-4 w-4 mr-1" /> Als Entwurf
+                      <Save className="h-4 w-4 sm:mr-1" /> <span className="hidden sm:inline">Als Entwurf</span>
                     </Button>
                     <Button variant="outline" size="sm" onClick={() => setUseRichEditor(!useRichEditor)}
                       className={`text-xs ${useRichEditor ? 'border-purple-300 text-purple-700 bg-purple-50' : ''}`}
@@ -508,6 +550,13 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                     <Button variant="outline" size="sm" onClick={cancelEdits} className="text-xs">
                       <X className="h-4 w-4 mr-1" /> Abbrechen
                     </Button>
+                    {autosaveStatus && (
+                      <span className={`text-xs flex items-center gap-1 ml-2 ${autosaveStatus === 'saving' ? 'text-blue-500' : autosaveStatus === 'saved' ? 'text-green-600' : 'text-red-500'}`}>
+                        {autosaveStatus === 'saving' && <><motion.span animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }} className="inline-block">⟳</motion.span> Speichert...</>}
+                        {autosaveStatus === 'saved' && <><CheckCircle2 className="h-3 w-3" /> Auto-gespeichert</>}
+                        {autosaveStatus === 'error' && <>⚠ Auto-Save fehlgeschlagen</>}
+                      </span>
+                    )}
                   </>
                 ) : (
                   <>
@@ -635,13 +684,25 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
               {/* EDIT MODE */}
               {editMode ? (
                 <div className="space-y-3">
+                <Reorder.Group
+                  axis="y"
+                  values={editedQuestions}
+                  onReorder={(newOrder) => {
+                    newOrder.forEach((q, i) => { q.number = i + 1 })
+                    setEditedQuestions([...newOrder])
+                    markUnsaved()
+                  }}
+                  className="space-y-3"
+                >
                   {editedQuestions.map((q, index) => (
-                    <motion.div key={`edit-${index}`} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}
-                      className={`group border rounded-xl bg-white shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden ${activeKiAction?.questionIndex === index ? 'ring-2 ring-blue-400 ring-offset-2' : ''}`}>
+                    <Reorder.Item key={q._dragId} value={q}
+                      whileDrag={{ scale: 1.02, boxShadow: '0 8px 25px rgba(0,0,0,0.15)', zIndex: 50 }}
+                      className={`group border rounded-xl bg-white shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden ${activeKiAction?.questionIndex === index ? 'ring-2 ring-blue-400 ring-offset-2' : ''}`}
+                    >
                       {/* Question Header Bar */}
-                      <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 border-b">
+                      <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 border-b cursor-grab active:cursor-grabbing" style={{ touchAction: 'none' }}>
                         <div className="flex items-center gap-2">
-                          <GripVertical className="h-4 w-4 text-gray-300" />
+                          <GripVertical className="h-4 w-4 text-gray-400" />
                           <span className="text-xs font-bold text-gray-500">#{q.number}</span>
                           <Select value={q.type || 'open'} onValueChange={(val) => changeQuestionType(index, val)}>
                             <SelectTrigger className="h-7 text-xs border-0 bg-blue-50 text-blue-700 w-auto gap-1 px-2">
@@ -1158,10 +1219,37 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
 
                         {/* Open / Generic answer field */}
                         {(q.type === 'open' || (!['multiple_choice', 'true_false', 'either_or', 'fill_blank', 'matching', 'ordering', 'math', 'image', 'image_block'].includes(q.type) && !q.options)) && (
-                          <div>
-                            <Label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Erwartete Antwort / Lösung</Label>
-                            <Textarea value={q.answer || ''} onChange={(e) => updateEditedQuestion(index, 'answer', e.target.value)}
-                              placeholder="Musterantwort eingeben..." className="text-sm bg-green-50 border-green-200 focus:bg-white mt-1 min-h-[60px]" />
+                          <div className="space-y-3">
+                            <div>
+                              <Label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Erwartete Antwort / Lösung</Label>
+                              <Textarea value={q.answer || ''} onChange={(e) => updateEditedQuestion(index, 'answer', e.target.value)}
+                                placeholder="Musterantwort eingeben..." className="text-sm bg-green-50 border-green-200 focus:bg-white mt-1 min-h-[60px]" />
+                            </div>
+                            {/* Line count control for writing space */}
+                            <div>
+                              <Label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Schreiblinien für Schüler</Label>
+                              <div className="flex items-center gap-3 mt-1.5">
+                                <button onClick={() => updateEditedQuestion(index, 'lineCount', Math.max(1, (q.lineCount || 3) - 1))}
+                                  className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center hover:bg-gray-100 transition-colors disabled:opacity-30"
+                                  disabled={(q.lineCount || 3) <= 1}>
+                                  <Minus className="h-3.5 w-3.5 text-gray-600" />
+                                </button>
+                                <div className="flex items-center gap-1.5 min-w-[80px] justify-center">
+                                  <div className="flex gap-0.5">
+                                    {Array.from({ length: Math.min(q.lineCount || 3, 10) }).map((_, i) => (
+                                      <div key={i} className="w-4 h-[2px] bg-gray-400 rounded" />
+                                    ))}
+                                  </div>
+                                  <span className="text-sm font-semibold text-gray-700 ml-1">{q.lineCount || 3}</span>
+                                </div>
+                                <button onClick={() => updateEditedQuestion(index, 'lineCount', Math.min(12, (q.lineCount || 3) + 1))}
+                                  className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center hover:bg-gray-100 transition-colors disabled:opacity-30"
+                                  disabled={(q.lineCount || 3) >= 12}>
+                                  <PlusCircle className="h-3.5 w-3.5 text-gray-600" />
+                                </button>
+                                <span className="text-xs text-gray-400 ml-1">{(q.lineCount || 3) <= 2 ? 'Wenig Platz' : (q.lineCount || 3) <= 5 ? 'Normal' : (q.lineCount || 3) <= 8 ? 'Viel Platz' : 'Sehr viel Platz'}</span>
+                              </div>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1205,8 +1293,9 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                           </div>
                         </motion.div>
                       )}
-                    </motion.div>
+                    </Reorder.Item>
                   ))}
+                </Reorder.Group>
 
                   {/* Add Question Button with Type Selector */}
                   <div className="relative">
@@ -1216,7 +1305,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                           <Label className="text-sm font-semibold text-gray-700">Frageart wählen</Label>
                           <Button variant="ghost" size="sm" onClick={() => setShowQuestionTypeSelector(false)} className="h-7 w-7 p-0"><X className="h-4 w-4" /></Button>
                         </div>
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                           {QUESTION_TYPES.map(qt => (
                             <button key={qt.id} onClick={() => addQuestionOfType(qt.id)}
                               className="flex items-center gap-2 p-2.5 rounded-lg border border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50 transition-all text-left">
@@ -1262,8 +1351,20 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                       </div>
                       ) : null}
 
-                      {/* MC / True-False / Either-Or options */}
-                      {q.options && ['multiple_choice', 'true_false', 'either_or'].includes(q.type || 'multiple_choice') && (
+                      {/* True-False: dedicated layout — always exactly 2 boxes */}
+                      {q.type === 'true_false' && (
+                        <div className="flex gap-3 ml-1 mt-3">
+                          {[{ label: 'Wahr', isWahr: true }, { label: 'Falsch', isWahr: false }].map((tf, i) => (
+                            <div key={i} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 flex-1 justify-center ${tf.isWahr ? 'border-green-300 bg-green-50' : 'border-red-300 bg-red-50'}`}>
+                              <div className={`w-5 h-5 rounded-full border-2 flex-shrink-0 ${tf.isWahr ? 'border-green-400' : 'border-red-400'}`} />
+                              <span className={`text-sm font-medium ${tf.isWahr ? 'text-green-700' : 'text-red-700'}`}>{tf.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* MC / Either-Or options */}
+                      {q.options && ['multiple_choice', 'either_or'].includes(q.type || 'multiple_choice') && (
                         <div className="space-y-2 ml-1 mt-2">
                           {q.options.map((option, i) => (
                             <div key={i} className="flex items-start gap-3 text-gray-800 text-sm">
@@ -1416,7 +1517,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                       {/* Writing lines for open/generic questions */}
                       {(q.type === 'open' || (!q.options && !['fill_blank', 'matching', 'ordering', 'math', 'image', 'image_block', 'table'].includes(q.type))) && (
                         <div className="mt-3 ml-1 space-y-3">
-                          {Array.from({ length: (q.points || 1) >= 3 ? 4 : (q.points || 1) >= 2 ? 3 : 2 }).map((_, i) => (
+                          {Array.from({ length: q.lineCount || ((q.points || 1) >= 3 ? 4 : (q.points || 1) >= 2 ? 3 : 2) }).map((_, i) => (
                             <div key={i} className="h-6" style={{ borderBottom: `1px solid ${wsTheme.colors.accent}40` }} />
                           ))}
                         </div>
@@ -1472,10 +1573,14 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
           </div>
 
           {/* Editor Panel */}
+          {/* Mobile overlay backdrop */}
+          {showEditorPanel && (
+            <div className="fixed inset-0 bg-black/30 z-40 lg:hidden" onClick={() => setShowEditorPanel(false)} />
+          )}
           <AnimatePresence>
             {showEditorPanel && (
-              <motion.div className="lg:col-span-4" initial={{ opacity: 0, x: 100 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 100 }} transition={{ type: "spring", stiffness: 200, damping: 30 }}>
-                <div className="glass-card rounded-2xl p-5 sticky top-20 space-y-4">
+              <motion.div className="fixed right-0 top-0 bottom-0 w-[85vw] max-w-md z-50 overflow-y-auto lg:relative lg:w-auto lg:max-w-none lg:z-auto lg:col-span-4" initial={{ opacity: 0, x: 100 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 100 }} transition={{ type: "spring", stiffness: 200, damping: 30 }}>
+                <div className="glass-card rounded-2xl lg:rounded-2xl rounded-l-2xl rounded-r-none lg:rounded-r-2xl p-5 sticky top-20 space-y-4 h-full lg:h-auto bg-white lg:bg-transparent overflow-y-auto">
                   <div className="flex items-center justify-between">
                     <h3 className="text-lg font-semibold">Werkzeuge</h3>
                     <Button variant="ghost" size="sm" onClick={() => setShowEditorPanel(false)} aria-label="Panel schliessen"><X className="h-4 w-4" /></Button>
@@ -1486,7 +1591,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                   <div className="space-y-2">
                     <Label className="text-sm font-medium flex items-center gap-2"><RefreshCw className="h-4 w-4" /> Schwierigkeit anpassen</Label>
                     <p className="text-xs text-gray-500">Generiert das Material mit anderem Niveau neu.</p>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                       {['easy', 'medium', 'hard'].map((level) => (
                         <Button key={level} size="sm" variant={selectedWorksheet.difficulty === level ? 'default' : 'outline'} onClick={() => handleRegenerate(selectedWorksheet.id, level)} disabled={generating || selectedWorksheet.difficulty === level} className="transition-smooth text-xs">
                           {DIFFICULTY_LABELS[level]}
