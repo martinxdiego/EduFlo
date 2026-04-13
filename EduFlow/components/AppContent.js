@@ -38,7 +38,7 @@ import { saveAs } from 'file-saver'
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/ui/command'
 import { LEHRPLAN_CYCLES, searchCompetencies, getAllSubjects, getSubjectsForCycle, getCompetenciesForSubject, getTotalCompetencyCount } from '@/data/lehrplan21'
 import { getThemeById } from '@/data/worksheetThemes'
-import { DashboardView, GeneratorView, LibraryView, UploadView, SettingsView } from '@/components/views'
+import { DashboardView, GeneratorView, LibraryView, UploadView, SettingsView, AnalyticsView } from '@/components/views'
 import { useEduFlow } from '@/contexts/EduFlowContext'
 import OnboardingHint from '@/components/OnboardingHint'
 
@@ -1890,10 +1890,11 @@ const AppContent = () => {
   const saveEdits = async () => {
     if (selectedWorksheet && editedQuestions.length > 0) {
       setSaveStatus('saving')
-      const totalPoints = editedQuestions.reduce((sum, q) => sum + (q.points || 1), 0)
+      const cleanQuestions = editedQuestions.map(({ _dragId, ...rest }) => rest)
+      const totalPoints = cleanQuestions.reduce((sum, q) => sum + (q.points || 1), 0)
       const updatedContent = {
         ...selectedWorksheet.content,
-        questions: editedQuestions,
+        questions: cleanQuestions,
         total_points: totalPoints
       }
       const updated = { ...selectedWorksheet, content: updatedContent }
@@ -1928,8 +1929,9 @@ const AppContent = () => {
   const saveDraft = async () => {
     if (selectedWorksheet && editedQuestions.length > 0) {
       setSaveStatus('saving')
-      const totalPoints = editedQuestions.reduce((sum, q) => sum + (q.points || 1), 0)
-      const updatedContent = { ...selectedWorksheet.content, questions: editedQuestions, total_points: totalPoints }
+      const cleanQuestions = editedQuestions.map(({ _dragId, ...rest }) => rest)
+      const totalPoints = cleanQuestions.reduce((sum, q) => sum + (q.points || 1), 0)
+      const updatedContent = { ...selectedWorksheet.content, questions: cleanQuestions, total_points: totalPoints }
       const updated = { ...selectedWorksheet, content: updatedContent }
 
       // Persist to DB
@@ -2820,6 +2822,7 @@ const AppContent = () => {
     { label: 'Lehrplan 21', icon: GraduationCap, action: () => { setActiveView('curriculum'); setCommandOpen(false) } },
     { label: 'Schuljahresplaner', icon: Calendar, action: () => { setActiveView('planner'); setCommandOpen(false) } },
     { label: 'Export-Historie', icon: Clock, action: () => { setActiveView('exports'); setCommandOpen(false) } },
+    { label: 'Lernanalyse-Dashboard', icon: BarChart3, action: () => { setActiveView('analytics'); setCommandOpen(false) } },
     { label: 'Einstellungen', icon: Settings, action: () => { setActiveView('settings'); setCommandOpen(false) } },
     ...(selectedWorksheet ? [
       { label: 'PDF Schülerversion exportieren', icon: Download, action: () => { handleExportPDF(selectedWorksheet, 'student'); setCommandOpen(false) } },
@@ -2846,6 +2849,7 @@ const AppContent = () => {
     { label: 'Classroom', items: [
       { id: 'classes', label: 'Klassen', icon: Users },
       { id: 'students', label: 'Schüler', icon: User },
+      { id: 'analytics', label: 'Lernanalyse', icon: BarChart3 },
     ]},
   ]
   const navItems = navGroups.flatMap(g => g.items)
@@ -4791,6 +4795,11 @@ const AppContent = () => {
                 apiBase=""
               />
             </motion.div>
+          )}
+
+          {/* ============ ANALYTICS VIEW ============ */}
+          {activeView === 'analytics' && (
+            <AnalyticsView />
           )}
 
           {/* ============ SETTINGS VIEW ============ */}

@@ -1373,6 +1373,186 @@ Gib:
       return handleCORS(NextResponse.json({ assignments: assignmentSummaries, studentStats, classStats }))
     }
 
+    // ========== LEARNING ANALYTICS DASHBOARD ==========
+
+    // Teacher: Aggregated analytics across all classes - GET /api/analytics/dashboard
+    if (route === '/analytics/dashboard' && method === 'GET') {
+      const decoded = await verifyToken(request)
+      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+
+      // Load all teacher's classes, assignments, submissions, worksheets
+      const classes = await db.collection('classes').find({ teacher_id: decoded.userId }).toArray()
+      const assignments = await db.collection('assignments').find({ teacher_id: decoded.userId }).toArray()
+      if (assignments.length === 0) {
+        return handleCORS(NextResponse.json({
+          overview: { totalStudents: 0, totalAssignments: 0, totalSubmissions: 0, avgScore: 0, avgGrade: 0, passRate: 0 },
+          scoreDistribution: [], performanceOverTime: [], subjectPerformance: [],
+          questionTypeAnalysis: [], classComparison: [], weakTopics: [], studentRanking: []
+        }))
+      }
+
+      const assignmentIds = assignments.map(a => a.id)
+      const worksheetIds = [...new Set(assignments.map(a => a.worksheet_id))]
+      const submissions = await db.collection('submissions').find({ assignment_id: { $in: assignmentIds } }).toArray()
+      const worksheets = await db.collection('worksheets').find({ id: { $in: worksheetIds } }).toArray()
+      const wsMap = {}; worksheets.forEach(w => { wsMap[w.id] = w })
+      const aMap = {}; assignments.forEach(a => { aMap[a.id] = a })
+
+      // All enrolled students across classes
+      const allStudentIds = new Set()
+      classes.forEach(c => (c.enrolled_students || []).forEach(s => allStudentIds.add(s.student_id)))
+      const studentNameMap = {}
+      classes.forEach(c => (c.enrolled_students || []).forEach(s => { studentNameMap[s.student_id] = s.display_name }))
+
+      // --- 1. Overview stats ---
+      const allGrades = submissions.filter(s => s.swiss_grade).map(s => s.swiss_grade)
+      const allScores = submissions.filter(s => s.score_percentage != null).map(s => s.score_percentage)
+      const overview = {
+        totalStudents: allStudentIds.size,
+        totalAssignments: assignments.length,
+        totalSubmissions: submissions.length,
+        avgScore: allScores.length > 0 ? Math.round(allScores.reduce((a, b) => a + b, 0) / allScores.length) : 0,
+        avgGrade: allGrades.length > 0 ? Math.round(allGrades.reduce((a, b) => a + b, 0) / allGrades.length * 10) / 10 : 0,
+        passRate: allGrades.length > 0 ? Math.round(allGrades.filter(g => g >= 4).length / allGrades.length * 100) : 0,
+      }
+
+      // --- 2. Score distribution (0-10%, 10-20%, ... 90-100%) ---
+      const scoreBuckets = Array.from({ length: 10 }, (_, i) => ({ range: `${i * 10}-${i * 10 + 10}%`, count: 0 }))
+      allScores.forEach(s => {
+        const idx = Math.min(Math.floor(s / 10), 9)
+        scoreBuckets[idx].count++
+      })
+
+      // --- 3. Performance over time (last 12 weeks) ---
+      const now = new Date()
+      const performanceOverTime = []
+      for (let w = 11; w >= 0; w--) {
+        const weekStart = new Date(now); weekStart.setDate(now.getDate() - w * 7); weekStart.setHours(0, 0, 0, 0)
+        const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 7)
+        const weekSubs = submissions.filter(s => {
+          const d = new Date(s.submitted_at || s.created_at)
+          return d >= weekStart && d < weekEnd
+        })
+        const weekScores = weekSubs.filter(s => s.score_percentage != null).map(s => s.score_percentage)
+        const weekLabel = `${weekStart.getDate()}.${weekStart.getMonth() + 1}`
+        performanceOverTime.push({
+          week: weekLabel,
+          avgScore: weekScores.length > 0 ? Math.round(weekScores.reduce((a, b) => a + b, 0) / weekScores.length) : null,
+          submissions: weekSubs.length
+        })
+      }
+
+      // --- 4. Subject performance ---
+      const subjectMap = {}
+      submissions.forEach(sub => {
+        const assignment = aMap[sub.assignment_id]
+        const worksheet = assignment ? wsMap[assignment.worksheet_id] : null
+        const subject = worksheet?.subject || 'Unbekannt'
+        if (!subjectMap[subject]) subjectMap[subject] = { scores: [], grades: [], count: 0 }
+        subjectMap[subject].count++
+        if (sub.score_percentage != null) subjectMap[subject].scores.push(sub.score_percentage)
+        if (sub.swiss_grade) subjectMap[subject].grades.push(sub.swiss_grade)
+      })
+      const subjectPerformance = Object.entries(subjectMap).map(([subject, data]) => ({
+        subject,
+        avgScore: data.scores.length > 0 ? Math.round(data.scores.reduce((a, b) => a + b, 0) / data.scores.length) : 0,
+        avgGrade: data.grades.length > 0 ? Math.round(data.grades.reduce((a, b) => a + b, 0) / data.grades.length * 10) / 10 : 0,
+        submissions: data.count
+      })).sort((a, b) => b.submissions - a.submissions)
+
+      // --- 5. Question type analysis ---
+      const qTypeMap = {}
+      submissions.forEach(sub => {
+        const results = sub.question_results || sub.results || []
+        results.forEach(r => {
+          const t = r.type || 'unknown'
+          if (!qTypeMap[t]) qTypeMap[t] = { correct: 0, total: 0 }
+          qTypeMap[t].total++
+          if (r.isCorrect) qTypeMap[t].correct++
+        })
+      })
+      const questionTypeLabels = {
+        multiple_choice: 'Multiple Choice', true_false: 'Wahr/Falsch', open: 'Offene Frage',
+        math: 'Rechnen', image: 'Bilderfrage', matching: 'Zuordnung', fill_blank: 'Lückentext',
+        ordering: 'Reihenfolge', either_or: 'Entweder-Oder', table: 'Tabelle'
+      }
+      const questionTypeAnalysis = Object.entries(qTypeMap)
+        .filter(([_, v]) => v.total >= 2)
+        .map(([type, v]) => ({
+          type: questionTypeLabels[type] || type,
+          correctRate: Math.round((v.correct / v.total) * 100),
+          total: v.total
+        }))
+        .sort((a, b) => a.correctRate - b.correctRate)
+
+      // --- 6. Class comparison ---
+      const classComparison = classes.map(cls => {
+        const classAssignmentIds = assignments.filter(a => a.class_id === cls.id).map(a => a.id)
+        const classSubs = submissions.filter(s => classAssignmentIds.includes(s.assignment_id))
+        const classGrades = classSubs.filter(s => s.swiss_grade).map(s => s.swiss_grade)
+        const classScores = classSubs.filter(s => s.score_percentage != null).map(s => s.score_percentage)
+        return {
+          name: cls.name,
+          students: (cls.enrolled_students || []).length,
+          submissions: classSubs.length,
+          avgScore: classScores.length > 0 ? Math.round(classScores.reduce((a, b) => a + b, 0) / classScores.length) : 0,
+          avgGrade: classGrades.length > 0 ? Math.round(classGrades.reduce((a, b) => a + b, 0) / classGrades.length * 10) / 10 : 0,
+          passRate: classGrades.length > 0 ? Math.round(classGrades.filter(g => g >= 4).length / classGrades.length * 100) : 0,
+        }
+      }).filter(c => c.submissions > 0)
+
+      // --- 7. Weak topics ---
+      const topicMap = {}
+      submissions.forEach(sub => {
+        const assignment = aMap[sub.assignment_id]
+        const worksheet = assignment ? wsMap[assignment.worksheet_id] : null
+        const topic = worksheet?.topic || 'Unbekannt'
+        const subject = worksheet?.subject || ''
+        if (!topicMap[topic]) topicMap[topic] = { subject, correct: 0, total: 0, students: new Set() }
+        const results = sub.question_results || sub.results || []
+        results.forEach(r => {
+          topicMap[topic].total++
+          if (r.isCorrect) topicMap[topic].correct++
+          else if (sub.student_id) topicMap[topic].students.add(sub.student_id)
+        })
+      })
+      const weakTopics = Object.entries(topicMap)
+        .filter(([_, v]) => v.total >= 5)
+        .map(([topic, v]) => ({
+          topic, subject: v.subject,
+          errorRate: Math.round(((v.total - v.correct) / v.total) * 100),
+          affectedStudents: v.students.size,
+          totalQuestions: v.total
+        }))
+        .sort((a, b) => b.errorRate - a.errorRate)
+        .slice(0, 10)
+
+      // --- 8. Student ranking ---
+      const studentPerf = {}
+      submissions.forEach(sub => {
+        if (!sub.student_id) return
+        if (!studentPerf[sub.student_id]) studentPerf[sub.student_id] = { scores: [], grades: [], count: 0 }
+        studentPerf[sub.student_id].count++
+        if (sub.score_percentage != null) studentPerf[sub.student_id].scores.push(sub.score_percentage)
+        if (sub.swiss_grade) studentPerf[sub.student_id].grades.push(sub.swiss_grade)
+      })
+      const studentRanking = Object.entries(studentPerf).map(([sid, data]) => ({
+        student_id: sid,
+        name: studentNameMap[sid] || 'Unbekannt',
+        submissions: data.count,
+        avgScore: data.scores.length > 0 ? Math.round(data.scores.reduce((a, b) => a + b, 0) / data.scores.length) : 0,
+        avgGrade: data.grades.length > 0 ? Math.round(data.grades.reduce((a, b) => a + b, 0) / data.grades.length * 10) / 10 : 0,
+        trend: data.scores.length >= 2
+          ? (data.scores[data.scores.length - 1] > data.scores[0] ? 'up' : data.scores[data.scores.length - 1] < data.scores[0] ? 'down' : 'stable')
+          : 'stable'
+      })).sort((a, b) => b.avgScore - a.avgScore)
+
+      return handleCORS(NextResponse.json({
+        overview, scoreDistribution: scoreBuckets, performanceOverTime,
+        subjectPerformance, questionTypeAnalysis, classComparison, weakTopics, studentRanking
+      }))
+    }
+
     // ========== WORKSHEET GENERATION ==========
 
     // Generate worksheet - POST /api/generate-worksheet
