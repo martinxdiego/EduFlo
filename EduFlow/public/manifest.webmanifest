@@ -1,0 +1,63 @@
+{
+  "name": "EduFlow — KI für Schweizer Lehrpersonen",
+  "short_name": "EduFlow",
+  "description": "KI-gestützte Lernmaterialien für den Lehrplan 21. Arbeitsblätter, Prüfungen, Quizze und Vokabellisten in Sekunden.",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f8fafc",
+  "theme_color": "#3b82f6",
+  "lang": "de-CH",
+  "dir": "ltr",
+  "categories": ["education", "productivity"],
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Material erstellen",
+      "short_name": "Erstellen",
+      "description": "Neues Lernmaterial mit KI generieren",
+      "url": "/?view=create&source=pwa-shortcut",
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Bibliothek",
+      "short_name": "Bibliothek",
+      "description": "Alle gespeicherten Materialien",
+      "url": "/?view=library&source=pwa-shortcut",
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Material hochladen",
+      "short_name": "Hochladen",
+      "description": "PDF, Word oder Bild hochladen",
+      "url": "/?view=upload&source=pwa-shortcut",
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "any" }]
+    }
+  ]
+}

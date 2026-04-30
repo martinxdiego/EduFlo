@@ -41,6 +41,8 @@ import { getThemeById } from '@/data/worksheetThemes'
 import { DashboardView, GeneratorView, LibraryView, UploadView, SettingsView, AnalyticsView } from '@/components/views'
 import { useEduFlow } from '@/contexts/EduFlowContext'
 import OnboardingHint from '@/components/OnboardingHint'
+import BottomTabBar from '@/components/BottomTabBar'
+import MobileMoreSheet from '@/components/MobileMoreSheet'
 
 // ============================================================
 // CONSTANTS
@@ -3013,27 +3015,7 @@ const AppContent = () => {
           </div>
         </div>
 
-        {/* Mobile nav dropdown */}
-        <AnimatePresence>
-          {mobileNavOpen && (
-            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="sm:hidden glass p-3 shadow-lg border-b border-white/20">
-              <nav className="space-y-3">
-                {navGroups.map(group => (
-                  <div key={group.label}>
-                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-2 mb-1">{group.label}</p>
-                    <div className="grid grid-cols-2 gap-1">
-                      {group.items.map(item => (
-                        <Button key={item.id} variant="ghost" size="sm" onClick={() => { setActiveView(item.id); setMobileNavOpen(false) }} className={`justify-start text-xs ${activeView === item.id ? 'bg-blue-50 text-blue-700 font-semibold ring-1 ring-blue-200/60' : 'text-gray-600'}`}>
-                          <item.icon className={`h-3.5 w-3.5 mr-1.5 ${activeView === item.id ? 'text-blue-600' : ''}`} />{item.label}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </nav>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Mobile nav is handled by BottomTabBar + MobileMoreSheet (rendered at root) */}
       </motion.header>
 
       {/* SUCCESS TOAST */}
@@ -3046,7 +3028,7 @@ const AppContent = () => {
       </AnimatePresence>
 
       {/* MAIN CONTENT */}
-      <main className="container mx-auto px-3 sm:px-4 pt-16 sm:pt-20 pb-24 sm:pb-32" role="main">
+      <main className="container mx-auto px-3 sm:px-4 pt-16 sm:pt-20 pb-28 sm:pb-32" role="main">
         <AnimatePresence mode="wait">
 
           {/* ============ HOME VIEW ============ */}
@@ -4964,7 +4946,7 @@ const AppContent = () => {
       </CommandDialog>
 
       {/* ====== AI CHAT ASSISTANT ====== */}
-      <div className={`fixed ${editMode ? 'bottom-16' : 'bottom-6'} right-6 z-50 transition-all duration-300`}>
+      <div className={`fixed ${editMode ? 'bottom-32 sm:bottom-16' : 'bottom-20 sm:bottom-6'} right-4 sm:right-6 z-50 transition-all duration-300`} style={{ marginBottom: 'env(safe-area-inset-bottom)' }}>
         <AnimatePresence>
           {chatOpen && (
             <motion.div initial={{ opacity: 0, y: 20, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 20, scale: 0.95 }}
@@ -5284,6 +5266,31 @@ const AppContent = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ====== MOBILE BOTTOM TAB BAR ====== */}
+      <BottomTabBar
+        activeView={activeView}
+        onSelect={(id) => {
+          setActiveView(id)
+          setSelectedWorksheet(null)
+          setShowEditorPanel(false)
+        }}
+        onMore={() => setMobileNavOpen(true)}
+      />
+      <MobileMoreSheet
+        open={mobileNavOpen}
+        onOpenChange={setMobileNavOpen}
+        navGroups={navGroups}
+        activeView={activeView}
+        onSelect={(id) => {
+          setActiveView(id)
+          setSelectedWorksheet(null)
+          setShowEditorPanel(false)
+        }}
+        onSettings={() => setActiveView('settings')}
+        onLogout={handleLogout}
+        user={user}
+      />
     </div>
   )
 }
