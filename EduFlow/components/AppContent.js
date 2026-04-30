@@ -3654,7 +3654,8 @@ const AppContent = () => {
                   {/* Month Calendar Grid */}
                   {plannerView === 'month' && (
                     <Card className="glass-card border-0 overflow-hidden">
-                      <div className="grid grid-cols-7">
+                      <div className="overflow-x-auto -mx-px">
+                      <div className="grid grid-cols-7 min-w-[640px]">
                         {['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map(day => (
                           <div key={day} className="p-2 text-center text-xs font-semibold text-gray-500 border-b bg-gray-50/50">{day}</div>
                         ))}
@@ -3700,6 +3701,7 @@ const AppContent = () => {
                             </div>
                           )
                         })}
+                      </div>
                       </div>
                     </Card>
                   )}
@@ -4180,7 +4182,8 @@ const AppContent = () => {
                   {/* Submissions table */}
                   {assignmentSubmissions.length > 0 && (
                     <Card className="glass-card border-0 mb-6 overflow-hidden">
-                      <table className="w-full">
+                      <div className="overflow-x-auto -mx-px">
+                      <table className="w-full min-w-[640px]">
                         <thead><tr className="border-b bg-gray-50/50">
                           <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Name</th>
                           <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600">Punkte</th>
@@ -4233,6 +4236,7 @@ const AppContent = () => {
                           )})}
                         </tbody>
                       </table>
+                      </div>
 
                       {/* Expanded submission detail with teacher correction */}
                       {expandedSubmission && (() => {
@@ -4517,8 +4521,8 @@ const AppContent = () => {
                   <Button onClick={() => setActiveView('library')} variant="outline"><FolderOpen className="h-4 w-4 mr-2" /> Zur Bibliothek</Button>
                 </CardContent></Card>
               ) : (
-                <Card className="glass-card border-0 overflow-hidden"><div className="overflow-x-auto">
-                  <table className="w-full">
+                <Card className="glass-card border-0 overflow-hidden"><div className="overflow-x-auto -mx-px">
+                  <table className="w-full min-w-[600px]">
                     <thead><tr className="border-b bg-gray-50/50">
                       <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Material</th>
                       <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Format</th>
@@ -4690,8 +4694,8 @@ const AppContent = () => {
                             <p className="text-xs text-gray-400 mt-1">Teilen Sie den Code <span className="font-mono font-bold text-blue-600">{classDetailData.join_code}</span> mit Ihren Schülern.</p>
                           </div>
                         ) : (
-                          <div className="overflow-x-auto">
-                            <table className="w-full">
+                          <div className="overflow-x-auto -mx-px">
+                            <table className="w-full min-w-[720px]">
                               <thead><tr className="border-b border-gray-200">
                                 <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Name</th>
                                 <th className="px-3 py-2 text-center text-xs font-semibold text-gray-600">Niveau</th>
