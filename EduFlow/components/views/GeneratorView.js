@@ -1593,9 +1593,15 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                     <p className="text-xs text-gray-500">Generiert das Material mit anderem Niveau neu.</p>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                       {['easy', 'medium', 'hard'].map((level) => (
-                        <Button key={level} size="sm" variant={selectedWorksheet.difficulty === level ? 'default' : 'outline'} onClick={() => handleRegenerate(selectedWorksheet.id, level)} disabled={generating || selectedWorksheet.difficulty === level} className="transition-smooth text-xs">
-                          {DIFFICULTY_LABELS[level]}
-                        </Button>
+                        <motion.div
+                          key={level}
+                          whileHover={!generating && selectedWorksheet.difficulty !== level ? { scale: 1.04, y: -1 } : {}}
+                          whileTap={!generating && selectedWorksheet.difficulty !== level ? { scale: 0.96 } : {}}
+                        >
+                          <Button size="sm" variant={selectedWorksheet.difficulty === level ? 'default' : 'outline'} onClick={() => handleRegenerate(selectedWorksheet.id, level)} disabled={generating || selectedWorksheet.difficulty === level} className="w-full transition-colors text-xs">
+                            {DIFFICULTY_LABELS[level]}
+                          </Button>
+                        </motion.div>
                       ))}
                     </div>
                   </div>
@@ -1609,20 +1615,34 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                       {WORKSHEET_THEMES.map(theme => {
                         const isActive = (selectedWorksheet.theme || form.theme || 'classic') === theme.id
                         return (
-                          <button key={theme.id} onClick={() => {
-                            setSelectedWorksheet(prev => ({ ...prev, theme: theme.id }))
-                            fetch(`/api/worksheets/${selectedWorksheet.id}`, {
-                              method: 'PUT',
-                              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                              body: JSON.stringify({ worksheetId: selectedWorksheet.id, theme: theme.id })
-                            }).catch(() => {})
-                          }}
-                            className={`p-1.5 rounded-lg border text-center transition-all ${isActive ? 'ring-2 ring-offset-1 shadow-sm' : 'border-gray-200 hover:border-gray-300'}`}
-                            style={isActive ? { borderColor: theme.colors.accent, ringColor: theme.colors.accent } : {}}
+                          <motion.button
+                            key={theme.id}
+                            onClick={() => {
+                              setSelectedWorksheet(prev => ({ ...prev, theme: theme.id }))
+                              fetch(`/api/worksheets/${selectedWorksheet.id}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                body: JSON.stringify({ worksheetId: selectedWorksheet.id, theme: theme.id })
+                              }).catch(() => {})
+                            }}
+                            whileHover={{ y: -2, scale: 1.05 }}
+                            whileTap={{ scale: 0.94 }}
+                            animate={isActive ? { scale: [1, 1.12, 1] } : {}}
+                            transition={isActive ? { duration: 0.4 } : { type: 'spring', stiffness: 400, damping: 22 }}
+                            className={`relative p-1.5 rounded-lg border text-center ${isActive ? 'shadow-sm' : 'border-gray-200 hover:border-gray-300'}`}
+                            style={isActive ? { borderColor: theme.colors.accent } : {}}
                             title={theme.name}>
-                            <span className="text-sm block">{theme.icon}</span>
-                            <span className="text-[9px] text-gray-500 block leading-tight">{theme.name}</span>
-                          </button>
+                            {isActive && (
+                              <motion.span
+                                layoutId="theme-picker-ring"
+                                className="absolute inset-0 rounded-lg ring-2 ring-offset-1 pointer-events-none"
+                                style={{ '--tw-ring-color': theme.colors.accent }}
+                                transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                              />
+                            )}
+                            <span className="relative text-sm block">{theme.icon}</span>
+                            <span className="relative text-[9px] text-gray-500 block leading-tight">{theme.name}</span>
+                          </motion.button>
                         )
                       })}
                     </div>
@@ -1685,38 +1705,66 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
           {/* Gamification Progress */}
           {worksheets.length > 0 && (
-            <div className="max-w-2xl mx-auto mb-6">
+            <motion.div
+              className="max-w-2xl mx-auto mb-6"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.05 }}
+            >
               <Card className="glass-card border-0 bg-gradient-to-r from-blue-50/50 to-purple-50/50">
                 <CardContent className="py-4">
                   <div className="flex items-center gap-4">
                     <div className="flex items-center gap-3 flex-1">
-                      <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
+                      <motion.div
+                        className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center"
+                        animate={{ rotate: [0, 8, -4, 0], scale: [1, 1.06, 1] }}
+                        transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                      >
                         <Star className="h-5 w-5 text-blue-600" />
-                      </div>
+                      </motion.div>
                       <div className="flex-1">
                         <div className="flex items-center justify-between mb-1">
                           <p className="text-sm font-medium text-gray-900">{worksheets.length} Materialien erstellt</p>
                           <span className="text-xs text-gray-500">{exportHistory.length} Exporte</span>
                         </div>
-                        <div className="w-full bg-gray-100 rounded-full h-1.5">
-                          <div className="h-full rounded-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all" style={{ width: `${Math.min(100, worksheets.length * 10)}%` }} />
+                        <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                          <motion.div
+                            className="h-full rounded-full bg-gradient-to-r from-blue-500 to-purple-500"
+                            initial={{ width: 0 }}
+                            animate={{ width: `${Math.min(100, worksheets.length * 10)}%` }}
+                            transition={{ duration: 1.1, ease: [0.22, 1, 0.36, 1], delay: 0.2 }}
+                          />
                         </div>
                       </div>
                     </div>
-                    {worksheets.length >= 5 && (
-                      <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200 text-[10px]">
-                        <Star className="h-3 w-3 mr-0.5" /> Produktiv!
-                      </Badge>
-                    )}
-                    {worksheets.length >= 10 && (
-                      <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-[10px]">
-                        <Crown className="h-3 w-3 mr-0.5" /> Power-User
-                      </Badge>
-                    )}
+                    <AnimatePresence>
+                      {worksheets.length >= 5 && (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.6, rotate: -20 }}
+                          animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                          transition={{ type: 'spring', stiffness: 380, damping: 18, delay: 0.3 }}
+                        >
+                          <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200 text-[10px]">
+                            <Star className="h-3 w-3 mr-0.5" /> Produktiv!
+                          </Badge>
+                        </motion.div>
+                      )}
+                      {worksheets.length >= 10 && (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.6, rotate: -20 }}
+                          animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                          transition={{ type: 'spring', stiffness: 380, damping: 18, delay: 0.45 }}
+                        >
+                          <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-[10px]">
+                            <Crown className="h-3 w-3 mr-0.5" /> Power-User
+                          </Badge>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 </CardContent>
               </Card>
-            </div>
+            </motion.div>
           )}
 
           {/* Quick Actions */}
@@ -1746,7 +1794,13 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
           <Card className="glass-card border-0 max-w-2xl mx-auto">
             <CardHeader className="space-y-3">
               <CardTitle className="text-2xl sm:text-3xl flex items-center gap-3">
-                <Sparkles className="h-7 w-7 text-blue-500" /> Material erstellen
+                <motion.div
+                  animate={{ rotate: [0, 12, -8, 0], scale: [1, 1.1, 1] }}
+                  transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                >
+                  <Sparkles className="h-7 w-7 text-blue-500" />
+                </motion.div>
+                Material erstellen
               </CardTitle>
               <CardDescription className="text-base">Wählen Sie den Materialtyp und die Einstellungen. Die KI generiert passende Inhalte für Ihre Klasse.</CardDescription>
             </CardHeader>
@@ -1755,15 +1809,38 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                 {/* Resource Type */}
                 <div>
                   <Label className="text-sm font-medium mb-3 block">Materialtyp</Label>
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                    {RESOURCE_TYPES.map(rt => (
-                      <button key={rt.id} type="button" onClick={() => setForm({ ...form, resourceType: rt.id })}
-                        className={`p-3 rounded-xl border-2 text-center transition-smooth hover:shadow-md ${form.resourceType === rt.id ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-gray-300'}`}>
-                        <rt.icon className={`h-6 w-6 mx-auto mb-2 ${form.resourceType === rt.id ? 'text-blue-600' : 'text-gray-500'}`} />
-                        <span className={`text-xs font-medium block ${form.resourceType === rt.id ? 'text-blue-700' : 'text-gray-700'}`}>{rt.label}</span>
-                      </button>
-                    ))}
-                  </div>
+                  <motion.div
+                    className="grid grid-cols-2 sm:grid-cols-5 gap-3"
+                    initial="hidden"
+                    animate="show"
+                    variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05 } } }}
+                  >
+                    {RESOURCE_TYPES.map(rt => {
+                      const isActive = form.resourceType === rt.id
+                      return (
+                      <motion.button
+                        key={rt.id}
+                        type="button"
+                        onClick={() => setForm({ ...form, resourceType: rt.id })}
+                        variants={{ hidden: { opacity: 0, y: 10, scale: 0.94 }, show: { opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 24 } } }}
+                        whileHover={{ y: -3, scale: 1.04 }}
+                        whileTap={{ scale: 0.96 }}
+                        animate={isActive ? { scale: [1, 1.06, 1] } : {}}
+                        transition={isActive ? { duration: 0.4 } : undefined}
+                        className={`relative p-3 rounded-xl border-2 text-center hover:shadow-md transition-colors ${isActive ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white hover:border-gray-300'}`}
+                      >
+                        {isActive && (
+                          <motion.span
+                            layoutId="resource-type-indicator"
+                            className="absolute inset-0 rounded-xl ring-2 ring-blue-400/40 pointer-events-none"
+                            transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                          />
+                        )}
+                        <rt.icon className={`relative h-6 w-6 mx-auto mb-2 ${isActive ? 'text-blue-600' : 'text-gray-500'}`} />
+                        <span className={`relative text-xs font-medium block ${isActive ? 'text-blue-700' : 'text-gray-700'}`}>{rt.label}</span>
+                      </motion.button>
+                    )})}
+                  </motion.div>
                   <p className="text-xs text-gray-500 mt-2">{RESOURCE_TYPES.find(r => r.id === form.resourceType)?.description}</p>
                 </div>
 
@@ -1940,9 +2017,57 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                   <Alert><AlertDescription className="flex items-center justify-between"><span>Monatliches Limit (5 Materialien) erreicht.</span><Button variant="link" onClick={handleUpgrade} className="ml-2 text-blue-600">Jetzt upgraden</Button></AlertDescription></Alert>
                 )}
 
-                <Button type="submit" className="w-full btn-premium text-lg py-6" disabled={generating || !form.topic.trim() || (user?.subscription_tier === 'free' && user?.worksheets_used_this_month >= 5)}>
-                  {(generating) ? (<><Zap className="h-5 w-5 mr-2 animate-pulse" /> Wird erstellt...</>) : (<><Sparkles className="h-5 w-5 mr-2" /> {RESOURCE_TYPES.find(r => r.id === form.resourceType)?.label || 'Material'} erstellen</>)}
-                </Button>
+                <motion.div
+                  whileHover={!generating && form.topic.trim() ? { scale: 1.01 } : {}}
+                  whileTap={!generating && form.topic.trim() ? { scale: 0.99 } : {}}
+                  className="relative"
+                >
+                  {/* Orbiting sparkles when generating */}
+                  {generating && (
+                    <>
+                      <motion.div
+                        className="absolute inset-0 pointer-events-none"
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
+                      >
+                        <span className="absolute top-1/2 left-0 -translate-y-1/2 w-2 h-2 bg-blue-400 rounded-full shadow-lg shadow-blue-400/60" />
+                      </motion.div>
+                      <motion.div
+                        className="absolute inset-0 pointer-events-none"
+                        animate={{ rotate: -360 }}
+                        transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
+                      >
+                        <span className="absolute top-1/2 right-0 -translate-y-1/2 w-1.5 h-1.5 bg-purple-400 rounded-full shadow-lg shadow-purple-400/60" />
+                      </motion.div>
+                    </>
+                  )}
+                  <Button type="submit" className="w-full btn-premium text-lg py-6 relative overflow-hidden group" disabled={generating || !form.topic.trim() || (user?.subscription_tier === 'free' && user?.worksheets_used_this_month >= 5)}>
+                    {!generating && form.topic.trim() && (
+                      <span className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 bg-gradient-to-r from-transparent via-white/30 to-transparent pointer-events-none" />
+                    )}
+                    <span className="relative flex items-center justify-center">
+                      {generating ? (
+                        <>
+                          <motion.span animate={{ rotate: 360 }} transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }} className="mr-2">
+                            <Zap className="h-5 w-5" />
+                          </motion.span>
+                          Wird erstellt...
+                        </>
+                      ) : (
+                        <>
+                          <motion.span
+                            className="mr-2"
+                            animate={{ rotate: [0, 12, -8, 0] }}
+                            transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+                          >
+                            <Sparkles className="h-5 w-5" />
+                          </motion.span>
+                          {RESOURCE_TYPES.find(r => r.id === form.resourceType)?.label || 'Material'} erstellen
+                        </>
+                      )}
+                    </span>
+                  </Button>
+                </motion.div>
               </form>
             </CardContent>
           </Card>

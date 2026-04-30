@@ -178,7 +178,14 @@ export default function UploadView({ RESOURCE_TYPES, SUBJECTS }) {
   return (
     <motion.div key="upload" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-3xl mx-auto">
       <div className="mb-8">
-        <h2 className="text-3xl font-bold text-gradient mb-2">Material hochladen</h2>
+        <motion.h2
+          className="text-3xl font-bold text-gradient mb-2 inline-block"
+          style={{ backgroundSize: '200% 100%' }}
+          animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
+          transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
+        >
+          Material hochladen
+        </motion.h2>
         <p className="text-gray-600">Laden Sie eigene Dokumente hoch und lassen Sie die KI daraus neue Lernmaterialien erstellen.</p>
       </div>
       <Card className="glass-card border-0"><CardContent className="pt-6 space-y-6">
@@ -192,28 +199,46 @@ export default function UploadView({ RESOURCE_TYPES, SUBJECTS }) {
           <div className="mb-4">
             {!cameraOpen ? (
               <div className="flex gap-3">
-                <button onClick={startCamera}
-                  className="flex-1 flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-dashed border-purple-300 bg-gradient-to-br from-purple-50 to-blue-50 hover:border-purple-400 hover:from-purple-100 hover:to-blue-100 transition-all cursor-pointer group">
-                  <div className="w-14 h-14 rounded-2xl bg-purple-100 group-hover:bg-purple-200 flex items-center justify-center transition-colors">
+                <motion.button
+                  onClick={startCamera}
+                  whileHover={{ y: -4, scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  transition={{ type: 'spring', stiffness: 380, damping: 22 }}
+                  className="flex-1 flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-dashed border-purple-300 bg-gradient-to-br from-purple-50 to-blue-50 hover:border-purple-400 hover:from-purple-100 hover:to-blue-100 transition-colors cursor-pointer group"
+                >
+                  <motion.div
+                    className="w-14 h-14 rounded-2xl bg-purple-100 group-hover:bg-purple-200 flex items-center justify-center transition-colors"
+                    whileHover={{ rotate: [0, -8, 8, -4, 0] }}
+                    transition={{ duration: 0.5 }}
+                  >
                     <Camera className="h-7 w-7 text-purple-600" />
-                  </div>
+                  </motion.div>
                   <div className="text-center">
                     <p className="font-semibold text-gray-800 text-sm">Foto aufnehmen</p>
                     <p className="text-xs text-gray-500 mt-0.5">Buchseiten, Arbeitsblätter, Notizen abfotografieren</p>
                   </div>
-                </button>
+                </motion.button>
                 {/* Native camera input fallback for mobile */}
                 <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={handleCameraInput} />
-                <button onClick={() => cameraInputRef.current?.click()}
-                  className="flex-1 flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-dashed border-blue-300 bg-gradient-to-br from-blue-50 to-cyan-50 hover:border-blue-400 hover:from-blue-100 hover:to-cyan-100 transition-all cursor-pointer group">
-                  <div className="w-14 h-14 rounded-2xl bg-blue-100 group-hover:bg-blue-200 flex items-center justify-center transition-colors">
+                <motion.button
+                  onClick={() => cameraInputRef.current?.click()}
+                  whileHover={{ y: -4, scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  transition={{ type: 'spring', stiffness: 380, damping: 22 }}
+                  className="flex-1 flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-dashed border-blue-300 bg-gradient-to-br from-blue-50 to-cyan-50 hover:border-blue-400 hover:from-blue-100 hover:to-cyan-100 transition-colors cursor-pointer group"
+                >
+                  <motion.div
+                    className="w-14 h-14 rounded-2xl bg-blue-100 group-hover:bg-blue-200 flex items-center justify-center transition-colors"
+                    whileHover={{ rotate: [0, -8, 8, -4, 0] }}
+                    transition={{ duration: 0.5 }}
+                  >
                     <Image className="h-7 w-7 text-blue-600" />
-                  </div>
+                  </motion.div>
                   <div className="text-center">
                     <p className="font-semibold text-gray-800 text-sm">Aus Galerie wählen</p>
                     <p className="text-xs text-gray-500 mt-0.5">Bereits gespeicherte Fotos oder Screenshots</p>
                   </div>
-                </button>
+                </motion.button>
               </div>
             ) : (
               <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="rounded-2xl overflow-hidden border-2 border-purple-300 bg-black">
@@ -308,39 +333,72 @@ export default function UploadView({ RESOURCE_TYPES, SUBJECTS }) {
           </div>
 
           {/* File upload (existing) */}
-          <div
+          <motion.div
             onDragOver={(e) => { e.preventDefault(); setUploadDragOver(true) }}
             onDragLeave={() => setUploadDragOver(false)}
             onDrop={handleFileDrop}
             onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-smooth ${uploadDragOver ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50/50'}`}
+            animate={uploadDragOver ? { scale: 1.02, borderColor: 'rgb(59, 130, 246)' } : { scale: 1 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 22 }}
+            className={`relative border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer overflow-hidden ${uploadDragOver ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50/50'}`}
           >
+            {/* Animated ring on drag-over */}
+            {uploadDragOver && (
+              <motion.div
+                className="absolute inset-0 rounded-2xl border-2 border-blue-400 pointer-events-none"
+                animate={{ scale: [1, 1.04, 1], opacity: [0.6, 0, 0.6] }}
+                transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
+              />
+            )}
             <input ref={fileInputRef} type="file" multiple accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,.gif,.webp,.pptx,.ppt,.mp3,.wav,.m4a,.ogg,.mp4,.xlsx,.xls,.csv,.rtf" onChange={handleFileDrop} className="hidden" />
-            <Upload className={`h-10 w-10 mx-auto mb-3 ${uploadDragOver ? 'text-blue-500' : 'text-gray-400'}`} />
+            <motion.div
+              animate={uploadDragOver ? { y: [-2, 2, -2] } : { y: 0 }}
+              transition={{ duration: 1, repeat: uploadDragOver ? Infinity : 0, ease: 'easeInOut' }}
+            >
+              <Upload className={`h-10 w-10 mx-auto mb-3 ${uploadDragOver ? 'text-blue-500' : 'text-gray-400'}`} />
+            </motion.div>
             <p className="font-medium text-gray-700 mb-1 text-sm">{uploadDragOver ? 'Dateien hier ablegen...' : 'Dateien hierher ziehen oder klicken'}</p>
             <p className="text-xs text-gray-500">PDF, Word, PowerPoint, Bilder, Audio, Excel, Text</p>
-          </div>
+          </motion.div>
         </div>
 
         {/* File list */}
-        {uploadedFiles.length > 0 && (
-          <div className="space-y-2">
-            {uploadedFiles.map((file, i) => (
-              <div key={i} className="flex items-center justify-between p-3 bg-blue-50 rounded-lg border border-blue-100">
-                <div className="flex items-center gap-3">
-                  <FileType className="h-5 w-5 text-blue-500" />
-                  <div>
-                    <p className="text-sm font-medium text-gray-800">{file.name}</p>
-                    <p className="text-xs text-gray-500">{(file.size / 1024).toFixed(0)} KB</p>
-                  </div>
-                </div>
-                <Button variant="ghost" size="sm" onClick={() => handleRemoveFile(i)} className="text-gray-400 hover:text-red-500">
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
+        <AnimatePresence>
+          {uploadedFiles.length > 0 && (
+            <motion.div
+              className="space-y-2"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <AnimatePresence mode="popLayout">
+                {uploadedFiles.map((file, i) => (
+                  <motion.div
+                    key={`${file.name}-${i}`}
+                    layout
+                    initial={{ opacity: 0, x: -20, scale: 0.96 }}
+                    animate={{ opacity: 1, x: 0, scale: 1 }}
+                    exit={{ opacity: 0, x: 20, scale: 0.94, transition: { duration: 0.2 } }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 26, delay: i * 0.04 }}
+                    whileHover={{ x: 3 }}
+                    className="flex items-center justify-between p-3 bg-blue-50 rounded-lg border border-blue-100 hover:border-blue-300 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <FileType className="h-5 w-5 text-blue-500" />
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">{file.name}</p>
+                        <p className="text-xs text-gray-500">{(file.size / 1024).toFixed(0)} KB</p>
+                      </div>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => handleRemoveFile(i)} className="text-gray-400 hover:text-red-500">
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Instructions */}
         <div>
@@ -439,7 +497,12 @@ export default function UploadView({ RESOURCE_TYPES, SUBJECTS }) {
               )}
 
               <p className="text-sm text-green-700 font-medium">Wählen Sie nun, was daraus erstellt werden soll:</p>
-              <div className="flex flex-wrap gap-2">
+              <motion.div
+                className="flex flex-wrap gap-2"
+                initial="hidden"
+                animate="show"
+                variants={{ hidden: {}, show: { transition: { staggerChildren: 0.06, delayChildren: 0.1 } } }}
+              >
                 {RESOURCE_TYPES.map(rt => {
                   const included = uploadFileResults.filter(r => r.included && r.analysis)
                   const firstAnalysis = included[0]?.analysis || uploadAnalysisResult || {}
@@ -451,33 +514,54 @@ export default function UploadView({ RESOURCE_TYPES, SUBJECTS }) {
                   const suggestedType = firstAnalysis.material_type_suggestion || 'worksheet'
                   const suggestedSubject = included.length === 1 ? (included[0]?.correctedSubject || firstAnalysis.subject) : firstAnalysis.subject
                   const suggestedGrade = included.length === 1 ? (included[0]?.correctedGrade || firstAnalysis.grade_suggestion) : firstAnalysis.grade_suggestion
+                  const isSuggested = rt.id === suggestedType
 
                   return (
-                    <Button key={rt.id} variant={rt.id === suggestedType ? 'default' : 'outline'} size="sm" onClick={() => {
-                      setForm(prev => ({
-                        ...prev,
-                        resourceType: rt.id,
-                        topic: topicText + (topicsStr ? ` – Schwerpunkte: ${topicsStr}` : '') + (uploadInstructions ? ` – ${uploadInstructions}` : ''),
-                        subject: suggestedSubject && SUBJECTS.includes(suggestedSubject) ? suggestedSubject : prev.subject,
-                        grade: suggestedGrade || prev.grade,
-                        difficulty: firstAnalysis.difficulty_suggestion || prev.difficulty,
-                      }))
-                      setActiveView('create')
-                    }}>
-                      <rt.icon className="h-4 w-4 mr-1.5" /> {rt.label} erstellen
-                    </Button>
+                    <motion.div
+                      key={rt.id}
+                      variants={{ hidden: { opacity: 0, y: 12, scale: 0.94 }, show: { opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 400, damping: 24 } } }}
+                      whileHover={{ y: -2, scale: 1.04 }}
+                      whileTap={{ scale: 0.96 }}
+                      animate={isSuggested ? { boxShadow: ['0 0 0 0 rgba(59,130,246,0)', '0 0 0 6px rgba(59,130,246,0.18)', '0 0 0 0 rgba(59,130,246,0)'] } : {}}
+                      transition={isSuggested ? { duration: 2, repeat: Infinity, ease: 'easeInOut' } : undefined}
+                      style={{ borderRadius: '0.5rem' }}
+                    >
+                      <Button variant={isSuggested ? 'default' : 'outline'} size="sm" onClick={() => {
+                        setForm(prev => ({
+                          ...prev,
+                          resourceType: rt.id,
+                          topic: topicText + (topicsStr ? ` – Schwerpunkte: ${topicsStr}` : '') + (uploadInstructions ? ` – ${uploadInstructions}` : ''),
+                          subject: suggestedSubject && SUBJECTS.includes(suggestedSubject) ? suggestedSubject : prev.subject,
+                          grade: suggestedGrade || prev.grade,
+                          difficulty: firstAnalysis.difficulty_suggestion || prev.difficulty,
+                        }))
+                        setActiveView('create')
+                      }}>
+                        <rt.icon className="h-4 w-4 mr-1.5" /> {rt.label} erstellen
+                      </Button>
+                    </motion.div>
                   )
                 })}
-              </div>
+              </motion.div>
             </div>
           ) : (
-            <Button className="w-full btn-premium" disabled={uploadedFiles.length === 0 || uploadAnalyzing} onClick={uploadFileResults.length > 0 ? handleReAnalyze : handleAnalyzeUpload}>
-              {uploadAnalyzing ? (
-                <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Wird analysiert... ({uploadFileResults.filter(r => !r.analyzing).length}/{uploadedFiles.length})</>
-              ) : (
-                <><Sparkles className="h-4 w-4 mr-2" /> {uploadedFiles.length === 0 ? 'Zuerst Dateien hochladen' : uploadFileResults.length > 0 ? `Neue Dateien analysieren` : `${uploadedFiles.length} Datei${uploadedFiles.length > 1 ? 'en' : ''} analysieren`}</>
-              )}
-            </Button>
+            <motion.div
+              whileHover={uploadedFiles.length > 0 && !uploadAnalyzing ? { scale: 1.01 } : {}}
+              whileTap={uploadedFiles.length > 0 && !uploadAnalyzing ? { scale: 0.99 } : {}}
+            >
+              <Button className="w-full btn-premium relative overflow-hidden group" disabled={uploadedFiles.length === 0 || uploadAnalyzing} onClick={uploadFileResults.length > 0 ? handleReAnalyze : handleAnalyzeUpload}>
+                {!uploadAnalyzing && uploadedFiles.length > 0 && (
+                  <span className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 bg-gradient-to-r from-transparent via-white/25 to-transparent" />
+                )}
+                <span className="relative flex items-center justify-center">
+                  {uploadAnalyzing ? (
+                    <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Wird analysiert... ({uploadFileResults.filter(r => !r.analyzing).length}/{uploadedFiles.length})</>
+                  ) : (
+                    <><Sparkles className="h-4 w-4 mr-2" /> {uploadedFiles.length === 0 ? 'Zuerst Dateien hochladen' : uploadFileResults.length > 0 ? `Neue Dateien analysieren` : `${uploadedFiles.length} Datei${uploadedFiles.length > 1 ? 'en' : ''} analysieren`}</>
+                  )}
+                </span>
+              </Button>
+            </motion.div>
           )}
         </div>
 

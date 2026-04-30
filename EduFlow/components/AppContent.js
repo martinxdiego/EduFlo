@@ -3073,21 +3073,43 @@ const AppContent = () => {
           {activeView === 'templates' && (
             <motion.div key="templates" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-7xl mx-auto">
               <div className="mb-8">
-                <h2 className="text-3xl font-bold text-gradient mb-2">Vorlagen</h2>
+                <motion.h2
+                  className="text-3xl font-bold text-gradient mb-2 inline-block"
+                  style={{ backgroundSize: '200% 100%' }}
+                  animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
+                  transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
+                >
+                  Vorlagen
+                </motion.h2>
                 <p className="text-gray-600">Starten Sie schneller mit vorgefertigten Vorlagen. Wählen Sie eine Vorlage, geben Sie Ihr Thema ein – fertig.</p>
               </div>
 
               {/* Category Tabs */}
               <div className="flex gap-2 mb-6 overflow-x-auto pb-1">
-                {TEMPLATE_CATEGORIES.map(cat => (
-                  <button key={cat.id} onClick={() => setTemplateCategory(cat.id)}
-                    className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-smooth ${templateCategory === cat.id ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200 hover:border-blue-300 hover:text-blue-600'}`}>
-                    {cat.label}
-                    <span className="ml-1.5 text-xs opacity-70">
+                {TEMPLATE_CATEGORIES.map(cat => {
+                  const isActive = templateCategory === cat.id
+                  return (
+                  <motion.button
+                    key={cat.id}
+                    onClick={() => setTemplateCategory(cat.id)}
+                    whileHover={{ y: -2, scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                    className={`relative px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap ${isActive ? 'text-white' : 'bg-white text-gray-600 border border-gray-200 hover:border-blue-300 hover:text-blue-600'}`}
+                  >
+                    {isActive && (
+                      <motion.span
+                        layoutId="template-cat-pill"
+                        className="absolute inset-0 bg-blue-600 rounded-full shadow-md"
+                        transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                      />
+                    )}
+                    <span className="relative">{cat.label}</span>
+                    <span className="relative ml-1.5 text-xs opacity-70">
                       {STARTER_TEMPLATES.filter(t => cat.id === 'all' || t.category === cat.id).length}
                     </span>
-                  </button>
-                ))}
+                  </motion.button>
+                )})}
               </div>
 
               {/* Search + Filter */}
@@ -3099,33 +3121,55 @@ const AppContent = () => {
               </div>
 
               {filteredTemplates.length === 0 ? (
+                <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ type: 'spring', stiffness: 380, damping: 26 }}>
                 <Card className="glass-card border-0"><CardContent className="py-16 text-center">
-                  <Search className="h-12 w-12 mx-auto text-gray-300 mb-4" />
+                  <motion.div animate={{ rotate: [0, -8, 8, -4, 0] }} transition={{ duration: 1.4, repeat: Infinity, repeatDelay: 3, ease: 'easeInOut' }}>
+                    <Search className="h-12 w-12 mx-auto text-gray-300 mb-4" />
+                  </motion.div>
                   <h3 className="text-lg font-semibold text-gray-700 mb-2">Keine Vorlagen gefunden</h3>
                   <p className="text-gray-500 mb-4">Versuchen Sie andere Suchbegriffe oder Filter.</p>
                   <Button variant="outline" onClick={() => { setTemplateSearch(''); setTemplateFilterSubject('all'); setTemplateCategory('all') }}>Filter zurücksetzen</Button>
                 </CardContent></Card>
+                </motion.div>
               ) : (
-                <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                <motion.div
+                  key={`tpl-${templateCategory}-${templateFilterSubject}-${templateSearch}`}
+                  className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
+                  variants={{ hidden: {}, show: { transition: { staggerChildren: 0.04, delayChildren: 0.05 } } }}
+                  initial="hidden"
+                  animate="show"
+                >
+                  <AnimatePresence mode="popLayout">
                   {[...filteredTemplates].sort((a, b) => {
                     if (!user?.teacher_type) return 0
                     const gA = parseInt(a.grade, 10), gB = parseInt(b.grade, 10)
                     const relevantA = user.teacher_type === 'sekundar' ? gA >= 7 : gA <= 6
                     const relevantB = user.teacher_type === 'sekundar' ? gB >= 7 : gB <= 6
                     return (relevantB ? 1 : 0) - (relevantA ? 1 : 0)
-                  }).map((template, index) => {
+                  }).map((template) => {
                     const typeInfo = RESOURCE_TYPES.find(r => r.id === template.type)
                     const TypeIcon = typeInfo?.icon || FileText
                     return (
-                    <motion.div key={template.id} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.03 }}>
-                      <Card className="glass-card border-0 hover-lift h-full flex flex-col group cursor-pointer" onClick={() => handleUseTemplate(template)}>
+                    <motion.div
+                      key={template.id}
+                      layout
+                      variants={{ hidden: { opacity: 0, y: 14, scale: 0.96 }, show: { opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 26 } } }}
+                      exit={{ opacity: 0, scale: 0.94, transition: { duration: 0.2 } }}
+                      whileHover={{ y: -5, transition: { type: 'spring', stiffness: 400, damping: 22 } }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      <Card className="glass-card border-0 h-full flex flex-col group cursor-pointer hover:shadow-xl transition-shadow" onClick={() => handleUseTemplate(template)}>
                         <CardHeader className="pb-3">
                           <div className="flex items-start gap-3">
-                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${template.type === 'exam' ? 'bg-red-50' : template.type === 'quiz' ? 'bg-green-50' : template.type === 'vocabulary' ? 'bg-purple-50' : 'bg-blue-50'}`}>
+                            <motion.div
+                              className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${template.type === 'exam' ? 'bg-red-50' : template.type === 'quiz' ? 'bg-green-50' : template.type === 'vocabulary' ? 'bg-purple-50' : 'bg-blue-50'}`}
+                              whileHover={{ rotate: [0, -8, 8, -4, 0], scale: 1.1 }}
+                              transition={{ duration: 0.5 }}
+                            >
                               <TypeIcon className={`h-5 w-5 ${template.type === 'exam' ? 'text-red-500' : template.type === 'quiz' ? 'text-green-500' : template.type === 'vocabulary' ? 'text-purple-500' : 'text-blue-500'}`} />
-                            </div>
+                            </motion.div>
                             <div className="flex-1 min-w-0">
-                              <CardTitle className="text-sm leading-tight">{template.name}</CardTitle>
+                              <CardTitle className="text-sm leading-tight group-hover:text-blue-700 transition-colors">{template.name}</CardTitle>
                               <CardDescription className="text-xs mt-1 line-clamp-2">{template.description}</CardDescription>
                             </div>
                           </div>
@@ -3146,24 +3190,30 @@ const AppContent = () => {
                           )}
                         </CardContent>
                         <CardFooter className="pt-0">
-                          <Button className="w-full transition-smooth group-hover:bg-blue-600 group-hover:text-white" variant="outline" size="sm">
-                            <ArrowRight className="h-4 w-4 mr-2" /> Verwenden
+                          <Button className="w-full transition-colors group-hover:bg-blue-600 group-hover:text-white" variant="outline" size="sm">
+                            <ArrowRight className="h-4 w-4 mr-2 group-hover:translate-x-1 transition-transform" /> Verwenden
                           </Button>
                         </CardFooter>
                       </Card>
                     </motion.div>
                   )})}
-                </div>
+                  </AnimatePresence>
+                </motion.div>
               )}
 
-              <div className="mt-8">
+              <motion.div className="mt-8" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
                 <Card className="glass-card border-0 bg-gradient-to-br from-blue-50 to-purple-50"><CardContent className="py-8 text-center">
-                  <Star className="h-10 w-10 mx-auto text-blue-400 mb-3" />
+                  <motion.div
+                    animate={{ rotate: [0, 12, -8, 0], scale: [1, 1.1, 1] }}
+                    transition={{ duration: 3.5, repeat: Infinity, ease: 'easeInOut' }}
+                  >
+                    <Star className="h-10 w-10 mx-auto text-blue-400 mb-3" />
+                  </motion.div>
                   <h3 className="text-lg font-semibold text-gray-800 mb-2">Eigene Vorlagen speichern</h3>
                   <p className="text-sm text-gray-600 max-w-md mx-auto">Bald können Sie Ihre besten Materialien als eigene Vorlagen speichern und mit einem Klick wiederverwenden.</p>
                   <Badge variant="secondary" className="mt-4">Demnächst verfügbar</Badge>
                 </CardContent></Card>
-              </div>
+              </motion.div>
             </motion.div>
           )}
 
@@ -3171,7 +3221,14 @@ const AppContent = () => {
           {activeView === 'curriculum' && (
             <motion.div key="curriculum" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-6xl mx-auto">
               <div className="mb-8">
-                <h2 className="text-3xl font-bold text-gradient mb-2">Lehrplan 21</h2>
+                <motion.h2
+                  className="text-3xl font-bold text-gradient mb-2 inline-block"
+                  style={{ backgroundSize: '200% 100%' }}
+                  animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
+                  transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
+                >
+                  Lehrplan 21
+                </motion.h2>
                 <p className="text-gray-600">Kompetenzen durchsuchen, Jahresplanung verwalten und gezielt Material erstellen.</p>
               </div>
 
@@ -3305,7 +3362,12 @@ const AppContent = () => {
 
               {/* Cycle Cards */}
               {!curriculumSearch.trim() && (
-                <div className="space-y-4">
+                <motion.div
+                  className="space-y-4"
+                  variants={{ hidden: {}, show: { transition: { staggerChildren: 0.08, delayChildren: 0.05 } } }}
+                  initial="hidden"
+                  animate="show"
+                >
                   {[...LEHRPLAN_CYCLES].sort((a, b) => {
                     if (!user?.teacher_type) return 0
                     const relevant = user.teacher_type === 'sekundar' ? ['z3'] : ['z1', 'z2']
@@ -3314,14 +3376,26 @@ const AppContent = () => {
                     const cycleColor = cycle.color === 'emerald' ? 'from-emerald-50 to-green-50' : cycle.color === 'blue' ? 'from-blue-50 to-indigo-50' : 'from-purple-50 to-pink-50'
                     const iconBg = cycle.color === 'emerald' ? 'bg-emerald-100' : cycle.color === 'blue' ? 'bg-blue-100' : 'bg-purple-100'
                     const iconColor = cycle.color === 'emerald' ? 'text-emerald-600' : cycle.color === 'blue' ? 'text-blue-600' : 'text-purple-600'
+                    const progressBar = cycle.color === 'emerald' ? 'bg-emerald-500' : cycle.color === 'blue' ? 'bg-blue-500' : 'bg-purple-500'
                     const totalComps = cycle.areas.reduce((sum, a) => sum + (a.competencies?.length || 0), 0)
                     const doneComps = cycle.areas.reduce((sum, a) => sum + (a.competencies || []).filter(c => competencyTracker[c.code] === 'done').length, 0)
+                    const progressPct = totalComps > 0 ? (doneComps / totalComps) * 100 : 0
 
                     return (
-                    <Card key={cycle.id} className="glass-card border-0 overflow-hidden">
-                      <button onClick={() => setExpandedCycle(expandedCycle === cycle.id ? null : cycle.id)} className={`w-full px-6 py-5 flex items-center justify-between text-left hover:bg-gradient-to-r ${cycleColor} transition-smooth`}>
+                    <motion.div
+                      key={cycle.id}
+                      variants={{ hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 360, damping: 28 } } }}
+                    >
+                    <Card className="glass-card border-0 overflow-hidden hover:shadow-lg transition-shadow">
+                      <button onClick={() => setExpandedCycle(expandedCycle === cycle.id ? null : cycle.id)} className={`w-full px-6 py-5 flex items-center justify-between text-left hover:bg-gradient-to-r ${cycleColor} transition-colors`}>
                         <div className="flex items-center gap-4">
-                          <div className={`w-12 h-12 rounded-xl ${iconBg} flex items-center justify-center`}><GraduationCap className={`h-6 w-6 ${iconColor}`} /></div>
+                          <motion.div
+                            className={`w-12 h-12 rounded-xl ${iconBg} flex items-center justify-center`}
+                            whileHover={{ rotate: [0, -8, 8, 0], scale: 1.08 }}
+                            transition={{ duration: 0.5 }}
+                          >
+                            <GraduationCap className={`h-6 w-6 ${iconColor}`} />
+                          </motion.div>
                           <div>
                             <h3 className="text-lg font-semibold text-gray-900">{cycle.name}</h3>
                             <p className="text-sm text-gray-500">{cycle.grades} • {cycle.areas.length} Fächer • {totalComps} Kompetenzen</p>
@@ -3332,11 +3406,21 @@ const AppContent = () => {
                             <div className="text-right hidden sm:block">
                               <p className="text-xs text-green-600 font-medium">{doneComps}/{totalComps} erledigt</p>
                               <div className="w-20 h-1.5 bg-gray-200 rounded-full mt-1 overflow-hidden">
-                                <div className="h-full bg-green-500 rounded-full" style={{ width: `${(doneComps/totalComps)*100}%` }} />
+                                <motion.div
+                                  className={`h-full ${progressBar} rounded-full`}
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${progressPct}%` }}
+                                  transition={{ duration: 1, ease: [0.22, 1, 0.36, 1], delay: 0.2 }}
+                                />
                               </div>
                             </div>
                           )}
-                          <ChevronDown className={`h-5 w-5 text-gray-400 transition-transform ${expandedCycle === cycle.id ? 'rotate-180' : ''}`} />
+                          <motion.div
+                            animate={{ rotate: expandedCycle === cycle.id ? 180 : 0 }}
+                            transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                          >
+                            <ChevronDown className="h-5 w-5 text-gray-400" />
+                          </motion.div>
                         </div>
                       </button>
                       <AnimatePresence>
@@ -3345,7 +3429,7 @@ const AppContent = () => {
                             <div className="px-6 pb-5 space-y-3">
                               {cycle.areas.map(area => (
                                 <div key={area.id} className="border rounded-xl overflow-hidden">
-                                  <button onClick={() => setExpandedArea(expandedArea === area.id ? null : area.id)} className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50 transition-smooth">
+                                  <button onClick={() => setExpandedArea(expandedArea === area.id ? null : area.id)} className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50 transition-colors">
                                     <div className="flex items-center gap-2.5">
                                       <span className="text-lg">{area.icon}</span>
                                       <span className="font-medium text-gray-800">{area.name}</span>
@@ -3355,11 +3439,18 @@ const AppContent = () => {
                                       {(area.competencies || []).some(c => competencyTracker[c.code]) && (
                                         <div className="flex -space-x-0.5">
                                           {(area.competencies || []).map(c => competencyTracker[c.code]).filter(Boolean).slice(0, 8).map((status, si) => (
-                                            <div key={si} className={`w-2 h-2 rounded-full ${getCompetencyStatusInfo(status).dot}`} />
+                                            <motion.div
+                                              key={si}
+                                              className={`w-2 h-2 rounded-full ${getCompetencyStatusInfo(status).dot}`}
+                                              animate={status === 'in_progress' ? { scale: [1, 1.3, 1], opacity: [0.7, 1, 0.7] } : {}}
+                                              transition={status === 'in_progress' ? { duration: 1.6, repeat: Infinity, ease: 'easeInOut' } : undefined}
+                                            />
                                           ))}
                                         </div>
                                       )}
-                                      <ChevronRight className={`h-4 w-4 text-gray-400 transition-transform ${expandedArea === area.id ? 'rotate-90' : ''}`} />
+                                      <motion.div animate={{ rotate: expandedArea === area.id ? 90 : 0 }} transition={{ type: 'spring', stiffness: 400, damping: 25 }}>
+                                        <ChevronRight className="h-4 w-4 text-gray-400" />
+                                      </motion.div>
                                     </div>
                                   </button>
                                   <AnimatePresence>
@@ -3461,8 +3552,9 @@ const AppContent = () => {
                         )}
                       </AnimatePresence>
                     </Card>
+                    </motion.div>
                   )})}
-                </div>
+                </motion.div>
               )}
 
               {/* Info + Tips */}
@@ -4481,15 +4573,25 @@ const AppContent = () => {
               </OnboardingHint>
               <div className="mb-6 flex items-end justify-between flex-wrap gap-4">
                 <div>
-                  <h2 className="text-3xl font-bold text-gradient mb-1">Klassenverwaltung</h2>
+                  <motion.h2
+                    className="text-3xl font-bold text-gradient mb-1 inline-block"
+                    style={{ backgroundSize: '200% 100%' }}
+                    animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
+                    transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
+                  >
+                    Klassenverwaltung
+                  </motion.h2>
                   <p className="text-gray-600 text-sm">Klassen erstellen, Schüler verwalten und Niveaus zuweisen (Lehrplan 21).</p>
                 </div>
-                <Button size="sm" className="btn-premium text-xs" onClick={loadTeacherClasses}>
-                  <RefreshCw className="h-3.5 w-3.5 mr-1" /> Aktualisieren
-                </Button>
+                <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}>
+                  <Button size="sm" className="btn-premium text-xs" onClick={loadTeacherClasses}>
+                    <RefreshCw className="h-3.5 w-3.5 mr-1" /> Aktualisieren
+                  </Button>
+                </motion.div>
               </div>
 
               {/* Create new class */}
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
               <Card className="glass-card border-0 mb-6">
                 <CardContent className="py-4">
                   <div className="flex gap-3 items-end">
@@ -4499,42 +4601,76 @@ const AppContent = () => {
                         placeholder="z.B. 4a, 6b, Deutsch 5c..." className="mt-1 text-sm"
                         onKeyDown={(e) => e.key === 'Enter' && createClass()} />
                     </div>
-                    <Button size="sm" className="btn-premium" onClick={createClass} disabled={!newClassName.trim() || classLoading}>
-                      <PlusCircle className="h-3.5 w-3.5 mr-1" /> Erstellen
-                    </Button>
+                    <motion.div whileHover={newClassName.trim() && !classLoading ? { scale: 1.04 } : {}} whileTap={newClassName.trim() && !classLoading ? { scale: 0.96 } : {}}>
+                      <Button size="sm" className="btn-premium" onClick={createClass} disabled={!newClassName.trim() || classLoading}>
+                        <PlusCircle className="h-3.5 w-3.5 mr-1" /> Erstellen
+                      </Button>
+                    </motion.div>
                   </div>
                 </CardContent>
               </Card>
+              </motion.div>
 
               <div className="grid lg:grid-cols-3 gap-6">
                 {/* Class list */}
-                <div className="space-y-3">
+                <motion.div
+                  className="space-y-3"
+                  variants={{ hidden: {}, show: { transition: { staggerChildren: 0.06, delayChildren: 0.1 } } }}
+                  initial="hidden"
+                  animate="show"
+                >
                   {teacherClasses.length === 0 ? (
+                    <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}>
                     <Card className="glass-card border-0">
                       <CardContent className="py-12 text-center">
-                        <Users className="h-10 w-10 text-gray-300 mx-auto mb-3" />
+                        <motion.div animate={{ y: [0, -6, 0] }} transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}>
+                          <Users className="h-10 w-10 text-gray-300 mx-auto mb-3" />
+                        </motion.div>
                         <p className="text-gray-500 font-medium">Noch keine Klassen</p>
                         <p className="text-xs text-gray-400 mt-1">Erstellen Sie oben eine Klasse.</p>
                       </CardContent>
                     </Card>
-                  ) : teacherClasses.map(cls => (
-                    <Card key={cls.id} className={`glass-card border-0 cursor-pointer transition-all hover:shadow-lg ${selectedClass === cls.id ? 'ring-2 ring-blue-400' : ''}`}
-                      onClick={() => loadClassDetail(cls.id)}>
-                      <CardContent className="py-4">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <h4 className="font-bold text-gray-900">{cls.name}</h4>
-                            <p className="text-xs text-gray-500">{(cls.enrolled_students || []).length} Schüler/innen</p>
+                    </motion.div>
+                  ) : (
+                    <AnimatePresence mode="popLayout">
+                    {teacherClasses.map(cls => {
+                      const isSelected = selectedClass === cls.id
+                      return (
+                      <motion.div
+                        key={cls.id}
+                        layout
+                        variants={{ hidden: { opacity: 0, x: -16 }, show: { opacity: 1, x: 0, transition: { type: 'spring', stiffness: 380, damping: 26 } } }}
+                        exit={{ opacity: 0, x: 20, transition: { duration: 0.2 } }}
+                        whileHover={{ x: 4, transition: { type: 'spring', stiffness: 400, damping: 25 } }}
+                        whileTap={{ scale: 0.98 }}
+                      >
+                      <Card className={`glass-card border-0 cursor-pointer transition-shadow hover:shadow-lg relative ${isSelected ? '' : ''}`}
+                        onClick={() => loadClassDetail(cls.id)}>
+                        {isSelected && (
+                          <motion.span
+                            layoutId="class-selected-ring"
+                            className="absolute inset-0 rounded-xl ring-2 ring-blue-400 pointer-events-none"
+                            transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                          />
+                        )}
+                        <CardContent className="py-4 relative">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h4 className="font-bold text-gray-900">{cls.name}</h4>
+                              <p className="text-xs text-gray-500">{(cls.enrolled_students || []).length} Schüler/innen</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-xs font-mono bg-blue-50 text-blue-700 px-2 py-1 rounded-lg">{cls.join_code || '–'}</p>
+                              <p className="text-[10px] text-gray-400 mt-1">Beitritts-Code</p>
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <p className="text-xs font-mono bg-blue-50 text-blue-700 px-2 py-1 rounded-lg">{cls.join_code || '–'}</p>
-                            <p className="text-[10px] text-gray-400 mt-1">Beitritts-Code</p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
+                        </CardContent>
+                      </Card>
+                      </motion.div>
+                    )})}
+                    </AnimatePresence>
+                  )}
+                </motion.div>
 
                 {/* Class detail / Roster */}
                 <div className="lg:col-span-2">
@@ -4591,14 +4727,20 @@ const AppContent = () => {
                                     <td className="px-3 py-2.5 text-center">
                                       <div className="flex items-center justify-center gap-1">
                                         {['A', 'B', 'C'].map(n => (
-                                          <button key={n} onClick={() => updateStudentNiveau(classDetailData.id, s.student_id, n)}
+                                          <motion.button
+                                            key={n}
+                                            onClick={() => updateStudentNiveau(classDetailData.id, s.student_id, n)}
+                                            whileHover={{ scale: 1.1 }}
+                                            whileTap={{ scale: 0.92 }}
+                                            animate={s.niveau === n ? { scale: [1, 1.18, 1] } : {}}
+                                            transition={s.niveau === n ? { duration: 0.4 } : { type: 'spring', stiffness: 400, damping: 25 }}
                                             className={`w-7 h-7 rounded-lg text-xs font-bold transition-colors ${
                                               s.niveau === n
-                                                ? n === 'A' ? 'bg-green-500 text-white' : n === 'B' ? 'bg-blue-500 text-white' : 'bg-purple-500 text-white'
+                                                ? n === 'A' ? 'bg-green-500 text-white shadow-md' : n === 'B' ? 'bg-blue-500 text-white shadow-md' : 'bg-purple-500 text-white shadow-md'
                                                 : 'bg-white border border-gray-300 hover:border-blue-400 text-gray-500'
                                             }`}>
                                             {n}
-                                          </button>
+                                          </motion.button>
                                         ))}
                                       </div>
                                     </td>
@@ -4846,19 +4988,36 @@ const AppContent = () => {
               {/* Chat Messages */}
               <div className="flex-1 overflow-y-auto p-4 space-y-3 max-h-[340px]">
                 {chatMessages.length === 0 && (
-                  <div className="space-y-4">
+                  <motion.div
+                    className="space-y-4"
+                    initial="hidden"
+                    animate="show"
+                    variants={{ hidden: {}, show: { transition: { staggerChildren: 0.08 } } }}
+                  >
                     {/* Welcome */}
-                    <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-2xl p-4 text-center">
-                      <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-3">
+                    <motion.div
+                      variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}
+                      className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-2xl p-4 text-center"
+                    >
+                      <motion.div
+                        className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-3"
+                        animate={{ scale: [1, 1.08, 1], rotate: [0, 8, -4, 0] }}
+                        transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                      >
                         <Sparkles className="h-6 w-6 text-blue-500" />
-                      </div>
+                      </motion.div>
                       <p className="text-sm font-medium text-gray-800 mb-1">Hallo! Ich bin Ihr EduFlow-Assistent.</p>
                       <p className="text-xs text-gray-500">Ich helfe Ihnen beim Erstellen, Bearbeiten und Optimieren Ihrer Materialien.</p>
-                    </div>
+                    </motion.div>
                     {/* Quick Actions */}
-                    <div>
+                    <motion.div variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}>
                       <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-2">Schnellaktionen</p>
-                      <div className="grid grid-cols-2 gap-2">
+                      <motion.div
+                        className="grid grid-cols-2 gap-2"
+                        initial="hidden"
+                        animate="show"
+                        variants={{ hidden: {}, show: { transition: { staggerChildren: 0.04, delayChildren: 0.1 } } }}
+                      >
                         {(selectedWorksheet ? [
                           { text: 'Mach alle Fragen einfacher', icon: ChevronDown },
                           { text: 'Exportiere als PDF Schülerversion', icon: Download },
@@ -4870,17 +5029,23 @@ const AppContent = () => {
                           { text: 'Öffne den Lehrplan 21', icon: GraduationCap },
                           { text: 'Gehe zur Bibliothek', icon: FolderOpen },
                         ]).map((action, i) => (
-                          <button key={i} onClick={() => handleChatSend(action.text)}
-                            className="flex items-center gap-2 p-2.5 rounded-xl bg-white border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all text-left">
+                          <motion.button
+                            key={i}
+                            onClick={() => handleChatSend(action.text)}
+                            variants={{ hidden: { opacity: 0, scale: 0.94, y: 6 }, show: { opacity: 1, scale: 1, y: 0, transition: { type: 'spring', stiffness: 400, damping: 26 } } }}
+                            whileHover={{ y: -2, scale: 1.03 }}
+                            whileTap={{ scale: 0.97 }}
+                            className="flex items-center gap-2 p-2.5 rounded-xl bg-white border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-colors text-left"
+                          >
                             <action.icon className="h-4 w-4 text-blue-500 flex-shrink-0" />
                             <span className="text-xs text-gray-700">{action.text}</span>
-                          </button>
+                          </motion.button>
                         ))}
-                      </div>
-                    </div>
+                      </motion.div>
+                    </motion.div>
                     {/* Context-aware suggestions */}
                     {selectedWorksheet && (
-                      <div>
+                      <motion.div variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}>
                         <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-2">Für «{selectedWorksheet.title}»</p>
                         <div className="space-y-1.5">
                           {[
@@ -4889,18 +5054,31 @@ const AppContent = () => {
                             'Füge 2 Lückentext-Fragen zum gleichen Thema hinzu',
                             'Exportiere die Lehrerversion als PDF',
                           ].map((s, i) => (
-                            <button key={i} onClick={() => handleChatSend(s)}
-                              className="block w-full text-left text-xs bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg px-3 py-2 transition-smooth">
+                            <motion.button
+                              key={i}
+                              onClick={() => handleChatSend(s)}
+                              initial={{ opacity: 0, x: -10 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{ delay: 0.2 + i * 0.05, type: 'spring', stiffness: 400, damping: 28 }}
+                              whileHover={{ x: 3 }}
+                              className="block w-full text-left text-xs bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg px-3 py-2 transition-colors"
+                            >
                               {s}
-                            </button>
+                            </motion.button>
                           ))}
                         </div>
-                      </div>
+                      </motion.div>
                     )}
-                  </div>
+                  </motion.div>
                 )}
                 {chatMessages.map((msg, i) => (
-                  <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} gap-2`}>
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, y: 10, x: msg.role === 'user' ? 12 : -12 }}
+                    animate={{ opacity: 1, y: 0, x: 0 }}
+                    transition={{ type: 'spring', stiffness: 420, damping: 28 }}
+                    className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} gap-2`}
+                  >
                     {msg.role === 'assistant' && (
                       <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center flex-shrink-0 mt-0.5">
                         <Bot className="h-3.5 w-3.5 text-white" />
@@ -4909,7 +5087,7 @@ const AppContent = () => {
                     <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-md' : 'bg-gray-100 text-gray-800 rounded-bl-md'}`}>
                       <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                     </div>
-                  </div>
+                  </motion.div>
                 ))}
                 {chatLoading && (
                   <div className="flex items-start gap-2">
@@ -4958,12 +5136,22 @@ const AppContent = () => {
         {/* Chat Toggle Button */}
         <motion.button
           onClick={() => setChatOpen(!chatOpen)}
-          className={`w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-smooth ${chatOpen ? 'bg-gray-600 hover:bg-gray-700' : 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700'}`}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
+          className={`relative w-14 h-14 rounded-full shadow-lg flex items-center justify-center ${chatOpen ? 'bg-gray-600 hover:bg-gray-700' : 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700'}`}
+          whileHover={{ scale: 1.08 }}
+          whileTap={{ scale: 0.92 }}
           aria-label="KI-Assistent öffnen"
         >
-          {chatOpen ? <X className="h-6 w-6 text-white" /> : <MessageCircle className="h-6 w-6 text-white" />}
+          {/* Breathing pulse halo when closed */}
+          {!chatOpen && (
+            <motion.span
+              className="absolute inset-0 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 pointer-events-none"
+              animate={{ scale: [1, 1.35, 1], opacity: [0.5, 0, 0.5] }}
+              transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+            />
+          )}
+          <span className="relative">
+            {chatOpen ? <X className="h-6 w-6 text-white" /> : <MessageCircle className="h-6 w-6 text-white" />}
+          </span>
         </motion.button>
       </div>
 
