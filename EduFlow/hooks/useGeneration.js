@@ -19,6 +19,7 @@ export function useGeneration(token) {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({
           ...form,
+          aiProvider: 'openai',
           questionTypes: questionTypes?.length > 0 ? questionTypes : undefined,
           sourceText
         })

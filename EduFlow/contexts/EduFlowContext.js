@@ -28,7 +28,7 @@ export function EduFlowProvider({ children }) {
   const [form, setForm] = useState({
     topic: '', grade: '3', subject: 'Deutsch', difficulty: 'medium',
     questionCount: 10, resourceType: 'worksheet', dyslexiaFont: false,
-    competencyCode: '', theme: 'classic'
+    competencyCode: '', theme: 'classic', aiProvider: 'openai'
   })
 
   // Form question type preferences
@@ -132,6 +132,7 @@ export function EduFlowProvider({ children }) {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const googleCode = params.get('google_code')
+    const googleState = params.get('google_state')
     const googleError = params.get('google_error')
 
     // Clean up URL params
@@ -140,7 +141,7 @@ export function EduFlowProvider({ children }) {
     }
 
     if (googleCode) {
-      auth.handleGoogleCallback(googleCode).then(result => {
+      auth.handleGoogleCallback(googleCode, googleState).then(result => {
         if (result?.success && result.token) {
           auth.fetchCurrentUser(result.token).then(userData => {
             if (userData?.teacher_type) {

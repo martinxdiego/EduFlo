@@ -1,36 +1,22 @@
-import { MongoClient } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
 import { NextResponse } from 'next/server'
 import OpenAI from 'openai'
-import bcrypt from 'bcryptjs'
-import jwt from 'jsonwebtoken'
 import mammoth from 'mammoth'
 import pdfParse from 'pdf-parse'
+import { getDatabase } from '@/lib/server/database'
+import { checkRateLimit } from '@/lib/server/rate-limit'
+import {
+  applyCorsHeaders,
+  publicErrorMessage,
+  verifyAuthToken,
+} from '@/lib/server/security'
 
-// MongoDB connection
-let client
-let db
-let connectPromise
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+const ALLOWED_UPLOAD_EXTENSIONS = new Set(['pdf', 'docx', 'txt', 'csv', 'rtf', 'pptx', 'xlsx', 'xls'])
+const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 
 async function connectToMongo() {
-  if (db) return db
-  if (connectPromise) return connectPromise
-
-  connectPromise = (async () => {
-    try {
-      client = new MongoClient(process.env.MONGO_URL)
-      await client.connect()
-      db = client.db(process.env.DB_NAME)
-      return db
-    } catch (error) {
-      client = null
-      db = null
-      connectPromise = null
-      throw error
-    }
-  })()
-
-  return connectPromise
+  return getDatabase()
 }
 
 // OpenAI client
@@ -40,11 +26,7 @@ const openai = new OpenAI({
 
 // Helper function to handle CORS
 function handleCORS(response) {
-  response.headers.set('Access-Control-Allow-Origin', process.env.CORS_ORIGINS || '*')
-  response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-  response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-  response.headers.set('Access-Control-Allow-Credentials', 'true')
-  return response
+  return applyCorsHeaders(response)
 }
 
 // OPTIONS handler for CORS
@@ -54,18 +36,15 @@ export async function OPTIONS() {
 
 // Auth middleware
 async function verifyToken(request) {
-  const authHeader = request.headers.get('authorization')
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null
-  }
-  
-  const token = authHeader.substring(7)
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET)
-    return decoded
-  } catch (error) {
-    return null
-  }
+  return verifyAuthToken(request)
+}
+
+async function enforceRateLimit(db, request, route, method) {
+  const retryAfter = await checkRateLimit(db, request, route, method)
+  if (!retryAfter) return null
+  const response = NextResponse.json({ error: 'Zu viele Anfragen. Bitte später erneut versuchen.' }, { status: 429 })
+  response.headers.set('Retry-After', String(retryAfter))
+  return handleCORS(response)
 }
 
 // Swiss curriculum system prompt
@@ -106,6 +85,102 @@ Format your response as a JSON object with:
   "total_points": sum of all points,
   "estimated_time": "20-30 minutes"
 }`
+}
+
+function normalizeAIProvider(provider) {
+  const selected = String(provider || process.env.DEFAULT_AI_PROVIDER || 'openai').toLowerCase()
+  if (selected === 'gemini' || selected === 'openai') return selected
+  throw new Error(`Unsupported AI provider: ${provider}`)
+}
+
+function getGenerationTaskType(resourceType, sourceText) {
+  if (sourceText) return 'source-transformation'
+  if (resourceType === 'exam') return 'exam-generation'
+  return 'worksheet-generation'
+}
+
+function parseJsonObject(content) {
+  const raw = String(content || '').trim()
+  const withoutFence = raw
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/```$/i, '')
+    .trim()
+
+  try {
+    return JSON.parse(withoutFence)
+  } catch {
+    const match = withoutFence.match(/\{[\s\S]*\}/)
+    if (!match) throw new Error('AI response did not contain valid JSON.')
+    return JSON.parse(match[0])
+  }
+}
+
+async function generateJsonContent({ provider, messages, taskType, context, temperature = 0.7 }) {
+  if (provider === 'gemini') {
+    const { generateAI } = await import('@/lib/ai')
+    const prompt = messages.map((message) => {
+      const content = typeof message.content === 'string'
+        ? message.content
+        : JSON.stringify(message.content)
+      return `${message.role.toUpperCase()}:\n${content}`
+    }).join('\n\n')
+
+    const result = await generateAI({
+      provider: 'gemini',
+      prompt,
+      taskType,
+      context,
+      options: { temperature }
+    })
+
+    return parseJsonObject(result.text)
+  }
+
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages,
+    temperature,
+    response_format: { type: 'json_object' }
+  })
+
+  return parseJsonObject(completion.choices[0].message.content)
+}
+
+async function saveGeneratedWorksheet({
+  db,
+  user,
+  content,
+  topic,
+  grade,
+  subject,
+  difficulty,
+  questionCount,
+  resourceType,
+  aiProvider
+}) {
+  const worksheet = {
+    id: uuidv4(),
+    user_id: user.id,
+    title: content.title,
+    topic,
+    grade,
+    subject,
+    difficulty,
+    resourceType: resourceType || 'worksheet',
+    question_count: questionCount || 10,
+    ai_provider: aiProvider,
+    content: { ...content, resourceType: resourceType || 'worksheet' },
+    created_at: new Date()
+  }
+
+  await db.collection('worksheets').insertOne(worksheet)
+  await db.collection('users').updateOne(
+    { id: user.id },
+    { $inc: { worksheets_used_this_month: 1 } }
+  )
+
+  return worksheet
 }
 
 // ============================================================
@@ -349,344 +424,21 @@ function buildStructuredSource(extraction, aiAnalysis, fileName) {
 
 // Route handler function
 async function handleRoute(request, { params }) {
-  const { path = [] } = params
+  const { path = [] } = await params
   const route = `/${path.join('/')}`
   const method = request.method
 
   try {
     const db = await connectToMongo()
+    const rateLimitedResponse = await enforceRateLimit(db, request, route, method)
+    if (rateLimitedResponse) return rateLimitedResponse
 
     // Root endpoint
     if (route === '/' && method === 'GET') {
       return handleCORS(NextResponse.json({ message: "TeacherTime API v1.0" }))
     }
 
-    // ========== AUTH ENDPOINTS ==========
-    
-    // Register - POST /api/auth/register
-    if (route === '/auth/register' && method === 'POST') {
-      const body = await request.json()
-      const { email, password, name } = body
-
-      if (!email || !password || !name) {
-        return handleCORS(NextResponse.json(
-          { error: "Email, password, and name are required" },
-          { status: 400 }
-        ))
-      }
-
-      // Check if user exists
-      const existingUser = await db.collection('users').findOne({ email })
-      if (existingUser) {
-        return handleCORS(NextResponse.json(
-          { error: "User already exists" },
-          { status: 400 }
-        ))
-      }
-
-      // Hash password
-      const password_hash = await bcrypt.hash(password, 10)
-
-      // Create user
-      const user = {
-        id: uuidv4(),
-        email,
-        password_hash,
-        name,
-        subscription_tier: 'free',
-        worksheets_used_this_month: 0,
-        created_at: new Date(),
-        month_reset_date: new Date()
-      }
-
-      await db.collection('users').insertOne(user)
-
-      // Generate token
-      const token = jwt.sign(
-        { userId: user.id, email: user.email },
-        process.env.JWT_SECRET,
-        { expiresIn: '7d' }
-      )
-
-      const { password_hash: _, ...userWithoutPassword } = user
-      return handleCORS(NextResponse.json({ user: userWithoutPassword, token }))
-    }
-
-    // Login - POST /api/auth/login
-    if (route === '/auth/login' && method === 'POST') {
-      const body = await request.json()
-      const { email, password } = body
-
-      if (!email || !password) {
-        return handleCORS(NextResponse.json(
-          { error: "Email and password are required" },
-          { status: 400 }
-        ))
-      }
-
-      // Find user
-      const user = await db.collection('users').findOne({ email })
-      if (!user) {
-        return handleCORS(NextResponse.json(
-          { error: "Invalid credentials" },
-          { status: 401 }
-        ))
-      }
-
-      // Verify password
-      const valid = await bcrypt.compare(password, user.password_hash)
-      if (!valid) {
-        return handleCORS(NextResponse.json(
-          { error: "Invalid credentials" },
-          { status: 401 }
-        ))
-      }
-
-      // Generate token
-      const token = jwt.sign(
-        { userId: user.id, email: user.email },
-        process.env.JWT_SECRET,
-        { expiresIn: '7d' }
-      )
-
-      const { password_hash: _, ...userWithoutPassword } = user
-      return handleCORS(NextResponse.json({ user: userWithoutPassword, token }))
-    }
-
-    // Get current user - GET /api/auth/me
-    if (route === '/auth/me' && method === 'GET') {
-      const decoded = await verifyToken(request)
-      if (!decoded) {
-        return handleCORS(NextResponse.json(
-          { error: "Unauthorized" },
-          { status: 401 }
-        ))
-      }
-
-      const user = await db.collection('users').findOne({ id: decoded.userId })
-      if (!user) {
-        return handleCORS(NextResponse.json(
-          { error: "User not found" },
-          { status: 404 }
-        ))
-      }
-
-      // Reset monthly count if needed
-      const now = new Date()
-      const lastReset = new Date(user.month_reset_date)
-      if (now.getMonth() !== lastReset.getMonth() || now.getFullYear() !== lastReset.getFullYear()) {
-        await db.collection('users').updateOne(
-          { id: user.id },
-          { $set: { worksheets_used_this_month: 0, month_reset_date: now } }
-        )
-        user.worksheets_used_this_month = 0
-      }
-
-      const { password_hash: _, ...userWithoutPassword } = user
-      return handleCORS(NextResponse.json(userWithoutPassword))
-    }
-
-    // Update teacher type - PATCH /api/auth/teacher-type
-    if (route === '/auth/teacher-type' && method === 'PATCH') {
-      const decoded = await verifyToken(request)
-      if (!decoded) {
-        return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }))
-      }
-      const body = await request.json()
-      const { teacher_type } = body
-      if (!teacher_type || !['primar', 'sekundar', 'sonstiges'].includes(teacher_type)) {
-        return handleCORS(NextResponse.json({ error: 'Invalid teacher_type' }, { status: 400 }))
-      }
-      await db.collection('users').updateOne(
-        { id: decoded.userId },
-        { $set: { teacher_type } }
-      )
-      return handleCORS(NextResponse.json({ success: true, teacher_type }))
-    }
-
-    // Google OAuth - POST /api/auth/google
-    if (route === '/auth/google' && method === 'POST') {
-      const body = await request.json()
-      const { code } = body
-
-      if (!code) {
-        return handleCORS(NextResponse.json(
-          { error: 'Authorization code is required' },
-          { status: 400 }
-        ))
-      }
-
-      // Exchange authorization code for tokens
-      const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          code,
-          client_id: process.env.GOOGLE_CLIENT_ID,
-          client_secret: process.env.GOOGLE_CLIENT_SECRET,
-          redirect_uri: `${request.headers.get('x-forwarded-proto') || 'http'}://${request.headers.get('host')}/api/auth/google/callback`,
-          grant_type: 'authorization_code',
-        }),
-      })
-
-      const tokenData = await tokenResponse.json()
-
-      if (tokenData.error) {
-        return handleCORS(NextResponse.json(
-          { error: `Google OAuth error: ${tokenData.error_description || tokenData.error}` },
-          { status: 400 }
-        ))
-      }
-
-      // Get user info from Google
-      const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-        headers: { Authorization: `Bearer ${tokenData.access_token}` },
-      })
-
-      const googleUser = await userInfoResponse.json()
-
-      if (!googleUser.email) {
-        return handleCORS(NextResponse.json(
-          { error: 'Could not retrieve email from Google' },
-          { status: 400 }
-        ))
-      }
-
-      // Check if user exists by google_id or email
-      let user = await db.collection('users').findOne({
-        $or: [{ google_id: googleUser.id }, { email: googleUser.email }]
-      })
-
-      if (user) {
-        // Existing user — merge google_id if not set yet
-        if (!user.google_id) {
-          await db.collection('users').updateOne(
-            { id: user.id },
-            { $set: { google_id: googleUser.id } }
-          )
-        }
-      } else {
-        // New user — create account
-        user = {
-          id: uuidv4(),
-          email: googleUser.email,
-          name: googleUser.name || googleUser.email.split('@')[0],
-          google_id: googleUser.id,
-          subscription_tier: 'free',
-          worksheets_used_this_month: 0,
-          created_at: new Date(),
-          month_reset_date: new Date(),
-        }
-        await db.collection('users').insertOne(user)
-      }
-
-      // Generate JWT
-      const token = jwt.sign(
-        { userId: user.id, email: user.email },
-        process.env.JWT_SECRET,
-        { expiresIn: '7d' }
-      )
-
-      const { password_hash: _, _id: __, ...userWithoutPassword } = user
-      return handleCORS(NextResponse.json({ user: userWithoutPassword, token }))
-    }
-
     // ========== STUDENT AUTH ==========
-
-    // Register student - POST /api/student/register
-    if (route === '/student/register' && method === 'POST') {
-      const body = await request.json()
-      const { username, password, displayName } = body
-
-      if (!username || !password || !displayName) {
-        return handleCORS(NextResponse.json({ error: 'Benutzername, Passwort und Anzeigename sind erforderlich.' }, { status: 400 }))
-      }
-
-      if (username.length < 3) {
-        return handleCORS(NextResponse.json({ error: 'Benutzername muss mindestens 3 Zeichen lang sein.' }, { status: 400 }))
-      }
-
-      if (password.length < 4) {
-        return handleCORS(NextResponse.json({ error: 'Passwort muss mindestens 4 Zeichen lang sein.' }, { status: 400 }))
-      }
-
-      const existing = await db.collection('students').findOne({ username: username.toLowerCase() })
-      if (existing) {
-        return handleCORS(NextResponse.json({ error: 'Dieser Benutzername ist bereits vergeben.' }, { status: 400 }))
-      }
-
-      const password_hash = await bcrypt.hash(password, 10)
-      const student = {
-        id: uuidv4(),
-        username: username.toLowerCase(),
-        display_name: displayName,
-        password_hash,
-        created_at: new Date(),
-        total_quizzes: 0,
-        total_points: 0,
-        streak: 0,
-        last_activity: new Date()
-      }
-
-      await db.collection('students').insertOne(student)
-
-      const token = jwt.sign(
-        { studentId: student.id, username: student.username, role: 'student' },
-        process.env.JWT_SECRET,
-        { expiresIn: '30d' }
-      )
-
-      const { password_hash: _, ...safe } = student
-      return handleCORS(NextResponse.json({ student: { ...safe, _id: undefined }, token }))
-    }
-
-    // Login student - POST /api/student/login
-    if (route === '/student/login' && method === 'POST') {
-      const body = await request.json()
-      const { username, password } = body
-
-      if (!username || !password) {
-        return handleCORS(NextResponse.json({ error: 'Benutzername und Passwort sind erforderlich.' }, { status: 400 }))
-      }
-
-      const student = await db.collection('students').findOne({ username: username.toLowerCase() })
-      if (!student) {
-        return handleCORS(NextResponse.json({ error: 'Benutzername oder Passwort falsch.' }, { status: 401 }))
-      }
-
-      const valid = await bcrypt.compare(password, student.password_hash)
-      if (!valid) {
-        return handleCORS(NextResponse.json({ error: 'Benutzername oder Passwort falsch.' }, { status: 401 }))
-      }
-
-      const token = jwt.sign(
-        { studentId: student.id, username: student.username, role: 'student' },
-        process.env.JWT_SECRET,
-        { expiresIn: '30d' }
-      )
-
-      // Update last activity
-      await db.collection('students').updateOne({ id: student.id }, { $set: { last_activity: new Date() } })
-
-      const { password_hash: _, ...safe } = student
-      return handleCORS(NextResponse.json({ student: { ...safe, _id: undefined }, token }))
-    }
-
-    // Get current student - GET /api/student/me
-    if (route === '/student/me' && method === 'GET') {
-      const decoded = await verifyToken(request)
-      if (!decoded || decoded.role !== 'student') {
-        return handleCORS(NextResponse.json({ error: 'Nicht eingeloggt.' }, { status: 401 }))
-      }
-
-      const student = await db.collection('students').findOne({ id: decoded.studentId })
-      if (!student) {
-        return handleCORS(NextResponse.json({ error: 'Schüler nicht gefunden.' }, { status: 404 }))
-      }
-
-      const { password_hash: _, ...safe } = student
-      return handleCORS(NextResponse.json({ ...safe, _id: undefined }))
-    }
 
     // Get student's submissions history - GET /api/student/my-results
     if (route === '/student/my-results' && method === 'GET') {
@@ -1108,132 +860,6 @@ Regeln:
       return handleCORS(NextResponse.json({ success: true, xpEarned }))
     }
 
-    // Teacher: Get class-wide learning insights - GET /api/classes/:id/insights
-    if (route.match(/^\/classes\/[^/]+\/insights$/) && method === 'GET') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const classId = path[1]
-      const cls = await db.collection('classes').findOne({ id: classId, teacher_id: decoded.userId })
-      if (!cls) return handleCORS(NextResponse.json({ error: 'Klasse nicht gefunden.' }, { status: 404 }))
-
-      const studentIds = (cls.enrolled_students || []).map(s => s.student_id)
-      if (studentIds.length === 0) return handleCORS(NextResponse.json({ students: [], topicWeaknesses: [], recommendations: '' }))
-
-      // Get all submissions from class students
-      const submissions = await db.collection('submissions').find({ student_id: { $in: studentIds } }).toArray()
-      const assignmentIds = [...new Set(submissions.map(s => s.assignment_id))]
-      const assignments = await db.collection('assignments').find({ id: { $in: assignmentIds } }).toArray()
-      const worksheetIds = [...new Set(assignments.map(a => a.worksheet_id))]
-      const worksheets = await db.collection('worksheets').find({ id: { $in: worksheetIds } }).toArray()
-      const wsMap = {}; worksheets.forEach(w => { wsMap[w.id] = w })
-      const aMap = {}; assignments.forEach(a => { aMap[a.id] = a })
-
-      // Per-student weakness analysis
-      const studentInsights = {}
-      studentIds.forEach(sid => { studentInsights[sid] = { topics: {}, totalWrong: 0, totalQuestions: 0 } })
-
-      // Class-wide topic analysis
-      const classTopicErrors = {}
-
-      submissions.forEach(sub => {
-        if (!sub.student_id || !studentInsights[sub.student_id]) return
-        const assignment = aMap[sub.assignment_id]
-        const worksheet = assignment ? wsMap[assignment.worksheet_id] : null
-        const topic = worksheet?.topic || 'Unbekannt'
-        const subject = worksheet?.subject || ''
-
-        ;(sub.question_results || []).forEach(qr => {
-          studentInsights[sub.student_id].totalQuestions++
-          if (!classTopicErrors[topic]) classTopicErrors[topic] = { total: 0, wrong: 0, subject, studentsWrong: new Set() }
-          classTopicErrors[topic].total++
-
-          if (qr.isCorrect === false) {
-            studentInsights[sub.student_id].totalWrong++
-            if (!studentInsights[sub.student_id].topics[topic]) studentInsights[sub.student_id].topics[topic] = { wrong: 0, total: 0 }
-            studentInsights[sub.student_id].topics[topic].wrong++
-            studentInsights[sub.student_id].topics[topic].total++
-            classTopicErrors[topic].wrong++
-            classTopicErrors[topic].studentsWrong.add(sub.student_id)
-          } else {
-            if (!studentInsights[sub.student_id].topics[topic]) studentInsights[sub.student_id].topics[topic] = { wrong: 0, total: 0 }
-            studentInsights[sub.student_id].topics[topic].total++
-          }
-        })
-      })
-
-      // Format student insights
-      const enrolled = cls.enrolled_students || []
-      const students = enrolled.map(es => {
-        const si = studentInsights[es.student_id] || { topics: {}, totalWrong: 0, totalQuestions: 0 }
-        const weakTopics = Object.entries(si.topics)
-          .filter(([_, v]) => v.total >= 2 && (v.wrong / v.total) > 0.3)
-          .sort((a, b) => (b[1].wrong / b[1].total) - (a[1].wrong / a[1].total))
-          .slice(0, 3)
-          .map(([topic, v]) => ({ topic, errorRate: Math.round((v.wrong / v.total) * 100), wrong: v.wrong, total: v.total }))
-
-        return {
-          student_id: es.student_id,
-          display_name: es.display_name,
-          niveau: es.niveau || 'B',
-          totalQuestions: si.totalQuestions,
-          totalWrong: si.totalWrong,
-          errorRate: si.totalQuestions > 0 ? Math.round((si.totalWrong / si.totalQuestions) * 100) : 0,
-          weakTopics,
-          needsHelp: weakTopics.length > 0
-        }
-      })
-
-      // Class-wide topic weaknesses
-      const topicWeaknesses = Object.entries(classTopicErrors)
-        .filter(([_, v]) => v.total >= 3)
-        .map(([topic, v]) => ({
-          topic,
-          subject: v.subject,
-          errorRate: Math.round((v.wrong / v.total) * 100),
-          affectedStudents: v.studentsWrong.size,
-          totalStudents: studentIds.length,
-          total: v.total,
-          wrong: v.wrong
-        }))
-        .sort((a, b) => b.affectedStudents - a.affectedStudents || b.errorRate - a.errorRate)
-
-      // AI recommendations for teacher
-      let recommendations = ''
-      if (topicWeaknesses.length > 0) {
-        try {
-          const insightPrompt = `Du bist ein erfahrener Schweizer Schulberater. Analysiere diese Klassendaten und gib der Lehrperson konkrete Handlungsempfehlungen auf Deutsch:
-
-Klasse: ${cls.name}
-Schüleranzahl: ${studentIds.length}
-
-Schwache Themen der Klasse:
-${topicWeaknesses.slice(0, 5).map(tw => `- "${tw.topic}" (${tw.subject}): ${tw.errorRate}% Fehlerquote, ${tw.affectedStudents}/${tw.totalStudents} Schüler betroffen`).join('\n')}
-
-Schüler die besondere Förderung brauchen:
-${students.filter(s => s.needsHelp).map(s => `- ${s.display_name} (Niveau ${s.niveau}): Schwächen in ${s.weakTopics.map(t => t.topic).join(', ')}`).join('\n') || 'Keine auffälligen Schwächen'}
-
-Gib:
-1. Top 3 Massnahmen für den Unterricht (konkret und umsetzbar)
-2. Differenzierungsvorschläge nach Niveau A/B/C
-3. Empfohlene Übungsformate`
-
-          const aiRes = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
-            messages: [{ role: 'user', content: insightPrompt }],
-            max_tokens: 800
-          })
-          recommendations = aiRes.choices[0]?.message?.content || ''
-        } catch (e) { console.error('Insights AI error:', e) }
-      }
-
-      return handleCORS(NextResponse.json({
-        students: students.sort((a, b) => b.errorRate - a.errorRate),
-        topicWeaknesses,
-        recommendations,
-        totalSubmissions: submissions.length
-      }))
-    }
-
     // Get assignments for student's enrolled classes - GET /api/student/class-assignments
     if (route === '/student/class-assignments' && method === 'GET') {
       const decoded = await verifyToken(request)
@@ -1287,90 +913,6 @@ Gib:
         })
 
       return handleCORS(NextResponse.json(enriched))
-    }
-
-    // Get class-wide stats across all assignments - GET /api/classes/:id/stats
-    if (route.match(/^\/classes\/[^/]+\/stats$/) && method === 'GET') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const classId = path[1]
-      const cls = await db.collection('classes').findOne({ id: classId, teacher_id: decoded.userId })
-      if (!cls) return handleCORS(NextResponse.json({ error: 'Klasse nicht gefunden.' }, { status: 404 }))
-
-      // Get all assignments for this class
-      const assignments = await db.collection('assignments').find({ class_id: classId }).toArray()
-      if (assignments.length === 0) return handleCORS(NextResponse.json({ assignments: [], studentStats: [], classStats: null }))
-
-      const assignmentIds = assignments.map(a => a.id)
-      const submissions = await db.collection('submissions').find({ assignment_id: { $in: assignmentIds } }).toArray()
-
-      // Per-student aggregation
-      const studentMap = {}
-      const enrolled = cls.enrolled_students || []
-      enrolled.forEach(s => {
-        studentMap[s.student_id] = {
-          student_id: s.student_id,
-          display_name: s.display_name,
-          niveau: s.niveau || 'B',
-          submissions: 0,
-          total_earned: 0,
-          total_possible: 0,
-          grades: [],
-          avg_grade: null,
-          avg_score: null
-        }
-      })
-
-      submissions.forEach(sub => {
-        if (sub.student_id && studentMap[sub.student_id]) {
-          const sm = studentMap[sub.student_id]
-          sm.submissions++
-          sm.total_earned += sub.earned_points || 0
-          sm.total_possible += sub.total_points || 0
-          sm.grades.push(sub.swiss_grade || 1)
-        }
-      })
-
-      const studentStats = Object.values(studentMap).map(sm => {
-        if (sm.grades.length > 0) {
-          sm.avg_grade = Math.round(sm.grades.reduce((a, b) => a + b, 0) / sm.grades.length * 10) / 10
-          sm.avg_score = sm.total_possible > 0 ? Math.round((sm.total_earned / sm.total_possible) * 100) : 0
-        }
-        return sm
-      })
-
-      // Class-wide stats
-      const allGrades = submissions.map(s => s.swiss_grade || 1)
-      const classStats = allGrades.length > 0 ? {
-        totalAssignments: assignments.length,
-        totalSubmissions: submissions.length,
-        avgGrade: Math.round(allGrades.reduce((a, b) => a + b, 0) / allGrades.length * 10) / 10,
-        bestGrade: Math.max(...allGrades),
-        worstGrade: Math.min(...allGrades),
-        passing: allGrades.filter(g => g >= 4).length,
-        failing: allGrades.filter(g => g < 4).length,
-        passRate: Math.round((allGrades.filter(g => g >= 4).length / allGrades.length) * 100),
-        niveauStats: {
-          A: studentStats.filter(s => s.niveau === 'A'),
-          B: studentStats.filter(s => s.niveau === 'B'),
-          C: studentStats.filter(s => s.niveau === 'C')
-        }
-      } : null
-
-      const assignmentSummaries = assignments.map(a => {
-        const subs = submissions.filter(s => s.assignment_id === a.id)
-        const grades = subs.map(s => s.swiss_grade || 1)
-        return {
-          id: a.id,
-          title: a.worksheet_title,
-          target_niveau: a.target_niveau,
-          created_at: a.created_at,
-          submission_count: subs.length,
-          avg_grade: grades.length > 0 ? Math.round(grades.reduce((x, y) => x + y, 0) / grades.length * 10) / 10 : null
-        }
-      })
-
-      return handleCORS(NextResponse.json({ assignments: assignmentSummaries, studentStats, classStats }))
     }
 
     // ========== LEARNING ANALYTICS DASHBOARD ==========
@@ -1576,7 +1118,7 @@ Gib:
       }
 
       const body = await request.json()
-      const { topic, grade, subject, difficulty, questionCount } = body
+      const { topic, grade, subject, difficulty, questionCount, resourceType, sourceText, aiProvider, provider, competencyCode } = body
 
       if (!topic || !grade || !subject || !difficulty) {
         return handleCORS(NextResponse.json(
@@ -1585,43 +1127,41 @@ Gib:
         ))
       }
 
-      // Generate with OpenAI
+      const selectedProvider = normalizeAIProvider(aiProvider || provider)
       const systemPrompt = getSystemPrompt(grade, subject, difficulty)
       const userPrompt = `Create a worksheet with ${questionCount || 10} questions about: ${topic}\n\nMake it engaging and appropriate for ${grade}. Klasse students in Switzerland.`
 
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+      const worksheetContent = await generateJsonContent({
+        provider: selectedProvider,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt }
         ],
-        temperature: 0.7,
-        response_format: { type: "json_object" }
+        taskType: getGenerationTaskType(resourceType, sourceText),
+        context: {
+          topic,
+          grade,
+          subject,
+          difficulty,
+          questionCount: questionCount || 10,
+          resourceType: resourceType || 'worksheet',
+          competencyCode: competencyCode || null,
+          sourceText: sourceText || null
+        }
       })
 
-      const worksheetContent = JSON.parse(completion.choices[0].message.content)
-
-      // Save worksheet
-      const worksheet = {
-        id: uuidv4(),
-        user_id: user.id,
-        title: worksheetContent.title,
+      const worksheet = await saveGeneratedWorksheet({
+        db,
+        user,
+        content: worksheetContent,
         topic,
         grade,
         subject,
         difficulty,
-        question_count: questionCount || 10,
-        content: worksheetContent,
-        created_at: new Date()
-      }
-
-      await db.collection('worksheets').insertOne(worksheet)
-
-      // Update usage count
-      await db.collection('users').updateOne(
-        { id: user.id },
-        { $inc: { worksheets_used_this_month: 1 } }
-      )
+        questionCount,
+        resourceType,
+        aiProvider: selectedProvider
+      })
 
       return handleCORS(NextResponse.json(worksheet))
     }
@@ -1647,7 +1187,7 @@ Gib:
       }
 
       const body = await request.json()
-      const { topic, grade, subject, difficulty, questionCount, questionTypes, resourceType, sourceText } = body
+      const { topic, grade, subject, difficulty, questionCount, questionTypes, resourceType, sourceText, competencyCode, aiProvider, provider } = body
 
       if (!topic || !grade || !subject || !difficulty) {
         return handleCORS(NextResponse.json(
@@ -1655,6 +1195,8 @@ Gib:
           { status: 400 }
         ))
       }
+
+      const selectedProvider = normalizeAIProvider(aiProvider || provider)
 
       // Create a streaming response
       const encoder = new TextEncoder()
@@ -1745,7 +1287,75 @@ ${sourceParts.join('\n\n')}
               }
             }
 
-            const userPrompt = `Erstelle ${materialType} mit ${questionCount || 10} Fragen zum Thema: ${topic}\n\nDas Material ist für die ${grade}. Klasse in der Schweiz. Formuliere die Fragen klar, abwechslungsreich und didaktisch sinnvoll. Die Sprache soll natürlich klingen, nicht wie ein KI-Generator.${questionTypeInstruction}\n\n${pointsInstruction}${sourceInstruction}`
+            const competencyInstruction = competencyCode
+              ? `\n\nLehrplan-21-Kompetenz: ${competencyCode}. Richte Aufgaben und Hinweise sichtbar daran aus.`
+              : ''
+            const userPrompt = `Erstelle ${materialType} mit ${questionCount || 10} Fragen zum Thema: ${topic}\n\nDas Material ist für die ${grade}. Klasse in der Schweiz. Formuliere die Fragen klar, abwechslungsreich und didaktisch sinnvoll. Die Sprache soll natürlich klingen, nicht wie ein KI-Generator.${questionTypeInstruction}\n\n${pointsInstruction}${competencyInstruction}${sourceInstruction}`
+
+            if (selectedProvider === 'gemini') {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                type: 'status',
+                message: 'Gemini erstellt Material...',
+                progress: 55
+              })}\n\n`))
+
+              const worksheetContent = await generateJsonContent({
+                provider: selectedProvider,
+                messages: [
+                  { role: "system", content: systemPrompt },
+                  { role: "user", content: userPrompt }
+                ],
+                taskType: getGenerationTaskType(resourceType, sourceText),
+                context: {
+                  topic,
+                  grade,
+                  subject,
+                  difficulty,
+                  questionCount: questionCount || 10,
+                  questionTypes: questionTypes || [],
+                  resourceType: resourceType || 'worksheet',
+                  competencyCode: competencyCode || null,
+                  hasSourceText: Boolean(sourceText)
+                }
+              })
+
+              const questions = worksheetContent.questions || []
+              questions.slice(0, 5).forEach((question, index) => {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                  type: 'question',
+                  question: question.question || question.title || `Frage ${index + 1}`,
+                  number: index + 1,
+                  progress: Math.min(80, 55 + ((index + 1) * 5))
+                })}\n\n`))
+              })
+
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                type: 'status',
+                message: 'Lösungen werden erstellt...',
+                progress: 85
+              })}\n\n`))
+
+              const worksheet = await saveGeneratedWorksheet({
+                db,
+                user,
+                content: worksheetContent,
+                topic,
+                grade,
+                subject,
+                difficulty,
+                questionCount,
+                resourceType,
+                aiProvider: selectedProvider
+              })
+
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                type: 'complete',
+                worksheet,
+                progress: 100
+              })}\n\n`))
+              controller.close()
+              return
+            }
 
             const stream = await openai.chat.completions.create({
               model: "gpt-4o-mini",
@@ -1796,30 +1406,19 @@ ${sourceParts.join('\n\n')}
 
             await new Promise(resolve => setTimeout(resolve, 800))
 
-            const worksheetContent = JSON.parse(fullContent)
-
-            // Save worksheet
-            const worksheet = {
-              id: uuidv4(),
-              user_id: user.id,
-              title: worksheetContent.title,
+            const worksheetContent = parseJsonObject(fullContent)
+            const worksheet = await saveGeneratedWorksheet({
+              db,
+              user,
+              content: worksheetContent,
               topic,
               grade,
               subject,
               difficulty,
-              resourceType: resourceType || 'worksheet',
-              question_count: questionCount || 10,
-              content: { ...worksheetContent, resourceType: resourceType || 'worksheet' },
-              created_at: new Date()
-            }
-
-            await db.collection('worksheets').insertOne(worksheet)
-
-            // Update usage count
-            await db.collection('users').updateOne(
-              { id: user.id },
-              { $inc: { worksheets_used_this_month: 1 } }
-            )
+              questionCount,
+              resourceType,
+              aiProvider: selectedProvider
+            })
 
             // Send completion
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
@@ -1988,7 +1587,7 @@ ${sourceParts.join('\n\n')}
 
     // ========== SUBSCRIPTION MANAGEMENT ==========
 
-    // Upgrade to premium (MOCK - Stripe integration placeholder)
+    // Premium upgrades must only be granted by a verified billing webhook.
     if (route === '/subscribe/premium' && method === 'POST') {
       const decoded = await verifyToken(request)
       if (!decoded) {
@@ -1998,16 +1597,9 @@ ${sourceParts.join('\n\n')}
         ))
       }
 
-      // Mock payment success
-      await db.collection('users').updateOne(
-        { id: decoded.userId },
-        { $set: { subscription_tier: 'premium' } }
-      )
-
-      return handleCORS(NextResponse.json({ 
-        success: true, 
-        message: "Upgraded to Premium! (Mock payment - Stripe integration coming soon)" 
-      }))
+      return handleCORS(NextResponse.json({
+        error: 'Premium upgrades are temporarily unavailable until secure billing is configured.'
+      }, { status: 503 }))
     }
 
     // ========== FILE ANALYSIS ==========
@@ -2031,6 +1623,20 @@ ${sourceParts.join('\n\n')}
         const fileName = file.name || 'unknown'
         const fileType = file.type || ''
         const fileSize = file.size || 0
+        const extension = fileName.split('.').pop()?.toLowerCase() || ''
+        const isAllowedDocument = ALLOWED_UPLOAD_EXTENSIONS.has(extension)
+        const isAllowedImage = ALLOWED_IMAGE_TYPES.has(fileType)
+
+        if (fileSize <= 0 || fileSize > MAX_UPLOAD_BYTES) {
+          return handleCORS(NextResponse.json({ error: 'Datei muss zwischen 1 Byte und 10 MB gross sein.' }, { status: 413 }))
+        }
+        if (!isAllowedDocument && !isAllowedImage) {
+          return handleCORS(NextResponse.json({ error: 'Nicht unterstützter Dateityp.' }, { status: 415 }))
+        }
+        if (typeof instructions !== 'string' || instructions.length > 2_000) {
+          return handleCORS(NextResponse.json({ error: 'Anweisungen dürfen maximal 2.000 Zeichen lang sein.' }, { status: 400 }))
+        }
+
         const buffer = Buffer.from(await file.arrayBuffer())
 
         // Phase 1 & 2: Extract structured content (with OCR fallback)
@@ -2375,7 +1981,6 @@ WICHTIGE REGELN:
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
-            'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
             'Access-Control-Allow-Headers': 'Content-Type, Authorization',
           },
@@ -2597,679 +2202,11 @@ Aktion: ${actionPrompt}`
         return handleCORS(NextResponse.json({ imageUrl, revisedPrompt: response.data[0]?.revised_prompt }))
       } catch (imgError) {
         console.error('Image generation error:', imgError)
-        return handleCORS(NextResponse.json({ error: imgError.message || 'Bildgenerierung fehlgeschlagen' }, { status: 500 }))
+        return handleCORS(NextResponse.json({ error: publicErrorMessage(imgError, 'Bildgenerierung fehlgeschlagen') }, { status: 500 }))
       }
     }
 
     // ========== STUDENT MODE (Schüler-Modus) ==========
-
-    // ========== CLASS MANAGEMENT ==========
-
-    // Create/update class - POST /api/classes
-    if (route === '/classes' && method === 'POST') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const body = await request.json()
-      const { name, students } = body
-      if (!name) return handleCORS(NextResponse.json({ error: "Klassenname erforderlich" }, { status: 400 }))
-      const existingClass = await db.collection('classes').findOne({ name, teacher_id: decoded.userId })
-      if (existingClass) {
-        await db.collection('classes').updateOne({ id: existingClass.id }, { $set: { students: students || existingClass.students, updated_at: new Date() } })
-        const updated = await db.collection('classes').findOne({ id: existingClass.id })
-        const { _id, ...clean } = updated
-        return handleCORS(NextResponse.json(clean))
-      }
-      const joinCode = Math.random().toString(36).substring(2, 8).toUpperCase()
-      const newClass = {
-        id: uuidv4(),
-        name,
-        teacher_id: decoded.userId,
-        join_code: joinCode,
-        students: students || [],
-        enrolled_students: [], // { student_id, display_name, joined_at, niveau }
-        created_at: new Date(),
-        updated_at: new Date()
-      }
-      await db.collection('classes').insertOne(newClass)
-      const { _id, ...clean } = newClass
-      return handleCORS(NextResponse.json(clean))
-    }
-
-    // Get teacher's classes - GET /api/classes
-    if (route === '/classes' && method === 'GET') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const classes = await db.collection('classes').find({ teacher_id: decoded.userId }).sort({ name: 1 }).toArray()
-      const cleaned = classes.map(({ _id, ...c }) => c)
-      return handleCORS(NextResponse.json(cleaned))
-    }
-
-    // Get class details with enrolled students - GET /api/classes/:id
-    if (route.match(/^\/classes\/[^/]+$/) && method === 'GET') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const classId = path[1]
-      const cls = await db.collection('classes').findOne({ id: classId, teacher_id: decoded.userId })
-      if (!cls) return handleCORS(NextResponse.json({ error: 'Klasse nicht gefunden.' }, { status: 404 }))
-      // Enrich enrolled students with latest stats
-      const enriched = await Promise.all((cls.enrolled_students || []).map(async (es) => {
-        const student = await db.collection('students').findOne({ id: es.student_id })
-        const submissions = await db.collection('submissions').find({ student_id: es.student_id }).toArray()
-        const avgGrade = submissions.length > 0
-          ? Math.round(submissions.reduce((s, sub) => s + (sub.swiss_grade || 1), 0) / submissions.length * 10) / 10
-          : null
-        return {
-          ...es,
-          display_name: student?.display_name || es.display_name,
-          total_quizzes: student?.total_quizzes || 0,
-          total_points: student?.total_points || 0,
-          xp: student?.xp || 0,
-          level: student?.level || 1,
-          streak: student?.streak || 0,
-          avg_grade: avgGrade
-        }
-      }))
-      const { _id, ...clean } = cls
-      clean.enrolled_students = enriched
-      return handleCORS(NextResponse.json(clean))
-    }
-
-    // Update student niveau in class - PUT /api/classes/:id/students/:studentId/niveau
-    if (route.match(/^\/classes\/[^/]+\/students\/[^/]+\/niveau$/) && method === 'PUT') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const classId = path[1]
-      const studentId = path[3]
-      const body = await request.json()
-      const { niveau } = body // 'A' | 'B' | 'C'
-      if (!['A', 'B', 'C'].includes(niveau)) return handleCORS(NextResponse.json({ error: 'Ungültiges Niveau. Erlaubt: A, B, C' }, { status: 400 }))
-      const cls = await db.collection('classes').findOne({ id: classId, teacher_id: decoded.userId })
-      if (!cls) return handleCORS(NextResponse.json({ error: 'Klasse nicht gefunden.' }, { status: 404 }))
-      const enrolled = cls.enrolled_students || []
-      const idx = enrolled.findIndex(s => s.student_id === studentId)
-      if (idx === -1) return handleCORS(NextResponse.json({ error: 'Schüler nicht in dieser Klasse.' }, { status: 404 }))
-      enrolled[idx].niveau = niveau
-      await db.collection('classes').updateOne({ id: classId }, { $set: { enrolled_students: enrolled, updated_at: new Date() } })
-      return handleCORS(NextResponse.json({ success: true, niveau }))
-    }
-
-    // Remove student from class - DELETE /api/classes/:id/students/:studentId
-    if (route.match(/^\/classes\/[^/]+\/students\/[^/]+$/) && method === 'DELETE') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const classId = path[1]
-      const studentId = path[3]
-      const cls = await db.collection('classes').findOne({ id: classId, teacher_id: decoded.userId })
-      if (!cls) return handleCORS(NextResponse.json({ error: 'Klasse nicht gefunden.' }, { status: 404 }))
-      const updated = (cls.enrolled_students || []).filter(s => s.student_id !== studentId)
-      await db.collection('classes').updateOne({ id: classId }, { $set: { enrolled_students: updated, updated_at: new Date() } })
-      // Also remove from student's enrolled_classes
-      await db.collection('students').updateOne({ id: studentId }, { $pull: { enrolled_classes: { class_id: classId } } })
-      return handleCORS(NextResponse.json({ success: true }))
-    }
-
-    // Delete class - DELETE /api/classes/:id
-    if (route.match(/^\/classes\/[^/]+$/) && method === 'DELETE') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const classId = path[1]
-      // Remove class from all enrolled students
-      const cls = await db.collection('classes').findOne({ id: classId, teacher_id: decoded.userId })
-      if (cls) {
-        const studentIds = (cls.enrolled_students || []).map(s => s.student_id)
-        if (studentIds.length > 0) {
-          await db.collection('students').updateMany(
-            { id: { $in: studentIds } },
-            { $pull: { enrolled_classes: { class_id: classId } } }
-          )
-        }
-      }
-      await db.collection('classes').deleteOne({ id: classId, teacher_id: decoded.userId })
-      return handleCORS(NextResponse.json({ success: true }))
-    }
-
-    // Share worksheet as assignment - POST /api/assignments/share
-    if (route === '/assignments/share' && method === 'POST') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const body = await request.json()
-      const { worksheetId, className, classId, deadline, status: assignmentStatus, studentNames, targetNiveau } = body
-      if (!worksheetId) return handleCORS(NextResponse.json({ error: "Material-ID erforderlich" }, { status: 400 }))
-      const worksheet = await db.collection('worksheets').findOne({ id: worksheetId })
-      if (!worksheet) return handleCORS(NextResponse.json({ error: "Material nicht gefunden" }, { status: 404 }))
-      const code = Math.random().toString(36).substring(2, 8).toUpperCase()
-      // If classId provided, resolve class name
-      let resolvedClassName = className || ''
-      if (classId) {
-        const cls = await db.collection('classes').findOne({ id: classId, teacher_id: decoded.userId })
-        if (cls) resolvedClassName = cls.name
-      }
-      const assignment = {
-        id: uuidv4(),
-        code,
-        worksheet_id: worksheetId,
-        worksheet_title: worksheet.title || 'Unbenannt',
-        teacher_id: decoded.userId,
-        class_id: classId || null,
-        class_name: resolvedClassName,
-        student_names: studentNames || [],
-        target_niveau: targetNiveau || null, // null = all, 'A'|'B'|'C' = specific
-        deadline: deadline || null,
-        created_at: new Date(),
-        status: assignmentStatus || 'active',
-        access_url: `/schueler?code=${code}`
-      }
-      await db.collection('assignments').insertOne(assignment)
-      return handleCORS(NextResponse.json({ code, assignmentId: assignment.id, accessUrl: assignment.access_url }))
-    }
-
-    // Get assignment by code (student access, no auth needed) - GET /api/student/assignment/:code
-    if (route.startsWith('/student/assignment/') && method === 'GET') {
-      const code = path[2]
-      const assignment = await db.collection('assignments').findOne({ code, status: 'active' })
-      if (!assignment) return handleCORS(NextResponse.json({ error: 'Aufgabe nicht gefunden oder nicht mehr aktiv.' }, { status: 404 }))
-      if (assignment.deadline && new Date(assignment.deadline) < new Date()) {
-        return handleCORS(NextResponse.json({ error: 'Die Abgabefrist ist abgelaufen.' }, { status: 410 }))
-      }
-      const worksheet = await db.collection('worksheets').findOne({ id: assignment.worksheet_id })
-      if (!worksheet) return handleCORS(NextResponse.json({ error: 'Material nicht gefunden.' }, { status: 404 }))
-      // Return worksheet without answers for student view
-      const studentContent = {
-        ...worksheet.content,
-        questions: (worksheet.content?.questions || []).map(q => {
-          const base = {
-            number: q.number, type: q.type, question: q.question,
-            options: q.options, points: q.points, imageUrl: q.imageUrl,
-          }
-          // For matching: send answer structure so students can see items to match
-          if (q.type === 'matching' && q.answer) {
-            base.answer = q.answer // contains "A→B, C→D" pairs needed for display
-          }
-          // For ordering: send answer so items can be shuffled and displayed
-          if (q.type === 'ordering' && q.answer) {
-            base.answer = q.answer // contains comma-separated items
-          }
-          // For either_or/true_false: ensure options exist
-          if (q.type === 'true_false' && (!q.options || q.options.length === 0)) {
-            base.options = ['Wahr', 'Falsch']
-          }
-          if (q.type === 'either_or' && (!q.options || q.options.length === 0) && q.answer) {
-            // Try to extract options from the answer or question
-            base.options = ['Ja', 'Nein']
-          }
-          return base
-        })
-      }
-      return handleCORS(NextResponse.json({
-        title: worksheet.title, subject: worksheet.subject, grade: worksheet.grade,
-        content: studentContent, assignmentId: assignment.id, className: assignment.class_name
-      }))
-    }
-
-    // Submit student answers - POST /api/student/submit
-    if (route === '/student/submit' && method === 'POST') {
-      const body = await request.json()
-      const { assignmentCode, studentName, answers, duration, studentToken } = body
-
-      // Try to identify logged-in student
-      let studentId = null
-      if (studentToken) {
-        try {
-          const decoded = jwt.verify(studentToken, process.env.JWT_SECRET)
-          if (decoded.role === 'student') studentId = decoded.studentId
-        } catch (e) { /* guest mode */ }
-      }
-      const assignment = await db.collection('assignments').findOne({ code: assignmentCode, status: 'active' })
-      if (!assignment) {
-        // Debug: check if assignment exists with different status
-        const anyAssignment = await db.collection('assignments').findOne({ code: assignmentCode })
-        console.log('[Submit Debug] code:', assignmentCode, 'found:', !!anyAssignment, 'status:', anyAssignment?.status)
-        return handleCORS(NextResponse.json({ error: `Aufgabe nicht gefunden. Code: "${assignmentCode}", Status: ${anyAssignment ? anyAssignment.status : 'nicht vorhanden'}` }, { status: 404 }))
-      }
-      const worksheet = await db.collection('worksheets').findOne({ id: assignment.worksheet_id })
-      if (!worksheet) return handleCORS(NextResponse.json({ error: 'Material nicht gefunden.' }, { status: 404 }))
-
-      const questions = worksheet.content?.questions || []
-      let correctCount = 0
-      const questionResults = []
-
-      // Phase 1: Auto-grade deterministic types
-      const aiGradingNeeded = []
-      for (let i = 0; i < questions.length; i++) {
-        const q = questions[i]
-        const studentAnswer = answers[i]
-        let isCorrect = null
-        let feedback = null
-        let pointsAwarded = null
-
-        if (['multiple_choice', 'true_false', 'either_or'].includes(q.type)) {
-          isCorrect = studentAnswer === q.answer
-          if (isCorrect) correctCount++
-          feedback = isCorrect ? 'Richtig!' : `Richtig wäre: ${q.answer}`
-        } else if (q.type === 'math') {
-          const cleanStudent = String(studentAnswer || '').trim().replace(/\s/g, '')
-          const cleanAnswer = String(q.answer || '').trim().replace(/\s/g, '')
-          isCorrect = cleanStudent === cleanAnswer
-          if (isCorrect) correctCount++
-          feedback = isCorrect ? 'Richtig!' : `Die richtige Antwort ist: ${q.answer}`
-        } else if (q.type === 'fill_blank') {
-          const correctWords = (q.answer || '').split(',').map(w => w.trim().toLowerCase())
-          const studentWords = (studentAnswer || []).map(w => (w || '').trim().toLowerCase())
-          isCorrect = correctWords.every((w, wi) => studentWords[wi] === w)
-          if (isCorrect) correctCount++
-          feedback = isCorrect ? 'Richtig!' : `Richtige Antworten: ${q.answer}`
-        } else if (['open', 'image'].includes(q.type) && studentAnswer && String(studentAnswer).trim()) {
-          // Queue for AI grading
-          aiGradingNeeded.push({ index: i, question: q, studentAnswer })
-        } else if (q.type === 'ordering') {
-          const correctOrder = (q.answer || '').split(',').map(s => s.trim().toLowerCase())
-          const studentOrder = (studentAnswer || []).map(s => String(s).trim().toLowerCase())
-          isCorrect = correctOrder.length === studentOrder.length && correctOrder.every((item, idx) => item === studentOrder[idx])
-          if (isCorrect) correctCount++
-          feedback = isCorrect ? 'Richtige Reihenfolge!' : `Die richtige Reihenfolge wäre: ${q.answer}`
-        } else if (q.type === 'matching') {
-          // Student answer is { selectedLeft, matches: { leftIdx: rightIdx } }
-          const studentMatches = (studentAnswer?.matches) || studentAnswer || {}
-          const correctPairsRaw = (q.answer || '').split(',').filter(Boolean)
-          const correctLeft = correctPairsRaw.map(p => p.split('→')[0]?.trim())
-          const correctRight = correctPairsRaw.map(p => p.split('→')[1]?.trim())
-          // Reconstruct shuffled right order using same seed as frontend
-          const rightItems = correctRight.map((text, i) => ({ text, origIdx: i }))
-          const matchSeed = (q.number || 0) * 7 + correctPairsRaw.length
-          const shuffledRight = [...rightItems].sort((a, b) => ((a.origIdx * 31 + matchSeed) % 97) - ((b.origIdx * 31 + matchSeed) % 97))
-          let matchCorrect = 0
-          for (const [leftIdx, rightIdx] of Object.entries(studentMatches)) {
-            const li = parseInt(leftIdx)
-            const ri = parseInt(rightIdx)
-            if (shuffledRight[ri]?.origIdx === li) matchCorrect++
-          }
-          isCorrect = matchCorrect === correctPairsRaw.length && Object.keys(studentMatches).length === correctPairsRaw.length
-          if (isCorrect) correctCount++
-          feedback = isCorrect ? 'Alle richtig zugeordnet!' : `${matchCorrect}/${correctPairsRaw.length} richtig zugeordnet.`
-          feedback = isCorrect ? 'Richtig zugeordnet!' : 'Nicht alle Zuordnungen waren korrekt.'
-        }
-
-        questionResults.push({
-          questionNumber: q.number,
-          type: q.type,
-          question: q.question,
-          studentAnswer,
-          correctAnswer: q.answer,
-          isCorrect,
-          feedback,
-          pointsAwarded: isCorrect === true ? (q.points || 1) : isCorrect === false ? 0 : null,
-          maxPoints: q.points || 1,
-          aiGraded: false
-        })
-      }
-
-      // Phase 2: AI grading for open/image questions
-      if (aiGradingNeeded.length > 0) {
-        try {
-          const gradingPrompt = aiGradingNeeded.map((item, idx) => {
-            return `Frage ${idx + 1} (${item.question.points || 1} Punkte):
-Frage: ${item.question.question}
-Musterlösung: ${item.question.answer}
-${item.question.explanation ? `Hinweis: ${item.question.explanation}` : ''}
-Schüler-Antwort: ${item.studentAnswer}`
-          }).join('\n\n---\n\n')
-
-          const aiResponse = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
-            temperature: 0.1,
-            messages: [
-              {
-                role: 'system',
-                content: `Du bist ein erfahrener Schweizer Lehrperson, die Schülerantworten korrigiert. Bewerte jede Antwort fair und altersgerecht.
-
-Für jede Frage antworte im folgenden JSON-Format:
-{
-  "gradings": [
-    {
-      "pointsAwarded": <Zahl zwischen 0 und maxPunkte>,
-      "feedback": "<kurzes, ermutigendes Feedback auf Deutsch, max 2 Sätze>",
-      "isCorrect": <true wenn volle Punktzahl, false wenn 0, "partial" wenn teilweise>
-    }
-  ]
-}
-
-Regeln:
-- Bewerte den Inhalt, nicht die Rechtschreibung (ausser bei Deutsch-Aufgaben)
-- Akzeptiere sinngemäss richtige Antworten, auch wenn die Formulierung anders ist
-- Gib Teilpunkte wenn die Antwort teilweise richtig ist
-- Feedback soll konstruktiv und ermutigend sein
-- Antworte NUR mit validem JSON`
-              },
-              { role: 'user', content: gradingPrompt }
-            ]
-          })
-
-          const aiText = aiResponse.choices[0]?.message?.content || ''
-          const jsonMatch = aiText.match(/\{[\s\S]*\}/)
-          if (jsonMatch) {
-            const aiGrading = JSON.parse(jsonMatch[0])
-            const gradings = aiGrading.gradings || []
-
-            gradings.forEach((grading, idx) => {
-              if (idx < aiGradingNeeded.length) {
-                const resultIndex = aiGradingNeeded[idx].index
-                const maxPoints = aiGradingNeeded[idx].question.points || 1
-                const awarded = Math.min(Math.max(0, grading.pointsAwarded || 0), maxPoints)
-
-                questionResults[resultIndex].isCorrect = grading.isCorrect === true ? true : grading.isCorrect === false ? false : 'partial'
-                questionResults[resultIndex].feedback = grading.feedback || 'Bewertet durch KI.'
-                questionResults[resultIndex].pointsAwarded = awarded
-                questionResults[resultIndex].aiGraded = true
-
-                if (grading.isCorrect === true) correctCount++
-                else if (grading.isCorrect === 'partial') correctCount += 0.5
-              }
-            })
-          }
-        } catch (aiError) {
-          console.error('AI grading error:', aiError)
-          // Mark AI questions as needing manual review
-          aiGradingNeeded.forEach(item => {
-            questionResults[item.index].feedback = 'Konnte nicht automatisch bewertet werden. Wird von der Lehrperson geprüft.'
-            questionResults[item.index].needsManualReview = true
-          })
-        }
-      }
-
-      const totalPoints = questionResults.reduce((sum, r) => sum + (r.maxPoints || 1), 0)
-      const earnedPoints = questionResults.reduce((sum, r) => sum + (r.pointsAwarded ?? 0), 0)
-      const needsReview = questionResults.some(r => r.needsManualReview || r.isCorrect === null)
-
-      const scorePercentage = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0
-      const swissGrade = totalPoints > 0 ? Math.round((earnedPoints / totalPoints * 5 + 1) * 2) / 2 : 1
-
-      const submission = {
-        id: uuidv4(),
-        assignment_id: assignment.id,
-        student_id: studentId || null,
-        student_name: studentName,
-        answers,
-        question_results: questionResults,
-        correct_count: correctCount,
-        total_questions: questions.length,
-        total_points: totalPoints,
-        earned_points: earnedPoints,
-        score_percentage: scorePercentage,
-        swiss_grade: swissGrade,
-        needs_review: needsReview,
-        duration,
-        submitted_at: new Date()
-      }
-      await db.collection('submissions').insertOne(submission)
-
-      // Update student stats + gamification XP if logged in
-      if (studentId) {
-        // XP calculation: base 10 + earned points + bonus for grade + perfect bonus
-        let xpEarned = 10 + earnedPoints
-        if (swissGrade >= 5.5) xpEarned += 20
-        else if (swissGrade >= 4.5) xpEarned += 10
-        if (scorePercentage === 100) xpEarned += 25 // perfect bonus
-        await db.collection('students').updateOne(
-          { id: studentId },
-          {
-            $inc: { total_quizzes: 1, total_points: earnedPoints, xp: xpEarned },
-            $set: { last_activity: new Date() }
-          }
-        )
-      }
-      return handleCORS(NextResponse.json({
-        correctCount: Math.round(correctCount),
-        totalQuestions: questions.length,
-        totalPoints,
-        earnedPoints,
-        scorePercentage: submission.score_percentage,
-        duration,
-        submissionId: submission.id,
-        questionResults: questionResults.map(r => ({
-          questionNumber: r.questionNumber,
-          question: r.question,
-          type: r.type,
-          studentAnswer: r.studentAnswer,
-          isCorrect: r.isCorrect,
-          feedback: r.feedback,
-          pointsAwarded: r.pointsAwarded,
-          maxPoints: r.maxPoints,
-          aiGraded: r.aiGraded
-        })),
-        swissGrade,
-        needsReview
-      }))
-    }
-
-    // Get submissions for an assignment (teacher view) - GET /api/assignments/:id/submissions
-    if (route.match(/^\/assignments\/[^/]+\/submissions$/) && method === 'GET') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const assignmentId = path[1]
-      const assignment = await db.collection('assignments').findOne({ id: assignmentId, teacher_id: decoded.userId })
-      if (!assignment) return handleCORS(NextResponse.json({ error: 'Aufgabe nicht gefunden.' }, { status: 404 }))
-      const submissions = await db.collection('submissions').find({ assignment_id: assignmentId }).sort({ submitted_at: -1 }).toArray()
-      const cleaned = submissions.map(({ _id, ...s }) => s)
-      return handleCORS(NextResponse.json({ assignment: { ...assignment, _id: undefined }, submissions: cleaned }))
-    }
-
-    // Get teacher's assignments - GET /api/assignments
-    if (route === '/assignments' && method === 'GET') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const assignments = await db.collection('assignments').find({ teacher_id: decoded.userId }).sort({ created_at: -1 }).toArray()
-      // Enrich with worksheet titles and submission counts
-      const enriched = await Promise.all(assignments.map(async (a) => {
-        const { _id, ...clean } = a
-        if (!clean.worksheet_title) {
-          const ws = await db.collection('worksheets').findOne({ id: clean.worksheet_id })
-          clean.worksheet_title = ws?.title || 'Unbenannt'
-        }
-        const subCount = await db.collection('submissions').countDocuments({ assignment_id: clean.id })
-        clean.submission_count = subCount
-        return clean
-      }))
-      return handleCORS(NextResponse.json(enriched))
-    }
-
-    // Update assignment status - PUT /api/assignments/:id
-    if (route.match(/^\/assignments\/[^/]+$/) && method === 'PUT') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const assignmentId = path[1]
-      const body = await request.json()
-      const { status: newStatus, deadline } = body
-      const updateFields = { updated_at: new Date() }
-      if (newStatus) updateFields.status = newStatus
-      if (deadline !== undefined) updateFields.deadline = deadline
-      await db.collection('assignments').updateOne(
-        { id: assignmentId, teacher_id: decoded.userId },
-        { $set: updateFields }
-      )
-      const updated = await db.collection('assignments').findOne({ id: assignmentId })
-      return handleCORS(NextResponse.json({ ...(updated || {}), _id: undefined }))
-    }
-
-    // ========== LEHRER-KORREKTUR (Teacher Override) ==========
-
-    // Update a submission's question result (teacher override) - PUT /api/submissions/:id/grade
-    if (route.match(/^\/submissions\/[^/]+\/grade$/) && method === 'PUT') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const submissionId = path[1]
-      const body = await request.json()
-      const { questionIndex, pointsAwarded, feedback, teacherComment } = body
-
-      const submission = await db.collection('submissions').findOne({ id: submissionId })
-      if (!submission) return handleCORS(NextResponse.json({ error: 'Abgabe nicht gefunden.' }, { status: 404 }))
-
-      // Verify teacher owns the assignment
-      const assignment = await db.collection('assignments').findOne({ id: submission.assignment_id, teacher_id: decoded.userId })
-      if (!assignment) return handleCORS(NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 403 }))
-
-      const questionResults = submission.question_results || []
-      if (questionIndex < 0 || questionIndex >= questionResults.length) {
-        return handleCORS(NextResponse.json({ error: 'Ungültiger Fragenindex.' }, { status: 400 }))
-      }
-
-      // Update the specific question result
-      const qr = questionResults[questionIndex]
-      if (pointsAwarded !== undefined) {
-        const maxPts = qr.maxPoints || 1
-        qr.pointsAwarded = Math.min(Math.max(0, pointsAwarded), maxPts)
-        qr.isCorrect = qr.pointsAwarded === maxPts ? true : qr.pointsAwarded === 0 ? false : 'partial'
-      }
-      if (feedback !== undefined) qr.feedback = feedback
-      if (teacherComment !== undefined) qr.teacherComment = teacherComment
-      qr.teacherOverride = true
-      qr.needsManualReview = false
-
-      questionResults[questionIndex] = qr
-
-      // Recalculate totals
-      const totalPoints = questionResults.reduce((sum, r) => sum + (r.maxPoints || 1), 0)
-      const earnedPoints = questionResults.reduce((sum, r) => sum + (r.pointsAwarded ?? 0), 0)
-      const needsReview = questionResults.some(r => r.needsManualReview || r.isCorrect === null)
-
-      // Calculate Swiss grade (1-6)
-      const scorePercentage = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0
-      const swissGrade = totalPoints > 0 ? Math.round((earnedPoints / totalPoints * 5 + 1) * 2) / 2 : 1
-
-      await db.collection('submissions').updateOne(
-        { id: submissionId },
-        { $set: {
-          question_results: questionResults,
-          earned_points: earnedPoints,
-          total_points: totalPoints,
-          score_percentage: scorePercentage,
-          needs_review: needsReview,
-          swiss_grade: swissGrade,
-          teacher_reviewed: true,
-          reviewed_at: new Date()
-        }}
-      )
-
-      return handleCORS(NextResponse.json({
-        questionResults: questionResults.map(r => ({
-          questionNumber: r.questionNumber, question: r.question, type: r.type,
-          studentAnswer: r.studentAnswer, isCorrect: r.isCorrect, feedback: r.feedback,
-          pointsAwarded: r.pointsAwarded, maxPoints: r.maxPoints, aiGraded: r.aiGraded,
-          teacherOverride: r.teacherOverride, teacherComment: r.teacherComment,
-          needsManualReview: r.needsManualReview
-        })),
-        earnedPoints, totalPoints, scorePercentage, swissGrade, needsReview
-      }))
-    }
-
-    // Batch finalize grading for a submission - PUT /api/submissions/:id/finalize
-    if (route.match(/^\/submissions\/[^/]+\/finalize$/) && method === 'PUT') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const submissionId = path[1]
-
-      const submission = await db.collection('submissions').findOne({ id: submissionId })
-      if (!submission) return handleCORS(NextResponse.json({ error: 'Abgabe nicht gefunden.' }, { status: 404 }))
-
-      const assignment = await db.collection('assignments').findOne({ id: submission.assignment_id, teacher_id: decoded.userId })
-      if (!assignment) return handleCORS(NextResponse.json({ error: 'Nicht autorisiert.' }, { status: 403 }))
-
-      const questionResults = submission.question_results || []
-      const totalPoints = questionResults.reduce((sum, r) => sum + (r.maxPoints || 1), 0)
-      const earnedPoints = questionResults.reduce((sum, r) => sum + (r.pointsAwarded ?? 0), 0)
-      const scorePercentage = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0
-      const swissGrade = totalPoints > 0 ? Math.round((earnedPoints / totalPoints * 5 + 1) * 2) / 2 : 1
-
-      await db.collection('submissions').updateOne(
-        { id: submissionId },
-        { $set: {
-          needs_review: false,
-          swiss_grade: swissGrade,
-          score_percentage: scorePercentage,
-          earned_points: earnedPoints,
-          teacher_reviewed: true,
-          reviewed_at: new Date()
-        }}
-      )
-
-      return handleCORS(NextResponse.json({ swissGrade, scorePercentage, earnedPoints, totalPoints }))
-    }
-
-    // ========== ASSIGNMENT DELETE ==========
-
-    // Delete an assignment and its submissions - DELETE /api/assignments/:id
-    if (route.match(/^\/assignments\/[^/]+$/) && method === 'DELETE') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const assignmentId = path[1]
-
-      const assignment = await db.collection('assignments').findOne({ id: assignmentId, teacher_id: decoded.userId })
-      if (!assignment) return handleCORS(NextResponse.json({ error: 'Aufgabe nicht gefunden.' }, { status: 404 }))
-
-      await db.collection('submissions').deleteMany({ assignment_id: assignmentId })
-      await db.collection('assignments').deleteOne({ id: assignmentId })
-
-      return handleCORS(NextResponse.json({ message: 'Aufgabe und alle Abgaben gelöscht.' }))
-    }
-
-    // ========== KLASSENÜBERSICHT (Class Overview) ==========
-
-    // Get class overview with grade distribution - GET /api/assignments/:id/overview
-    if (route.match(/^\/assignments\/[^/]+\/overview$/) && method === 'GET') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const assignmentId = path[1]
-
-      const assignment = await db.collection('assignments').findOne({ id: assignmentId, teacher_id: decoded.userId })
-      if (!assignment) return handleCORS(NextResponse.json({ error: 'Aufgabe nicht gefunden.' }, { status: 404 }))
-
-      const submissions = await db.collection('submissions').find({ assignment_id: assignmentId }).sort({ submitted_at: -1 }).toArray()
-      if (submissions.length === 0) return handleCORS(NextResponse.json({ submissions: [], stats: null }))
-
-      // Calculate Swiss grades for all submissions
-      const gradesData = submissions.map(s => {
-        const tp = s.total_points || 1
-        const ep = s.earned_points || 0
-        const grade = s.swiss_grade || (Math.round((ep / tp * 5 + 1) * 2) / 2)
-        return {
-          name: s.student_name,
-          earnedPoints: ep,
-          totalPoints: tp,
-          scorePercentage: s.score_percentage || 0,
-          swissGrade: grade,
-          duration: s.duration,
-          submittedAt: s.submitted_at,
-          needsReview: s.needs_review,
-          teacherReviewed: s.teacher_reviewed
-        }
-      })
-
-      const grades = gradesData.map(g => g.swissGrade)
-      const scores = gradesData.map(g => g.scorePercentage)
-
-      // Grade distribution (1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6)
-      const gradeDistribution = {}
-      for (let g = 1; g <= 6; g += 0.5) { gradeDistribution[g] = 0 }
-      grades.forEach(g => { if (gradeDistribution[g] !== undefined) gradeDistribution[g]++ })
-
-      // Pass/fail (>= 4 is passing in Swiss system)
-      const passing = grades.filter(g => g >= 4).length
-      const failing = grades.filter(g => g < 4).length
-
-      const stats = {
-        count: submissions.length,
-        averageGrade: Math.round(grades.reduce((a, b) => a + b, 0) / grades.length * 10) / 10,
-        medianGrade: grades.sort((a, b) => a - b)[Math.floor(grades.length / 2)],
-        bestGrade: Math.max(...grades),
-        worstGrade: Math.min(...grades),
-        averageScore: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length),
-        passing,
-        failing,
-        passRate: Math.round((passing / submissions.length) * 100),
-        gradeDistribution
-      }
-
-      return handleCORS(NextResponse.json({ students: gradesData, stats }))
-    }
 
     // ========== FEHLERANALYSE (Error Analysis) ==========
 
@@ -3279,9 +2216,10 @@ Regeln:
       if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
       const body = await request.json()
       const { assignmentId } = body
+      const assignment = await db.collection('assignments').findOne({ id: assignmentId, teacher_id: decoded.userId })
+      if (!assignment) return handleCORS(NextResponse.json({ error: 'Aufgabe nicht gefunden.' }, { status: 404 }))
       const submissions = await db.collection('submissions').find({ assignment_id: assignmentId }).toArray()
       if (submissions.length === 0) return handleCORS(NextResponse.json({ error: 'Keine Abgaben vorhanden.' }, { status: 404 }))
-      const assignment = await db.collection('assignments').findOne({ id: assignmentId })
       const worksheet = await db.collection('worksheets').findOne({ id: assignment?.worksheet_id })
 
       // Build analysis
@@ -3373,117 +2311,6 @@ Bitte gib:
         console.error('Exam scan error:', e)
         return handleCORS(NextResponse.json({ error: 'Analyse fehlgeschlagen: ' + e.message }, { status: 500 }))
       }
-    }
-
-    // ========== COLLABORATION ==========
-
-    // Share worksheet with another user - POST /api/collaborate/share
-    if (route === '/collaborate/share' && method === 'POST') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const body = await request.json()
-      const { worksheetId, email, role = 'view' } = body // role: 'view', 'comment', 'edit'
-      const targetUser = await db.collection('users').findOne({ email })
-      if (!targetUser) return handleCORS(NextResponse.json({ error: 'Benutzer nicht gefunden.' }, { status: 404 }))
-      const share = {
-        id: uuidv4(),
-        worksheet_id: worksheetId,
-        owner_id: decoded.userId,
-        shared_with_id: targetUser.id,
-        shared_with_email: email,
-        role,
-        created_at: new Date()
-      }
-      await db.collection('shares').insertOne(share)
-      return handleCORS(NextResponse.json({ message: 'Material geteilt', shareId: share.id }))
-    }
-
-    // Get shared worksheets - GET /api/collaborate/shared-with-me
-    if (route === '/collaborate/shared-with-me' && method === 'GET') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const shares = await db.collection('shares').find({ shared_with_id: decoded.userId }).toArray()
-      const worksheetIds = shares.map(s => s.worksheet_id)
-      const worksheets = await db.collection('worksheets').find({ id: { $in: worksheetIds } }).toArray()
-      const result = shares.map(share => {
-        const ws = worksheets.find(w => w.id === share.worksheet_id)
-        return { ...share, _id: undefined, worksheet: ws ? { title: ws.title, subject: ws.subject, grade: ws.grade, id: ws.id } : null }
-      })
-      return handleCORS(NextResponse.json(result))
-    }
-
-    // Add comment to worksheet - POST /api/collaborate/comment
-    if (route === '/collaborate/comment' && method === 'POST') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const body = await request.json()
-      const { worksheetId, text, questionIndex } = body
-      const user = await db.collection('users').findOne({ id: decoded.userId })
-      const comment = {
-        id: uuidv4(),
-        worksheet_id: worksheetId,
-        user_id: decoded.userId,
-        user_name: user?.name || 'Unbekannt',
-        text,
-        question_index: questionIndex ?? null,
-        created_at: new Date()
-      }
-      await db.collection('comments').insertOne(comment)
-      return handleCORS(NextResponse.json({ commentId: comment.id }))
-    }
-
-    // Get comments for worksheet - GET /api/collaborate/comments/:worksheetId
-    if (route.startsWith('/collaborate/comments/') && method === 'GET') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const worksheetId = path[2]
-      const comments = await db.collection('comments').find({ worksheet_id: worksheetId }).sort({ created_at: -1 }).toArray()
-      return handleCORS(NextResponse.json(comments.map(({ _id, ...c }) => c)))
-    }
-
-    // Save version - POST /api/collaborate/version
-    if (route === '/collaborate/version' && method === 'POST') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const body = await request.json()
-      const { worksheetId, label } = body
-      const worksheet = await db.collection('worksheets').findOne({ id: worksheetId, user_id: decoded.userId })
-      if (!worksheet) return handleCORS(NextResponse.json({ error: 'Material nicht gefunden.' }, { status: 404 }))
-      const version = {
-        id: uuidv4(),
-        worksheet_id: worksheetId,
-        user_id: decoded.userId,
-        label: label || `Version ${new Date().toLocaleString('de-CH')}`,
-        content: worksheet.content,
-        title: worksheet.title,
-        created_at: new Date()
-      }
-      await db.collection('versions').insertOne(version)
-      return handleCORS(NextResponse.json({ versionId: version.id }))
-    }
-
-    // Get versions - GET /api/collaborate/versions/:worksheetId
-    if (route.startsWith('/collaborate/versions/') && method === 'GET') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const worksheetId = path[2]
-      const versions = await db.collection('versions').find({ worksheet_id: worksheetId }).sort({ created_at: -1 }).toArray()
-      return handleCORS(NextResponse.json(versions.map(({ _id, ...v }) => v)))
-    }
-
-    // Restore version - POST /api/collaborate/restore
-    if (route === '/collaborate/restore' && method === 'POST') {
-      const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
-      const body = await request.json()
-      const { worksheetId, versionId } = body
-      const version = await db.collection('versions').findOne({ id: versionId, worksheet_id: worksheetId })
-      if (!version) return handleCORS(NextResponse.json({ error: 'Version nicht gefunden.' }, { status: 404 }))
-      await db.collection('worksheets').updateOne(
-        { id: worksheetId, user_id: decoded.userId },
-        { $set: { content: version.content, title: version.title, updated_at: new Date() } }
-      )
-      return handleCORS(NextResponse.json({ message: 'Version wiederhergestellt' }))
     }
 
     // ========== TEXT-TO-SPEECH (Sprachausgabe) ==========
@@ -4168,7 +2995,7 @@ WICHTIG:
   } catch (error) {
     console.error('API Error:', error)
     return handleCORS(NextResponse.json(
-      { error: error.message || "Internal server error" },
+      { error: publicErrorMessage(error) },
       { status: 500 }
     ))
   }

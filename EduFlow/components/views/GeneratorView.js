@@ -222,7 +222,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
     setEditMode(false)
     setEditedQuestions([])
     setShowPostCreationBar(false)
-    setForm({ topic: '', grade: form.grade, subject: form.subject, difficulty: form.difficulty, questionCount: form.questionCount, resourceType: 'worksheet', dyslexiaFont: false })
+    setForm({ topic: '', grade: form.grade, subject: form.subject, difficulty: form.difficulty, questionCount: form.questionCount, resourceType: 'worksheet', dyslexiaFont: false, competencyCode: '', theme: form.theme || 'classic', aiProvider: 'openai' })
     setActiveView('create')
   }
 

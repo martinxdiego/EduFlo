@@ -1,6 +1,8 @@
 'use client'
 import { useState, useCallback } from 'react'
 
+const SESSION_MARKER = 'cookie-session'
+
 export function useAuth() {
   const [token, setToken] = useState(null)
   const [user, setUser] = useState(null)
@@ -10,9 +12,9 @@ export function useAuth() {
   const [selectedTeacherType, setSelectedTeacherType] = useState(null)
   const [savingTeacherType, setSavingTeacherType] = useState(false)
 
-  const fetchCurrentUser = useCallback(async (authToken) => {
+  const fetchCurrentUser = useCallback(async () => {
     try {
-      const response = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${authToken}` } })
+      const response = await fetch('/api/auth/me', { cache: 'no-store' })
       if (response.ok) {
         const userData = await response.json()
         setUser(userData)
@@ -21,7 +23,6 @@ export function useAuth() {
         }
         return userData
       } else {
-        localStorage.removeItem('teachertime_token')
         setToken(null)
         return null
       }
@@ -34,22 +35,25 @@ export function useAuth() {
   const handleAuth = useCallback(async (e, onSuccess) => {
     e.preventDefault()
     const endpoint = authMode === 'login' ? '/api/auth/login' : '/api/auth/register'
+    const requestBody = authMode === 'login'
+      ? { email: authForm.email, password: authForm.password }
+      : authForm
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(authForm)
+      body: JSON.stringify(requestBody)
     })
     const data = await response.json()
     if (response.ok) {
-      setToken(data.token)
+      setToken(SESSION_MARKER)
       setUser(data.user)
-      localStorage.setItem('teachertime_token', data.token)
+      localStorage.removeItem('teachertime_token')
       if (!data.user.teacher_type) {
         setShowOnboarding(true)
       } else if (onSuccess) {
-        onSuccess(data.token)
+        onSuccess(SESSION_MARKER)
       }
-      return { success: true, token: data.token, user: data.user }
+      return { success: true, token: SESSION_MARKER, user: data.user }
     }
     const errorMsg = data.error === 'Invalid credentials' ? 'E-Mail oder Passwort ist falsch.'
       : data.error === 'User already exists' ? 'Diese E-Mail-Adresse ist bereits registriert.'
@@ -57,9 +61,23 @@ export function useAuth() {
     return { success: false, error: errorMsg }
   }, [authMode, authForm])
 
-  const handleGoogleLogin = useCallback(() => {
+  const handleGoogleLogin = useCallback(async () => {
     const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
     const redirectUri = `${window.location.origin}/api/auth/google/callback`
+    if (!GOOGLE_CLIENT_ID) return { success: false, error: 'Google-Anmeldung ist nicht konfiguriert.' }
+
+    const randomBase64Url = (byteLength) => {
+      const bytes = crypto.getRandomValues(new Uint8Array(byteLength))
+      return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+    }
+    const codeVerifier = randomBase64Url(64)
+    const state = randomBase64Url(32)
+    const challengeBytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codeVerifier))
+    const codeChallenge = btoa(String.fromCharCode(...new Uint8Array(challengeBytes)))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+
+    sessionStorage.setItem('eduflow_google_oauth_state', state)
+    sessionStorage.setItem('eduflow_google_code_verifier', codeVerifier)
 
     const params = new URLSearchParams({
       client_id: GOOGLE_CLIENT_ID,
@@ -68,29 +86,41 @@ export function useAuth() {
       scope: 'email profile',
       access_type: 'offline',
       prompt: 'select_account',
+      state,
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256',
     })
 
     // Redirect to Google (no popup — avoids COOP issues)
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`
   }, [])
 
-  const handleGoogleCallback = useCallback(async (code) => {
+  const handleGoogleCallback = useCallback(async (code, returnedState) => {
     try {
+      const expectedState = sessionStorage.getItem('eduflow_google_oauth_state')
+      const codeVerifier = sessionStorage.getItem('eduflow_google_code_verifier')
+      sessionStorage.removeItem('eduflow_google_oauth_state')
+      sessionStorage.removeItem('eduflow_google_code_verifier')
+
+      if (!expectedState || !returnedState || returnedState !== expectedState || !codeVerifier) {
+        return { success: false, error: 'Google-Anmeldung konnte nicht sicher bestätigt werden.' }
+      }
+
       const response = await fetch('/api/auth/google', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code, codeVerifier }),
       })
       const data = await response.json()
 
       if (response.ok) {
-        setToken(data.token)
+        setToken(SESSION_MARKER)
         setUser(data.user)
-        localStorage.setItem('teachertime_token', data.token)
+        localStorage.removeItem('teachertime_token')
         if (!data.user.teacher_type) {
           setShowOnboarding(true)
         }
-        return { success: true, token: data.token, user: data.user }
+        return { success: true, token: SESSION_MARKER, user: data.user }
       } else {
         return { success: false, error: data.error || 'Google-Anmeldung fehlgeschlagen.' }
       }
@@ -99,7 +129,12 @@ export function useAuth() {
     }
   }, [])
 
-  const handleLogout = useCallback(() => {
+  const handleLogout = useCallback(async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' })
+    } catch (error) {
+      console.error('Abmeldung konnte serverseitig nicht bestätigt werden:', error)
+    }
     localStorage.removeItem('teachertime_token')
     setToken(null)
     setUser(null)
@@ -127,12 +162,10 @@ export function useAuth() {
   }, [selectedTeacherType, token])
 
   const initFromStorage = useCallback(() => {
-    const savedToken = localStorage.getItem('teachertime_token')
-    if (savedToken) {
-      setToken(savedToken)
-      return savedToken
-    }
-    return null
+    // JWTs from older versions must not remain readable by JavaScript.
+    localStorage.removeItem('teachertime_token')
+    setToken(SESSION_MARKER)
+    return SESSION_MARKER
   }, [])
 
   return {

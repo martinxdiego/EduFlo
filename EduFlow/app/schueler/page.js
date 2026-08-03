@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { BookOpen, CheckCircle2, ArrowRight, Clock, Send, ArrowLeft, Star, Trophy, Loader2, XCircle, AlertCircle, Sparkles, ChevronDown, ChevronUp, LogOut, User, BarChart3, Award, TrendingUp, Hash, Trash2, Users, Zap, Target, Crown, Flame, Brain, Lightbulb, ChevronRight, RefreshCw } from 'lucide-react'
 
+const SESSION_MARKER = 'cookie-session'
+
 export default function SchuelerPage() {
   // Auth state
   const [studentToken, setStudentToken] = useState(null)
@@ -55,13 +57,11 @@ export default function SchuelerPage() {
   const [showHint, setShowHint] = useState(false)
   const [completedExercises, setCompletedExercises] = useState(new Set())
 
-  // Check for saved token on mount
+  // Restore the HttpOnly cookie session on mount.
   useEffect(() => {
-    const saved = localStorage.getItem('eduflow_student_token')
-    if (saved) {
-      setStudentToken(saved)
-      fetchStudentProfile(saved)
-    }
+    localStorage.removeItem('eduflow_student_token')
+    setStudentToken(SESSION_MARKER)
+    fetchStudentProfile(SESSION_MARKER)
   }, [])
 
   // Keep studentName in sync with student profile
@@ -84,7 +84,7 @@ export default function SchuelerPage() {
 
   const fetchStudentProfile = async (token) => {
     try {
-      const res = await fetch('/api/student/me', { headers: { 'Authorization': `Bearer ${token}` } })
+      const res = await fetch('/api/student/me', { cache: 'no-store' })
       if (res.ok) {
         const data = await res.json()
         setStudent(data)
@@ -94,7 +94,6 @@ export default function SchuelerPage() {
         loadMyClasses(token)
         loadClassAssignments(token)
       } else {
-        localStorage.removeItem('eduflow_student_token')
         setStudentToken(null)
       }
     } catch (e) {
@@ -122,14 +121,14 @@ export default function SchuelerPage() {
       if (!res.ok) {
         setAuthError(data.error || 'Fehler bei der Anmeldung.')
       } else {
-        setStudentToken(data.token)
+        setStudentToken(SESSION_MARKER)
         setStudent(data.student)
         setStudentName(data.student.display_name)
-        localStorage.setItem('eduflow_student_token', data.token)
-        loadMyResults(data.token)
-        loadGamification(data.token)
-        loadMyClasses(data.token)
-        loadClassAssignments(data.token)
+        localStorage.removeItem('eduflow_student_token')
+        loadMyResults(SESSION_MARKER)
+        loadGamification(SESSION_MARKER)
+        loadMyClasses(SESSION_MARKER)
+        loadClassAssignments(SESSION_MARKER)
       }
     } catch (e) {
       setAuthError('Verbindungsfehler.')
@@ -137,7 +136,12 @@ export default function SchuelerPage() {
     setAuthLoading(false)
   }
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' })
+    } catch (e) {
+      console.error('Logout error:', e)
+    }
     setStudentToken(null)
     setStudent(null)
     setMyResults(null)
@@ -343,16 +347,13 @@ export default function SchuelerPage() {
         studentName: studentName || student?.display_name || 'Unbekannt',
         answers: answersArray,
         duration,
-        studentToken: studentToken !== 'guest' ? studentToken : null,
       }
-      console.log('[EduFlow] Submitting quiz:', { code: accessCode, codeLength: accessCode.length, name: payload.studentName, answerCount: answersArray.length, payload: JSON.stringify(payload).substring(0, 300) })
       const res = await fetch('/api/student/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })
       const text = await res.text()
-      console.log('[EduFlow] Submit response:', res.status, text.substring(0, 200))
       let data
       try { data = JSON.parse(text) } catch (e) {
         setError('Serverfehler: Ungültige Antwort.')
@@ -459,7 +460,7 @@ export default function SchuelerPage() {
                   type="password"
                   value={authForm.password}
                   onChange={(e) => setAuthForm(prev => ({ ...prev, password: e.target.value }))}
-                  placeholder="Mindestens 4 Zeichen"
+                  placeholder="Mindestens 8 Zeichen"
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 text-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none transition-all"
                   required
                   minLength={4}
@@ -747,19 +748,8 @@ export default function SchuelerPage() {
           )
 
         case 'matching':
-          const pairsRaw = (q.answer || '').split(',').filter(Boolean)
-          const parsePair = (p) => {
-            const trimmed = p.trim()
-            if (trimmed.includes('\u2192')) return trimmed.split('\u2192').map(s => s.trim())
-            if (trimmed.includes(' - ')) return trimmed.split(' - ').map(s => s.trim())
-            if (trimmed.includes('-')) return [trimmed.split('-')[0].trim(), trimmed.split('-').slice(1).join('-').trim()]
-            return [trimmed, trimmed]
-          }
-          const parsedPairs = pairsRaw.map(parsePair)
-          const leftItems = parsedPairs.map(p => p[0])
-          const rightItems = parsedPairs.map((p, i) => ({ text: p[1], origIdx: i }))
-          const seed = (q.number || currentQuestion) * 7 + parsedPairs.length
-          const shuffledRight = [...rightItems].sort((a, b) => ((a.origIdx * 31 + seed) % 97) - ((b.origIdx * 31 + seed) % 97))
+          const leftItems = q.matching_left || []
+          const shuffledRight = (q.matching_right || []).map((text, index) => ({ text, origIdx: index }))
           const matchState = currentAnswer || { selectedLeft: null, matches: {} }
           const matches = matchState.matches || {}
           const selectedLeft = matchState.selectedLeft
@@ -826,12 +816,8 @@ export default function SchuelerPage() {
           )
 
         case 'ordering':
-          const items = (q.answer || '').split(',').map(s => s.trim()).filter(Boolean)
-          const orderSeed = (q.number || currentQuestion) * 13 + items.length
-          const shuffledItems = currentAnswer || [...items].sort((a, b) => {
-            const ai = items.indexOf(a), bi = items.indexOf(b)
-            return ((ai * 31 + orderSeed) % 89) - ((bi * 31 + orderSeed) % 89)
-          })
+          const items = q.ordering_items || []
+          const shuffledItems = currentAnswer || items
           return (
             <div className="space-y-3">
               <p className="text-sm text-gray-500">Bringe die Elemente in die richtige Reihenfolge.</p>

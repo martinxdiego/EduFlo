@@ -1,0 +1,82 @@
+name: EduFlow CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: EduFlow
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      MONGO_URL: mongodb://127.0.0.1:27017
+      DB_NAME: eduflow_ci
+      JWT_SECRET: ci-only-secret-with-at-least-32-characters
+      NEXT_PUBLIC_BASE_URL: http://127.0.0.1:3000
+      CORS_ORIGINS: http://127.0.0.1:3000
+      OPENAI_API_KEY: ci-placeholder-key
+      RUN_INTEGRATION_TESTS: '1'
+      TEST_BASE_URL: http://127.0.0.1:3000
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: EduFlow/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run security unit tests
+        run: npm run test:security
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Build production application
+        run: npm run build
+
+      - name: Run API authorization integration tests
+        run: |
+          npm start > "$RUNNER_TEMP/eduflow-server.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:3000/ > /dev/null; then
+              npm run test:integration
+              exit $?
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/eduflow-server.log"
+          exit 1
+
+      - name: Upload server log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eduflow-server-log
+          path: ${{ runner.temp }}/eduflow-server.log
+          if-no-files-found: ignore

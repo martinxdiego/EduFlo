@@ -38,7 +38,7 @@ import { saveAs } from 'file-saver'
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/ui/command'
 import { LEHRPLAN_CYCLES, searchCompetencies, getAllSubjects, getSubjectsForCycle, getCompetenciesForSubject, getTotalCompetencyCount } from '@/data/lehrplan21'
 import { getThemeById } from '@/data/worksheetThemes'
-import { DashboardView, GeneratorView, LibraryView, UploadView, SettingsView, AnalyticsView } from '@/components/views'
+import { DashboardView, GeneratorView, LibraryView, UploadView, StudioView, SettingsView, AnalyticsView } from '@/components/views'
 import { useEduFlow } from '@/contexts/EduFlowContext'
 import OnboardingHint from '@/components/OnboardingHint'
 import BottomTabBar from '@/components/BottomTabBar'
@@ -2824,6 +2824,7 @@ const AppContent = () => {
     { label: 'Lehrplan 21', icon: GraduationCap, action: () => { setActiveView('curriculum'); setCommandOpen(false) } },
     { label: 'Schuljahresplaner', icon: Calendar, action: () => { setActiveView('planner'); setCommandOpen(false) } },
     { label: 'Export-Historie', icon: Clock, action: () => { setActiveView('exports'); setCommandOpen(false) } },
+    { label: 'Studio öffnen', icon: Sparkles, action: () => { setActiveView('studio'); setCommandOpen(false) } },
     { label: 'Lernanalyse-Dashboard', icon: BarChart3, action: () => { setActiveView('analytics'); setCommandOpen(false) } },
     { label: 'Einstellungen', icon: Settings, action: () => { setActiveView('settings'); setCommandOpen(false) } },
     ...(selectedWorksheet ? [
@@ -2852,6 +2853,9 @@ const AppContent = () => {
       { id: 'classes', label: 'Klassen', icon: Users },
       { id: 'students', label: 'Schüler', icon: User },
       { id: 'analytics', label: 'Lernanalyse', icon: BarChart3 },
+    ]},
+    { label: 'Studio', items: [
+      { id: 'studio', label: 'Studio', icon: Sparkles },
     ]},
   ]
   const navItems = navGroups.flatMap(g => g.items)
@@ -4928,6 +4932,11 @@ const AppContent = () => {
           {/* ============ ANALYTICS VIEW ============ */}
           {activeView === 'analytics' && (
             <AnalyticsView />
+          )}
+
+          {/* ============ STUDIO VIEW ============ */}
+          {activeView === 'studio' && (
+            <StudioView />
           )}
 
           {/* ============ SETTINGS VIEW ============ */}
