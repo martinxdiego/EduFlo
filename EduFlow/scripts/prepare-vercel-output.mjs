@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readdir } from "node:fs/promises";
+import { copyFile, cp, mkdir, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
 if (process.env.VERCEL) {
@@ -16,8 +16,13 @@ if (process.env.VERCEL) {
       ),
     ),
   );
+  await cp(
+    resolve(sourceDirectory, "server"),
+    resolve(destinationDirectory, "server"),
+    { recursive: true },
+  );
 
   console.log(
-    `Prepared ${metadataFiles.length} Next.js metadata files for Vercel deployment.`,
+    `Prepared ${metadataFiles.length} Next.js metadata files and server manifests for Vercel deployment.`,
   );
 }
