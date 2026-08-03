@@ -1,5 +1,11 @@
+const selfHostingConfig = process.env.VERCEL
+  ? {}
+  : {
+      output: 'standalone',
+    };
+
 const nextConfig = {
-  output: 'standalone',
+  ...selfHostingConfig,
   outputFileTracingRoot: __dirname,
   images: {
     unoptimized: true,
