@@ -12,9 +12,6 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: EduFlow
     services:
       mongodb:
         image: mongo:7
@@ -44,28 +41,28 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: EduFlow/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install locked dependencies
         run: npm ci
 
       - name: Run security unit tests
-        run: npm run test:security
+        run: npm --workspace EduFlow run test:security
 
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 
       - name: Build production application
-        run: npm run build
+        run: npm --workspace EduFlow run build
 
       - name: Run API authorization integration tests
         run: |
-          npm start > "$RUNNER_TEMP/eduflow-server.log" 2>&1 &
+          npm --workspace EduFlow run start > "$RUNNER_TEMP/eduflow-server.log" 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
           for attempt in {1..30}; do
             if curl --fail --silent http://127.0.0.1:3000/ > /dev/null; then
-              npm run test:integration
+              npm --workspace EduFlow run test:integration
               exit $?
             fi
             sleep 1
