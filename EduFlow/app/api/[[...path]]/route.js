@@ -10,10 +10,12 @@ import {
   publicErrorMessage,
   verifyAuthToken,
 } from '@/lib/server/security'
+import { prepareWorksheetContent } from '@/lib/server/worksheet-quality'
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 const ALLOWED_UPLOAD_EXTENSIONS = new Set(['pdf', 'docx', 'txt', 'csv', 'rtf', 'pptx', 'xlsx', 'xls'])
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
+const OPENAI_GENERATION_MODEL = process.env.OPENAI_GENERATION_MODEL || 'gpt-4o'
 
 async function connectToMongo() {
   return getDatabase()
@@ -55,18 +57,20 @@ function getSystemPrompt(grade, subject, difficulty) {
     hard: 'schwierig (synthesis and evaluation)'
   }
 
-  return `You are an expert Swiss primary school teacher creating worksheets aligned with Lehrplan 21 (Swiss curriculum).
+  return `You are an expert Swiss teacher and meticulous instructional designer creating classroom-ready materials aligned with Lehrplan 21 (Swiss curriculum).
 
-Grade Level: ${grade} (Primarschule)
+Grade Level: ${grade} (${Number(grade) >= 7 ? 'Sekundarstufe I' : 'Primarschule'})
 Subject: ${subject}
 Difficulty: ${difficultyDescriptions[difficulty]}
 
-Create age-appropriate questions that:
-- Use clear, simple German suitable for grade ${grade}
-- Align with Lehrplan 21 competencies
-- Include varied question types (multiple choice, short answer, problem-solving)
-- Are engaging and relevant to Swiss students
-- Consider Swiss cultural context
+Quality requirements:
+- Use precise, natural German suitable for grade ${grade}; avoid generic AI phrasing.
+- Test understanding and application, not only recall. Build a deliberate progression from accessible to demanding tasks.
+- Every question must be unambiguous, factually defensible and solvable with the supplied information.
+- Every answer must be a concrete, complete model solution. Multiple-choice distractors must be plausible but clearly wrong.
+- Avoid duplicate questions, trick questions and unsupported claims. For source material, never invent facts beyond the source.
+- Align visibly with the requested Lehrplan-21 competency and use Swiss spelling (ss instead of ß).
+- Before returning JSON, silently verify question count, solutions, option consistency, point sum and age appropriateness.
 
 Format your response as a JSON object with:
 {
@@ -74,7 +78,7 @@ Format your response as a JSON object with:
   "questions": [
     {
       "number": 1,
-      "type": "multiple_choice" | "short_answer" | "problem_solving",
+      "type": "multiple_choice" | "true_false" | "open" | "math" | "matching" | "fill_blank" | "ordering" | "either_or",
       "question": "Question text",
       "options": ["A", "B", "C", "D"] (for multiple choice only),
       "answer": "Correct answer",
@@ -138,13 +142,41 @@ async function generateJsonContent({ provider, messages, taskType, context, temp
   }
 
   const completion = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: OPENAI_GENERATION_MODEL,
     messages,
     temperature,
     response_format: { type: 'json_object' }
   })
 
   return parseJsonObject(completion.choices[0].message.content)
+}
+
+async function ensureWorksheetQuality({ content, provider, messages, taskType, context, questionCount }) {
+  let prepared = prepareWorksheetContent(content, questionCount)
+  if (prepared.quality.passed) return prepared
+
+  const feedback = [...prepared.quality.errors, ...prepared.quality.warnings].join('\n- ')
+  const repairedContent = await generateJsonContent({
+    provider,
+    messages: [
+      ...messages,
+      { role: 'assistant', content: JSON.stringify(prepared.content) },
+      {
+        role: 'user',
+        content: `Qualitätskontrolle fehlgeschlagen. Korrigiere den Entwurf vollständig und gib nur das komplette JSON zurück. Behalte Thema, Niveau und exakt ${questionCount} Fragen bei.\n\nZu beheben:\n- ${feedback}`,
+      },
+    ],
+    taskType,
+    context: { ...context, qualityRepair: true },
+    temperature: 0.2,
+  })
+
+  prepared = prepareWorksheetContent(repairedContent, questionCount)
+  if (!prepared.quality.passed) {
+    console.error('Worksheet quality gate rejected AI output:', prepared.quality)
+    throw new Error('Der KI-Entwurf hat die Qualitätskontrolle nicht bestanden. Bitte erneut versuchen.')
+  }
+  return prepared
 }
 
 async function saveGeneratedWorksheet({
@@ -159,10 +191,16 @@ async function saveGeneratedWorksheet({
   resourceType,
   aiProvider
 }) {
+  const prepared = prepareWorksheetContent(content, questionCount || 10)
+  if (!prepared.quality.passed) {
+    console.error('Refusing to save low-quality worksheet:', prepared.quality)
+    throw new Error('Der KI-Entwurf hat die Qualitätskontrolle nicht bestanden. Bitte erneut versuchen.')
+  }
+  const checkedContent = prepared.content
   const worksheet = {
     id: uuidv4(),
     user_id: user.id,
-    title: content.title,
+    title: checkedContent.title,
     topic,
     grade,
     subject,
@@ -170,7 +208,15 @@ async function saveGeneratedWorksheet({
     resourceType: resourceType || 'worksheet',
     question_count: questionCount || 10,
     ai_provider: aiProvider,
-    content: { ...content, resourceType: resourceType || 'worksheet' },
+    content: {
+      ...checkedContent,
+      resourceType: resourceType || 'worksheet',
+      quality: {
+        score: prepared.quality.score,
+        warnings: prepared.quality.warnings,
+        checked_at: new Date().toISOString(),
+      },
+    },
     created_at: new Date()
   }
 
@@ -1131,23 +1177,33 @@ Regeln:
       const systemPrompt = getSystemPrompt(grade, subject, difficulty)
       const userPrompt = `Create a worksheet with ${questionCount || 10} questions about: ${topic}\n\nMake it engaging and appropriate for ${grade}. Klasse students in Switzerland.`
 
-      const worksheetContent = await generateJsonContent({
+      const generationMessages = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ]
+      const generationContext = {
+        topic,
+        grade,
+        subject,
+        difficulty,
+        questionCount: questionCount || 10,
+        resourceType: resourceType || 'worksheet',
+        competencyCode: competencyCode || null,
+        sourceText: sourceText || null
+      }
+      const draftContent = await generateJsonContent({
         provider: selectedProvider,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
-        ],
+        messages: generationMessages,
         taskType: getGenerationTaskType(resourceType, sourceText),
-        context: {
-          topic,
-          grade,
-          subject,
-          difficulty,
-          questionCount: questionCount || 10,
-          resourceType: resourceType || 'worksheet',
-          competencyCode: competencyCode || null,
-          sourceText: sourceText || null
-        }
+        context: generationContext
+      })
+      const { content: worksheetContent } = await ensureWorksheetQuality({
+        content: draftContent,
+        provider: selectedProvider,
+        messages: generationMessages,
+        taskType: getGenerationTaskType(resourceType, sourceText),
+        context: generationContext,
+        questionCount: questionCount || 10,
       })
 
       const worksheet = await saveGeneratedWorksheet({
@@ -1299,24 +1355,39 @@ ${sourceParts.join('\n\n')}
                 progress: 55
               })}\n\n`))
 
-              const worksheetContent = await generateJsonContent({
+              const generationMessages = [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userPrompt }
+              ]
+              const generationContext = {
+                topic,
+                grade,
+                subject,
+                difficulty,
+                questionCount: questionCount || 10,
+                questionTypes: questionTypes || [],
+                resourceType: resourceType || 'worksheet',
+                competencyCode: competencyCode || null,
+                hasSourceText: Boolean(sourceText)
+              }
+              const draftContent = await generateJsonContent({
                 provider: selectedProvider,
-                messages: [
-                  { role: "system", content: systemPrompt },
-                  { role: "user", content: userPrompt }
-                ],
+                messages: generationMessages,
                 taskType: getGenerationTaskType(resourceType, sourceText),
-                context: {
-                  topic,
-                  grade,
-                  subject,
-                  difficulty,
-                  questionCount: questionCount || 10,
-                  questionTypes: questionTypes || [],
-                  resourceType: resourceType || 'worksheet',
-                  competencyCode: competencyCode || null,
-                  hasSourceText: Boolean(sourceText)
-                }
+                context: generationContext
+              })
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                type: 'status',
+                message: 'Didaktische Qualität wird geprüft...',
+                progress: 82
+              })}\n\n`))
+              const { content: worksheetContent } = await ensureWorksheetQuality({
+                content: draftContent,
+                provider: selectedProvider,
+                messages: generationMessages,
+                taskType: getGenerationTaskType(resourceType, sourceText),
+                context: generationContext,
+                questionCount: questionCount || 10,
               })
 
               const questions = worksheetContent.questions || []
@@ -1358,7 +1429,7 @@ ${sourceParts.join('\n\n')}
             }
 
             const stream = await openai.chat.completions.create({
-              model: "gpt-4o-mini",
+              model: OPENAI_GENERATION_MODEL,
               messages: [
                 { role: "system", content: systemPrompt },
                 { role: "user", content: userPrompt }
@@ -1406,7 +1477,35 @@ ${sourceParts.join('\n\n')}
 
             await new Promise(resolve => setTimeout(resolve, 800))
 
-            const worksheetContent = parseJsonObject(fullContent)
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+              type: 'status',
+              message: 'Didaktische Qualität wird geprüft...',
+              progress: 92
+            })}\n\n`))
+
+            const generationMessages = [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt }
+            ]
+            const generationContext = {
+              topic,
+              grade,
+              subject,
+              difficulty,
+              questionCount: questionCount || 10,
+              questionTypes: questionTypes || [],
+              resourceType: resourceType || 'worksheet',
+              competencyCode: competencyCode || null,
+              hasSourceText: Boolean(sourceText)
+            }
+            const { content: worksheetContent } = await ensureWorksheetQuality({
+              content: parseJsonObject(fullContent),
+              provider: selectedProvider,
+              messages: generationMessages,
+              taskType: getGenerationTaskType(resourceType, sourceText),
+              context: generationContext,
+              questionCount: questionCount || 10,
+            })
             const worksheet = await saveGeneratedWorksheet({
               db,
               user,
@@ -1553,17 +1652,32 @@ ${sourceParts.join('\n\n')}
       const systemPrompt = getSystemPrompt(original.grade, original.subject, newDifficulty)
       const userPrompt = `Create a worksheet with ${original.question_count} questions about: ${original.topic}\n\nMake it engaging and appropriate for ${original.grade}. Klasse students in Switzerland.`
 
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
-        ],
-        temperature: 0.7,
-        response_format: { type: "json_object" }
+      const generationMessages = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ]
+      const generationContext = {
+        topic: original.topic,
+        grade: original.grade,
+        subject: original.subject,
+        difficulty: newDifficulty,
+        questionCount: original.question_count,
+        resourceType: original.resourceType || 'worksheet',
+      }
+      const draftContent = await generateJsonContent({
+        provider: 'openai',
+        messages: generationMessages,
+        taskType: getGenerationTaskType(original.resourceType, null),
+        context: generationContext,
       })
-
-      const worksheetContent = JSON.parse(completion.choices[0].message.content)
+      const { content: worksheetContent, quality } = await ensureWorksheetQuality({
+        content: draftContent,
+        provider: 'openai',
+        messages: generationMessages,
+        taskType: getGenerationTaskType(original.resourceType, null),
+        context: generationContext,
+        questionCount: original.question_count,
+      })
 
       // Save new worksheet
       const worksheet = {
@@ -1575,7 +1689,14 @@ ${sourceParts.join('\n\n')}
         subject: original.subject,
         difficulty: newDifficulty,
         question_count: original.question_count,
-        content: worksheetContent,
+        content: {
+          ...worksheetContent,
+          quality: {
+            score: quality.score,
+            warnings: quality.warnings,
+            checked_at: new Date().toISOString(),
+          },
+        },
         created_at: new Date(),
         regenerated_from: worksheetId
       }

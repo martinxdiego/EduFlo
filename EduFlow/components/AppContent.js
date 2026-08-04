@@ -43,6 +43,7 @@ import { useEduFlow } from '@/contexts/EduFlowContext'
 import OnboardingHint from '@/components/OnboardingHint'
 import BottomTabBar from '@/components/BottomTabBar'
 import MobileMoreSheet from '@/components/MobileMoreSheet'
+import AuthTransition from '@/components/AuthTransition'
 
 // ============================================================
 // CONSTANTS
@@ -244,7 +245,7 @@ const AppContent = () => {
     // Auth
     token, user, setUser, authMode, setAuthMode, authForm, setAuthForm,
     showOnboarding, setShowOnboarding, selectedTeacherType, setSelectedTeacherType,
-    savingTeacherType, handleAuth: _ctxHandleAuth, handleGoogleLogin, handleLogout,
+    savingTeacherType, authTransition, handleAuth: _ctxHandleAuth, handleGoogleLogin, handleLogout,
     handleSaveTeacherType: _ctxHandleSaveTeacherType,
     fetchCurrentUser, onAuthSuccess,
     // Worksheets
@@ -2863,6 +2864,10 @@ const AppContent = () => {
   // ============================================================
   // LANDING PAGE
   // ============================================================
+
+  if (authTransition) {
+    return <AuthTransition message={authTransition} />
+  }
 
   if (!token) {
     return (

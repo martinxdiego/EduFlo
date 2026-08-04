@@ -8,7 +8,7 @@
         "dev:webpack": "next dev --webpack --hostname 0.0.0.0 --port 3000",
         "build": "next build --webpack",
         "postbuild": "node scripts/prepare-vercel-output.mjs",
-        "test:security": "node --experimental-default-type=module --test tests/security.test.mjs tests/validation.test.mjs",
+        "test:security": "node --experimental-default-type=module --test tests/security.test.mjs tests/validation.test.mjs tests/worksheet-quality.test.mjs",
         "test:integration": "node --test tests/api-authz.integration.test.mjs",
         "test": "npm run test:security",
         "start": "next start"

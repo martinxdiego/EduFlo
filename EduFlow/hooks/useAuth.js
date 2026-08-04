@@ -1,5 +1,5 @@
 'use client'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 
 const SESSION_MARKER = 'cookie-session'
 
@@ -11,12 +11,26 @@ export function useAuth() {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [selectedTeacherType, setSelectedTeacherType] = useState(null)
   const [savingTeacherType, setSavingTeacherType] = useState(false)
+  const [isSessionChecking, setIsSessionChecking] = useState(true)
+  const [authTransition, setAuthTransition] = useState(null)
+  const transitionTimerRef = useRef(null)
+
+  const startAuthTransition = useCallback((message = 'Ihr Arbeitsbereich wird vorbereitet …') => {
+    if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current)
+    setAuthTransition(message)
+    transitionTimerRef.current = setTimeout(() => setAuthTransition(null), 850)
+  }, [])
+
+  useEffect(() => () => {
+    if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current)
+  }, [])
 
   const fetchCurrentUser = useCallback(async () => {
     try {
       const response = await fetch('/api/auth/me', { cache: 'no-store' })
       if (response.ok) {
         const userData = await response.json()
+        setToken(SESSION_MARKER)
         setUser(userData)
         if (!userData.teacher_type) {
           setShowOnboarding(true)
@@ -24,11 +38,16 @@ export function useAuth() {
         return userData
       } else {
         setToken(null)
+        setUser(null)
         return null
       }
     } catch (error) {
       console.error('Fehler beim Laden des Nutzers:', error)
+      setToken(null)
+      setUser(null)
       return null
+    } finally {
+      setIsSessionChecking(false)
     }
   }, [])
 
@@ -47,6 +66,7 @@ export function useAuth() {
     if (response.ok) {
       setToken(SESSION_MARKER)
       setUser(data.user)
+      startAuthTransition(authMode === 'login' ? 'Willkommen zurück – Dashboard wird geladen …' : 'Willkommen bei EduFlow – wir richten alles ein …')
       localStorage.removeItem('teachertime_token')
       if (!data.user.teacher_type) {
         setShowOnboarding(true)
@@ -59,7 +79,7 @@ export function useAuth() {
       : data.error === 'User already exists' ? 'Diese E-Mail-Adresse ist bereits registriert.'
       : data.error || 'Ein Fehler ist aufgetreten.'
     return { success: false, error: errorMsg }
-  }, [authMode, authForm])
+  }, [authMode, authForm, startAuthTransition])
 
   const handleGoogleLogin = useCallback(async () => {
     const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
@@ -116,6 +136,8 @@ export function useAuth() {
       if (response.ok) {
         setToken(SESSION_MARKER)
         setUser(data.user)
+        setIsSessionChecking(false)
+        startAuthTransition('Google-Anmeldung bestätigt – Dashboard wird geladen …')
         localStorage.removeItem('teachertime_token')
         if (!data.user.teacher_type) {
           setShowOnboarding(true)
@@ -127,7 +149,7 @@ export function useAuth() {
     } catch (err) {
       return { success: false, error: 'Verbindungsfehler bei Google-Anmeldung.' }
     }
-  }, [])
+  }, [startAuthTransition])
 
   const handleLogout = useCallback(async () => {
     try {
@@ -138,6 +160,7 @@ export function useAuth() {
     localStorage.removeItem('teachertime_token')
     setToken(null)
     setUser(null)
+    setAuthTransition(null)
   }, [])
 
   const handleSaveTeacherType = useCallback(async (onSuccess) => {
@@ -152,6 +175,7 @@ export function useAuth() {
       if (res.ok) {
         setUser(prev => ({ ...prev, teacher_type: selectedTeacherType }))
         setShowOnboarding(false)
+        startAuthTransition('Ihr persönlicher Arbeitsbereich ist bereit …')
         if (onSuccess) onSuccess()
       }
     } catch (err) {
@@ -159,12 +183,12 @@ export function useAuth() {
     } finally {
       setSavingTeacherType(false)
     }
-  }, [selectedTeacherType, token])
+  }, [selectedTeacherType, token, startAuthTransition])
 
   const initFromStorage = useCallback(() => {
     // JWTs from older versions must not remain readable by JavaScript.
     localStorage.removeItem('teachertime_token')
-    setToken(SESSION_MARKER)
+    setIsSessionChecking(true)
     return SESSION_MARKER
   }, [])
 
@@ -174,6 +198,7 @@ export function useAuth() {
     showOnboarding, setShowOnboarding,
     selectedTeacherType, setSelectedTeacherType,
     savingTeacherType,
+    isSessionChecking, authTransition,
     fetchCurrentUser, handleAuth, handleGoogleLogin, handleGoogleCallback, handleLogout, handleSaveTeacherType,
     initFromStorage,
   }

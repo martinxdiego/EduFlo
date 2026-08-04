@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { motion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 import { Button } from '@/ui/button'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
@@ -17,6 +17,7 @@ import {
   EyeOff,
   FileUp,
   Layers,
+  LoaderCircle,
   PencilLine,
   ShieldCheck,
   Sparkles,
@@ -74,6 +75,7 @@ export default function LandingPage({
 }) {
   const [showPassword, setShowPassword] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const reduceMotion = useReducedMotion()
   const isLogin = authMode === 'login'
 
   const switchMode = (mode) => {
@@ -93,8 +95,8 @@ export default function LandingPage({
   return (
     <main className="relative min-h-screen overflow-hidden bg-slate-50 text-slate-950">
       <div className="pointer-events-none absolute inset-0" aria-hidden="true">
-        <div className="absolute -left-32 top-20 h-80 w-80 rounded-full bg-blue-200/45 blur-3xl" />
-        <div className="absolute right-[-8rem] top-[-6rem] h-96 w-96 rounded-full bg-indigo-200/40 blur-3xl" />
+        <motion.div className="absolute -left-32 top-20 h-80 w-80 rounded-full bg-blue-200/45 blur-3xl" animate={reduceMotion ? undefined : { x: [0, 36, 0], y: [0, -20, 0] }} transition={{ duration: 13, repeat: Infinity, ease: 'easeInOut' }} />
+        <motion.div className="absolute right-[-8rem] top-[-6rem] h-96 w-96 rounded-full bg-indigo-200/40 blur-3xl" animate={reduceMotion ? undefined : { x: [0, -32, 0], y: [0, 28, 0] }} transition={{ duration: 16, repeat: Infinity, ease: 'easeInOut' }} />
         <div className="absolute bottom-0 left-1/2 h-64 w-[46rem] -translate-x-1/2 rounded-full bg-cyan-100/50 blur-3xl" />
       </div>
 
@@ -139,6 +141,54 @@ export default function LandingPage({
                   {item}
                 </span>
               ))}
+            </div>
+
+            <div className="relative mt-9 max-w-2xl rounded-3xl border border-white/80 bg-white/75 p-3 shadow-2xl shadow-blue-950/10 backdrop-blur-xl sm:p-4">
+              <motion.div
+                className="absolute -right-3 -top-4 hidden rounded-2xl border border-emerald-100 bg-white px-3 py-2 shadow-lg sm:flex sm:items-center sm:gap-2"
+                animate={reduceMotion ? undefined : { y: [0, -6, 0], rotate: [0, 1, 0] }}
+                transition={{ duration: 3.5, repeat: Infinity, ease: 'easeInOut' }}
+                aria-hidden="true"
+              >
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"><Check className="h-4 w-4" /></span>
+                <span className="text-xs font-semibold text-slate-700">Qualität geprüft</span>
+              </motion.div>
+              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full bg-red-300" /><span className="h-2.5 w-2.5 rounded-full bg-amber-300" /><span className="h-2.5 w-2.5 rounded-full bg-emerald-300" />
+                  </div>
+                  <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700">Lehrplan 21</span>
+                </div>
+                <div className="grid gap-4 p-4 sm:grid-cols-[0.75fr_1.25fr] sm:p-5">
+                  <div className="rounded-xl bg-slate-50 p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-600">Ihr Auftrag</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-900">Wasserkreislauf · 5. Klasse</p>
+                    <div className="mt-4 space-y-2 text-xs text-slate-500">
+                      <p className="rounded-lg bg-white px-3 py-2">Niveau: Mittel</p>
+                      <p className="rounded-lg bg-white px-3 py-2">10 abwechslungsreiche Fragen</p>
+                    </div>
+                  </div>
+                  <div className="space-y-2.5">
+                    {[['01', 'Verdunstung erklären'], ['02', 'Wolkenbildung zuordnen'], ['03', 'Kreislauf beschriften']].map(([number, text], index) => (
+                      <motion.div
+                        key={number}
+                        className="flex items-center gap-3 rounded-xl border border-slate-100 bg-white px-3 py-2.5 shadow-sm"
+                        animate={reduceMotion ? undefined : { x: [0, index === 1 ? 4 : 2, 0] }}
+                        transition={{ duration: 3.2 + index, repeat: Infinity, ease: 'easeInOut' }}
+                      >
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-[11px] font-bold text-blue-700">{number}</span>
+                        <span className="text-xs font-medium text-slate-700">{text}</span>
+                        <Check className="ml-auto h-3.5 w-3.5 text-emerald-500" aria-hidden="true" />
+                      </motion.div>
+                    ))}
+                    <div className="pt-1">
+                      <div className="mb-1.5 flex justify-between text-[10px] font-medium text-slate-400"><span>Entwurf</span><span>bereit</span></div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-slate-100"><motion.div className="h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-500" initial={{ width: '72%' }} animate={{ width: '100%' }} transition={{ duration: reduceMotion ? 0 : 1.8, repeat: reduceMotion ? 0 : Infinity, repeatDelay: 2 }} /></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
 
           </motion.div>
@@ -253,7 +303,8 @@ export default function LandingPage({
                   )}
 
                   <Button type="submit" disabled={isSubmitting} className="h-12 w-full text-base font-semibold">
-                    {isSubmitting ? 'Bitte warten …' : isLogin ? 'Sicher anmelden' : 'Kostenloses Konto erstellen'}
+                    {isSubmitting && <LoaderCircle className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />}
+                    {isSubmitting ? 'Sichere Anmeldung läuft …' : isLogin ? 'Sicher anmelden' : 'Kostenloses Konto erstellen'}
                     {!isSubmitting && <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />}
                   </Button>
 
