@@ -1,3 +1,5 @@
+const path = require('node:path');
+
 const selfHostingConfig = process.env.VERCEL
   ? {}
   : {
@@ -6,7 +8,14 @@ const selfHostingConfig = process.env.VERCEL
 
 const nextConfig = {
   ...selfHostingConfig,
-  outputFileTracingRoot: __dirname,
+  // npm hoists workspace dependencies to the repository root. Vercel must be
+  // allowed to trace those files when packaging each serverless function.
+  outputFileTracingRoot: process.env.VERCEL
+    ? path.join(__dirname, '..')
+    : __dirname,
+  outputFileTracingIncludes: {
+    '/*': ['../node_modules/@swc/helpers/**/*'],
+  },
   images: {
     unoptimized: true,
   },
