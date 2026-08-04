@@ -2866,6 +2866,28 @@ WICHTIG:
                   sectionContent = JSON.parse(repairResponse.choices[0].message.content)
                   prepared = prepareDossierSection(sectionContent, { sectionType, grade })
                 }
+                if (sectionType === 'exercises' && !prepared.quality.passed) {
+                  const exerciseResponse = await openai.chat.completions.create({
+                    model: dossierModel,
+                    messages: [
+                      {
+                        role: 'system',
+                        content: `Du erstellst exakt vier hochwertige, unterschiedliche Aufgaben für die ${grade}. Klasse im Fach ${subject}. Antworte nur als JSON: {"questions":[{"type":"open|multiple_choice|fill_blank|true_false","question":"...","options":["...","...","...","..."],"answer":"...","explanation":"...","answerLines":3}]}. Bei multiple_choice muss answer exakt einer Option entsprechen. Jede Aufgabe braucht eine konkrete Musterlösung.`,
+                      },
+                      { role: 'user', content: `Thema: ${topic}. Sektion: ${sectionTitle}. Lernziele: ${objectivesText}` },
+                    ],
+                    temperature: 0.2,
+                    response_format: { type: 'json_object' },
+                  })
+                  addDossierUsage(exerciseResponse.usage)
+                  const supplemental = JSON.parse(exerciseResponse.choices[0].message.content)
+                  const heading = prepared.content.blocks.find(block => block.type === 'heading') || { type: 'heading', content: { text: sectionTitle, level: 2 } }
+                  sectionContent = {
+                    blocks: [heading, ...(supplemental.questions || []).slice(0, 4).map(question => ({ type: 'question', content: question }))],
+                    summary: sectionContent.summary || `Übungen zu ${sectionTitle}`,
+                  }
+                  prepared = prepareDossierSection(sectionContent, { sectionType, grade })
+                }
                 if (!prepared.quality.passed) throw new Error(prepared.quality.errors.join(' '))
                 sectionContent = prepared.content
               } catch (e) {
