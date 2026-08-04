@@ -17,6 +17,16 @@ test('rejects exercise sections without enough solved questions', () => {
   assert.match(result.quality.errors.join(' '), /Musterloesung/)
 })
 
+test('drops malformed optional questions from theory sections', () => {
+  const result = prepareDossierSection({ blocks: [
+    { type: 'heading', content: { text: 'Theorie' } },
+    { type: 'text', content: { html: 'Ein ausreichend langer Erklaertext. '.repeat(30) } },
+    { type: 'question', content: {} },
+  ] }, { sectionType: 'theory' })
+  assert.equal(result.quality.passed, true)
+  assert.equal(result.content.blocks.some(block => block.type === 'question'), false)
+})
+
 test('evaluates complete dossiers and detects duplicates', () => {
   const sections = Array.from({ length: 6 }, (_, i) => ({ blocks: i === 2 ? Array.from({ length: 5 }, () => ({ type: 'question', content: { question: 'Gleich?', answer: 'Ja' } })) : [] }))
   const result = evaluateDossier(sections, ['Ich kann es.'])

@@ -36,9 +36,14 @@ function normalizeBlock(block, index) {
 }
 
 export function prepareDossierSection(sectionContent, { sectionType = 'theory', grade = 5 } = {}) {
-  const blocks = arr(sectionContent?.blocks).map(normalizeBlock)
+  let blocks = arr(sectionContent?.blocks).map(normalizeBlock)
   const errors = []
   const warnings = []
+  if (!['exercises', 'source_text'].includes(sectionType)) {
+    const before = blocks.length
+    blocks = blocks.filter(block => block.type !== 'question' || (text(block.content.question) && text(block.content.answer)))
+    if (blocks.length < before) warnings.push('Unvollständige optionale Aufgaben wurden aus dieser Sektion entfernt.')
+  }
   if (blocks.length < 2) errors.push('Die Sektion hat zu wenig Inhalt.')
   if (!blocks.some(block => block.type === 'heading')) errors.push('Eine klare Ueberschrift fehlt.')
   const questions = blocks.filter(block => block.type === 'question')
