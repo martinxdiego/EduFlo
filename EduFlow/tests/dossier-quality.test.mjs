@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { evaluateDossier, prepareDossierSection, validateDossierOutline } from '../lib/server/dossier-quality.js'
+import { deduplicateDossierQuestions, evaluateDossier, prepareDossierSection, validateDossierOutline } from '../lib/server/dossier-quality.js'
 
 test('validates a pedagogical outline', () => {
   const result = validateDossierOutline({ title: 'Wasser', sections: [
@@ -43,4 +43,19 @@ test('evaluates complete dossiers and detects duplicates', () => {
   const result = evaluateDossier(sections, ['Ich kann es.'])
   assert.equal(result.passed, false)
   assert.match(result.errors.join(' '), /Doppelte/)
+})
+
+test('removes duplicate questions across sections without mutating the input', () => {
+  const sections = [
+    { title: 'A', blocks: [{ type: 'question', content: { question: 'Was ist Wasser?', answer: 'H2O' } }] },
+    { title: 'B', blocks: [
+      { type: 'heading', content: { text: 'B' } },
+      { type: 'question', content: { question: '  WAS IST WASSER? ', answer: 'H2O' } },
+      { type: 'question', content: { question: 'Wie verdunstet Wasser?', answer: 'Durch Waerme' } },
+    ] },
+  ]
+  const result = deduplicateDossierQuestions(sections)
+  assert.equal(result.removed, 1)
+  assert.equal(result.sections.flatMap(section => section.blocks).filter(block => block.type === 'question').length, 2)
+  assert.equal(sections[1].blocks.length, 3)
 })

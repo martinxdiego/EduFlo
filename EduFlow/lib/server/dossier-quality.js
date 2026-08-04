@@ -62,6 +62,25 @@ export function prepareDossierSection(sectionContent, { sectionType = 'theory', 
   return { content: { blocks, summary: text(sectionContent?.summary) }, quality: { passed: errors.length === 0, errors, warnings, score } }
 }
 
+export function deduplicateDossierQuestions(sections) {
+  const seen = new Set()
+  let removed = 0
+  const uniqueSections = arr(sections).map(section => ({
+    ...section,
+    blocks: arr(section?.blocks).filter(block => {
+      if (block?.type !== 'question') return true
+      const normalized = text(block?.content?.question).toLowerCase()
+      if (!normalized || !seen.has(normalized)) {
+        if (normalized) seen.add(normalized)
+        return true
+      }
+      removed += 1
+      return false
+    }),
+  }))
+  return { sections: uniqueSections, removed }
+}
+
 export function evaluateDossier(sections, objectives = []) {
   const errors = []
   const allBlocks = arr(sections).flatMap(section => arr(section.blocks))

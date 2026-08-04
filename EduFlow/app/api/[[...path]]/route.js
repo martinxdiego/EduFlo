@@ -14,7 +14,7 @@ import { prepareWorksheetContent } from '@/lib/server/worksheet-quality'
 import { completeGeneration, failGeneration, startGeneration } from '@/lib/server/ai-telemetry'
 import { generateOpenAISpeech } from '@/lib/server/openai-service'
 import { validateChatToolCall } from '@/lib/chat-tools'
-import { evaluateDossier, prepareDossierSection, validateDossierOutline } from '@/lib/server/dossier-quality'
+import { deduplicateDossierQuestions, evaluateDossier, prepareDossierSection, validateDossierOutline } from '@/lib/server/dossier-quality'
 import { logEvent } from '@/lib/server/logger'
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
@@ -2931,6 +2931,18 @@ WICHTIG:
               } })
 
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'section_complete', section: sectionTitle, sectionIndex: idx, totalSections, blockCount: blocks.length, progress: progressBase + Math.floor(70 / totalSections) })}\n\n`))
+            }
+
+            const deduplicated = deduplicateDossierQuestions(generatedSections)
+            generatedSections.splice(0, generatedSections.length, ...deduplicated.sections)
+            allQuestions.splice(0, allQuestions.length, ...generatedSections.flatMap(section =>
+              (section.blocks || []).filter(block => block.type === 'question').map(block => block.content || {})
+            ))
+            if (deduplicated.removed > 0) {
+              console.info(JSON.stringify({
+                level: 'info', message: 'dossier.questions.deduplicated', dossierId,
+                removed: deduplicated.removed, remaining: allQuestions.length,
+              }))
             }
 
             // STEP 3: Generate solutions section
