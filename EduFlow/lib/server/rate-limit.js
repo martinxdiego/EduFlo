@@ -2,6 +2,9 @@ import { createHash } from 'crypto'
 import { verifyAuthToken } from './security.js'
 
 export const DEFAULT_RATE_LIMIT_POLICIES = [
+  { matches: (route, method) => method === 'POST' && route === '/auth/forgot-password', bucket: 'password-reset-request', limit: 5, windowMs: 30 * 60 * 1000 },
+  { matches: (route, method) => method === 'POST' && route === '/auth/reset-password', bucket: 'password-reset-submit', limit: 10, windowMs: 30 * 60 * 1000 },
+  { matches: (route, method) => method === 'DELETE' && route === '/auth/account', bucket: 'account-deletion', limit: 5, windowMs: 30 * 60 * 1000 },
   { matches: (route, method) => method === 'POST' && ['/auth/register', '/auth/login', '/auth/google', '/student/register', '/student/login'].includes(route), bucket: 'auth', limit: 10, windowMs: 15 * 60 * 1000 },
   { matches: (route, method) => method === 'GET' && route.startsWith('/student/assignment/'), bucket: 'assignment-read', limit: 60, windowMs: 10 * 60 * 1000 },
   { matches: (route, method) => method === 'POST' && route === '/student/submit', bucket: 'assignment-submit', limit: 20, windowMs: 10 * 60 * 1000 },

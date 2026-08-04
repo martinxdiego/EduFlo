@@ -214,7 +214,14 @@ export default function LandingPage({
                   </div>
 
                   <div>
-                    <Label htmlFor="auth-password" className="text-sm font-medium">Passwort</Label>
+                    <div className="flex items-center justify-between gap-4">
+                      <Label htmlFor="auth-password" className="text-sm font-medium">Passwort</Label>
+                      {isLogin && (
+                        <Link href="/passwort-zuruecksetzen" className="text-xs font-medium text-blue-700 transition hover:text-blue-900 hover:underline">
+                          Passwort vergessen?
+                        </Link>
+                      )}
+                    </div>
                     <div className="relative mt-1.5">
                       <Input
                         id="auth-password"

@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { loginSchema, registerSchema, teacherTypeSchema } from '../lib/server/schemas/auth.js'
+import {
+  deleteAccountSchema,
+  forgotPasswordSchema,
+  loginSchema,
+  registerSchema,
+  resetPasswordSchema,
+  teacherTypeSchema,
+} from '../lib/server/schemas/auth.js'
 import { commentSchema, shareWorksheetSchema } from '../lib/server/schemas/collaboration.js'
 import { studentLoginSchema, studentRegisterSchema } from '../lib/server/schemas/student-auth.js'
 import { classSchema, niveauSchema } from '../lib/server/schemas/classes.js'
@@ -22,6 +29,9 @@ test('auth schemas normalize identities and reject unexpected fields', () => {
     role: 'admin',
   }).success, false)
   assert.equal(teacherTypeSchema.safeParse({ teacher_type: 'admin' }).success, false)
+  assert.equal(forgotPasswordSchema.parse({ email: ' Teacher@School.CH ' }).email, 'teacher@school.ch')
+  assert.equal(resetPasswordSchema.safeParse({ token: 'short', password: 'secure-password' }).success, false)
+  assert.equal(deleteAccountSchema.safeParse({ email: 'teacher@school.ch', password: 'x', confirm: true }).success, false)
 })
 
 test('JSON parser rejects invalid, oversized and schema-invalid requests', async () => {

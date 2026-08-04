@@ -4,10 +4,16 @@ import { NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
 import { getDatabase } from '@/lib/server/database'
 import { checkRateLimit } from '@/lib/server/rate-limit'
+import { deleteTeacherAccountData } from '@/lib/server/account-deletion'
+import { isTransactionalEmailConfigured, sendPasswordResetEmail } from '@/lib/server/email'
+import { createPasswordResetToken, hashPasswordResetToken } from '@/lib/server/password-reset'
 import {
+  deleteAccountSchema,
+  forgotPasswordSchema,
   googleAuthSchema,
   loginSchema,
   registerSchema,
+  resetPasswordSchema,
   teacherTypeSchema,
 } from '@/lib/server/schemas/auth'
 import {
@@ -49,8 +55,8 @@ function signTeacherSession(user) {
 }
 
 function safeUser(user) {
-  const { _id, password_hash, ...safe } = user
-  return safe
+  const { _id, password_hash, google_id, ...safe } = user
+  return { ...safe, has_password: Boolean(password_hash) }
 }
 
 async function register(request, db) {
@@ -89,6 +95,117 @@ async function login(request, db) {
   }
 
   return authenticatedResponse({ user: safeUser(user) }, signTeacherSession(user), request)
+}
+
+async function forgotPassword(request, db) {
+  if (!isTransactionalEmailConfigured()) {
+    return jsonResponse(
+      { error: 'Der Passwort-Reset ist derzeit noch nicht verfügbar.' },
+      { status: 503 },
+      request,
+    )
+  }
+
+  const parsed = await parseJsonBody(request, forgotPasswordSchema)
+  if (!parsed.success) return validationResponse(parsed, request)
+
+  const genericResponse = {
+    message: 'Falls ein Konto mit dieser E-Mail-Adresse existiert, wurde ein Link zum Zurücksetzen versendet.',
+  }
+  const user = await db.collection('users').findOne({ email: parsed.data.email })
+  if (!user) return jsonResponse(genericResponse, { status: 202 }, request)
+
+  const { token, tokenHash, expiresAt } = createPasswordResetToken()
+  const resetRecord = {
+    id: uuidv4(),
+    user_id: user.id,
+    token_hash: tokenHash,
+    created_at: new Date(),
+    expires_at: expiresAt,
+    used_at: null,
+  }
+
+  await db.collection('password_reset_tokens').deleteMany({ user_id: user.id })
+  await db.collection('password_reset_tokens').insertOne(resetRecord)
+
+  const origin = process.env.NEXT_PUBLIC_BASE_URL
+    ? new URL(process.env.NEXT_PUBLIC_BASE_URL).origin
+    : new URL(request.url).origin
+
+  try {
+    await sendPasswordResetEmail({
+      to: user.email,
+      name: user.name,
+      resetUrl: `${origin}/passwort-zuruecksetzen?token=${encodeURIComponent(token)}`,
+      idempotencyKey: `password-reset/${resetRecord.id}`,
+    })
+  } catch (error) {
+    await db.collection('password_reset_tokens').deleteOne({ id: resetRecord.id })
+    console.error('Password reset email delivery failed')
+  }
+
+  return jsonResponse(genericResponse, { status: 202 }, request)
+}
+
+async function resetPassword(request, db) {
+  const parsed = await parseJsonBody(request, resetPasswordSchema)
+  if (!parsed.success) return validationResponse(parsed, request)
+
+  const passwordHash = await bcrypt.hash(parsed.data.password, 12)
+  const now = new Date()
+  const resetRecord = await db.collection('password_reset_tokens').findOneAndUpdate(
+    {
+      token_hash: hashPasswordResetToken(parsed.data.token),
+      used_at: null,
+      expires_at: { $gt: now },
+    },
+    { $set: { used_at: now } },
+    { returnDocument: 'after' },
+  )
+
+  if (!resetRecord) {
+    return jsonResponse({ error: 'Dieser Link ist ungültig oder abgelaufen.' }, { status: 400 }, request)
+  }
+
+  const updated = await db.collection('users').updateOne(
+    { id: resetRecord.user_id },
+    { $set: { password_hash: passwordHash, password_changed_at: now } },
+  )
+  if (updated.matchedCount !== 1) {
+    return jsonResponse({ error: 'Dieser Link ist ungültig oder abgelaufen.' }, { status: 400 }, request)
+  }
+
+  await db.collection('password_reset_tokens').deleteMany({ user_id: resetRecord.user_id })
+  return jsonResponse({ success: true, message: 'Ihr Passwort wurde aktualisiert.' }, undefined, request)
+}
+
+async function deleteAccount(request, db) {
+  const session = verifyAuthToken(request)
+  if (!session?.userId || session.role === 'student') {
+    return jsonResponse({ error: 'Unauthorized' }, { status: 401 }, request)
+  }
+
+  const parsed = await parseJsonBody(request, deleteAccountSchema)
+  if (!parsed.success) return validationResponse(parsed, request)
+
+  const user = await db.collection('users').findOne({ id: session.userId })
+  const emailMatches = user && user.email === parsed.data.email
+  const passwordMatches = !user?.password_hash
+    || (Boolean(parsed.data.password) && await bcrypt.compare(parsed.data.password, user.password_hash))
+
+  if (!emailMatches || !passwordMatches) {
+    return jsonResponse({ error: 'Die Kontobestätigung ist nicht korrekt.' }, { status: 401 }, request)
+  }
+
+  const result = await deleteTeacherAccountData(db, user.id)
+  if (result.deletedCount !== 1) {
+    return jsonResponse({ error: 'User not found' }, { status: 404 }, request)
+  }
+
+  return applyCorsHeaders(
+    clearSessionCookie(NextResponse.json({ success: true })),
+    request,
+  )
 }
 
 async function currentUser(request, db) {
@@ -217,9 +334,12 @@ async function handleAuthRoute(request, { params }) {
 
     if (action === 'register' && method === 'POST') return register(request, db)
     if (action === 'login' && method === 'POST') return login(request, db)
+    if (action === 'forgot-password' && method === 'POST') return forgotPassword(request, db)
+    if (action === 'reset-password' && method === 'POST') return resetPassword(request, db)
     if (action === 'me' && method === 'GET') return currentUser(request, db)
     if (action === 'teacher-type' && method === 'PATCH') return updateTeacherType(request, db)
     if (action === 'google' && method === 'POST') return googleLogin(request, db)
+    if (action === 'account' && method === 'DELETE') return deleteAccount(request, db)
     return jsonResponse({ error: 'Route not found' }, { status: 404 }, request)
   } catch (error) {
     console.error('Auth API error:', error)
@@ -230,3 +350,4 @@ async function handleAuthRoute(request, { params }) {
 export const GET = handleAuthRoute
 export const POST = handleAuthRoute
 export const PATCH = handleAuthRoute
+export const DELETE = handleAuthRoute

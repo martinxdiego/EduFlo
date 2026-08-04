@@ -19,6 +19,9 @@ async function ensureOperationalIndexes(db) {
     indexPromise = Promise.all([
       db.collection('rate_limits').createIndex({ key: 1 }, { unique: true }),
       db.collection('rate_limits').createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 }),
+      db.collection('password_reset_tokens').createIndex({ token_hash: 1 }, { unique: true }),
+      db.collection('password_reset_tokens').createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 }),
+      db.collection('password_reset_tokens').createIndex({ user_id: 1 }),
     ]).catch((error) => {
       indexPromise = null
       throw error

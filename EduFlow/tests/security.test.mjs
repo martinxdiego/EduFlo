@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import jwt from 'jsonwebtoken'
 import { DEFAULT_RATE_LIMIT_POLICIES } from '../lib/server/rate-limit.js'
+import { createPasswordResetToken, hashPasswordResetToken } from '../lib/server/password-reset.js'
 import {
   applyCorsHeaders,
   hasBoundedJsonSize,
@@ -16,6 +17,16 @@ test('password policy enforces sensible boundaries', () => {
   assert.equal(isStrongPassword('12345678'), true)
   assert.equal(isStrongPassword('x'.repeat(128)), true)
   assert.equal(isStrongPassword('x'.repeat(129)), false)
+})
+
+test('password reset tokens are random, stored as hashes and expire after one hour', () => {
+  const now = Date.now()
+  const first = createPasswordResetToken(now)
+  const second = createPasswordResetToken(now)
+  assert.notEqual(first.token, second.token)
+  assert.notEqual(first.token, first.tokenHash)
+  assert.equal(first.tokenHash, hashPasswordResetToken(first.token))
+  assert.equal(first.expiresAt.getTime(), now + 60 * 60 * 1000)
 })
 
 test('JSON payload size guard rejects oversized and circular input', () => {
@@ -122,4 +133,17 @@ test('AI-backed class insights have a dedicated per-user rate limit', () => {
   assert.equal(policy?.bucket, 'class-insights')
   assert.equal(policy?.limit, 10)
   assert.equal(policy?.windowMs, 60 * 60 * 1000)
+})
+
+test('password reset endpoints have dedicated abuse limits', () => {
+  const forgot = DEFAULT_RATE_LIMIT_POLICIES.find((candidate) => candidate.matches('/auth/forgot-password', 'POST'))
+  const reset = DEFAULT_RATE_LIMIT_POLICIES.find((candidate) => candidate.matches('/auth/reset-password', 'POST'))
+  assert.equal(forgot?.limit, 5)
+  assert.equal(reset?.limit, 10)
+})
+
+test('account deletion confirmation has a dedicated abuse limit', () => {
+  const policy = DEFAULT_RATE_LIMIT_POLICIES.find((candidate) => candidate.matches('/auth/account', 'DELETE'))
+  assert.equal(policy?.limit, 5)
+  assert.equal(policy?.windowMs, 30 * 60 * 1000)
 })

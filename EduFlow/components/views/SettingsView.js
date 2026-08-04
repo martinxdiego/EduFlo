@@ -1,4 +1,5 @@
 'use client'
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Button } from '@/ui/button'
 import { Input } from '@/ui/input'
@@ -8,16 +9,43 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/ui/badge'
 import { Separator } from '@/ui/separator'
 import { Switch } from '@/ui/switch'
-import { User, Settings, Crown, Bell, Printer, CheckCircle2 } from 'lucide-react'
+import { Alert, AlertDescription } from '@/ui/alert'
+import { User, Settings, Crown, Bell, Printer, CheckCircle2, ShieldAlert, Trash2 } from 'lucide-react'
 import { useEduFlow } from '@/contexts/EduFlowContext'
 
 export default function SettingsView({ GRADES, SUBJECTS, DIFFICULTY_LABELS }) {
   const ctx = useEduFlow()
-  const { user, token, settings, setSettings, handleSaveSettings, setSuccessMessage } = ctx
+  const { user, token, settings, setSettings, handleSaveSettings, setSuccessMessage, handleLogout } = ctx
+  const [deleteEmail, setDeleteEmail] = useState('')
+  const [deletePassword, setDeletePassword] = useState('')
+  const [deleteError, setDeleteError] = useState('')
+  const [deleteLoading, setDeleteLoading] = useState(false)
 
   const handleSave = () => {
     handleSaveSettings()
     setSuccessMessage('Einstellungen gespeichert.')
+  }
+
+  const canDelete = deleteEmail.trim().toLowerCase() === user?.email?.toLowerCase()
+    && (user?.has_password === false || Boolean(deletePassword))
+
+  const handleDeleteAccount = async () => {
+    setDeleteError('')
+    setDeleteLoading(true)
+    try {
+      const response = await fetch('/api/auth/account', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: deleteEmail, password: deletePassword }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Das Konto konnte nicht gelöscht werden.')
+      await handleLogout()
+      window.location.assign('/')
+    } catch (error) {
+      setDeleteError(error.message)
+      setDeleteLoading(false)
+    }
   }
 
   return (
@@ -95,6 +123,55 @@ export default function SettingsView({ GRADES, SUBJECTS, DIFFICULTY_LABELS }) {
         </Card>
 
         <Button className="w-full btn-premium" onClick={handleSave}><CheckCircle2 className="h-4 w-4 mr-2" /> Einstellungen speichern</Button>
+
+        <Card className="border-red-200 bg-red-50/40 shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg text-red-900">
+              <ShieldAlert className="h-5 w-5 text-red-600" /> Konto dauerhaft löschen
+            </CardTitle>
+            <CardDescription className="leading-6 text-red-800/80">
+              Ihr Profil, Ihre Materialien, Dossiers, Klassen, Aufträge und zugehörige Abgaben werden unwiderruflich gelöscht.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label htmlFor="delete-email">Zur Bestätigung Ihre E-Mail-Adresse eingeben</Label>
+              <Input
+                id="delete-email"
+                type="email"
+                autoComplete="email"
+                placeholder={user?.email || 'name@schule.ch'}
+                value={deleteEmail}
+                onChange={(event) => setDeleteEmail(event.target.value)}
+                className="mt-1.5 border-red-200 bg-white"
+              />
+            </div>
+            {user?.has_password !== false && (
+              <div>
+                <Label htmlFor="delete-password">Aktuelles Passwort</Label>
+                <Input
+                  id="delete-password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={deletePassword}
+                  onChange={(event) => setDeletePassword(event.target.value)}
+                  className="mt-1.5 border-red-200 bg-white"
+                />
+              </div>
+            )}
+            {deleteError && <Alert variant="destructive" role="alert"><AlertDescription>{deleteError}</AlertDescription></Alert>}
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={!canDelete || deleteLoading}
+              onClick={handleDeleteAccount}
+              className="w-full sm:w-auto"
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              {deleteLoading ? 'Konto wird gelöscht …' : 'Mein Konto dauerhaft löschen'}
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     </motion.div>
   )

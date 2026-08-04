@@ -3,6 +3,7 @@ import test from 'node:test'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { MongoClient } from 'mongodb'
+import { hashPasswordResetToken } from '../lib/server/password-reset.js'
 
 const enabled = process.env.RUN_INTEGRATION_TESTS === '1'
 
@@ -26,6 +27,11 @@ if (!enabled) {
     const submissionId = `${runId}-submission`
     const ownerEmail = `${runId}@example.test`
     const password = 'Secure-test-password-42'
+    const newPassword = 'New-secure-test-password-84'
+    const resetToken = `${runId}-password-reset-token-with-enough-entropy`
+    const deleteUserId = `${runId}-delete-user`
+    const deleteUserEmail = `${runId}-delete@example.test`
+    const deleteWorksheetId = `${runId}-delete-worksheet`
     const client = new MongoClient(mongoUrl)
 
     await client.connect()
@@ -52,6 +58,16 @@ if (!enabled) {
           month_reset_date: new Date(),
           created_at: new Date(),
         },
+        {
+          id: deleteUserId,
+          email: deleteUserEmail,
+          name: 'CI Delete User',
+          password_hash: await bcrypt.hash(password, 4),
+          subscription_tier: 'free',
+          worksheets_used_this_month: 0,
+          month_reset_date: new Date(),
+          created_at: new Date(),
+        },
       ])
       await db.collection('students').insertOne({
         id: studentId,
@@ -65,6 +81,13 @@ if (!enabled) {
         user_id: ownerId,
         title: 'Private CI worksheet',
         content: { questions: [{ number: 1, type: 'matching', question: 'Ordne zu', answer: 'A→1,B→2', points: 2 }] },
+        created_at: new Date(),
+      })
+      await db.collection('worksheets').insertOne({
+        id: deleteWorksheetId,
+        user_id: deleteUserId,
+        title: 'Delete me',
+        content: { questions: [] },
         created_at: new Date(),
       })
       await db.collection('classes').insertOne({
@@ -217,6 +240,58 @@ if (!enabled) {
       })
       assert.equal(studentGemini.status, 401)
 
+      await db.collection('password_reset_tokens').insertOne({
+        id: `${runId}-reset-record`,
+        user_id: ownerId,
+        token_hash: hashPasswordResetToken(resetToken),
+        created_at: new Date(),
+        expires_at: new Date(Date.now() + 60_000),
+        used_at: null,
+      })
+      const resetPassword = await fetch(`${baseUrl}/api/auth/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: baseUrl },
+        body: JSON.stringify({ token: resetToken, password: newPassword }),
+      })
+      assert.equal(resetPassword.status, 200)
+
+      const reusedReset = await fetch(`${baseUrl}/api/auth/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: baseUrl },
+        body: JSON.stringify({ token: resetToken, password }),
+      })
+      assert.equal(reusedReset.status, 400)
+
+      const oldPasswordLogin = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: baseUrl },
+        body: JSON.stringify({ email: ownerEmail, password }),
+      })
+      assert.equal(oldPasswordLogin.status, 401)
+
+      const newPasswordLogin = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: baseUrl },
+        body: JSON.stringify({ email: ownerEmail, password: newPassword }),
+      })
+      assert.equal(newPasswordLogin.status, 200)
+
+      const deleteLogin = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: baseUrl },
+        body: JSON.stringify({ email: deleteUserEmail, password }),
+      })
+      assert.equal(deleteLogin.status, 200)
+      const deleteCookie = (deleteLogin.headers.get('set-cookie') || '').split(';', 1)[0]
+      const deleteAccount = await fetch(`${baseUrl}/api/auth/account`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Cookie: deleteCookie, Origin: baseUrl },
+        body: JSON.stringify({ email: deleteUserEmail, password }),
+      })
+      assert.equal(deleteAccount.status, 200)
+      assert.equal(await db.collection('users').countDocuments({ id: deleteUserId }), 0)
+      assert.equal(await db.collection('worksheets').countDocuments({ id: deleteWorksheetId }), 0)
+
       const logout = await fetch(`${baseUrl}/api/auth/logout`, {
         method: 'POST',
         headers: { Cookie: ownerCookie, Origin: baseUrl },
@@ -225,14 +300,15 @@ if (!enabled) {
       assert.match(logout.headers.get('set-cookie') || '', /Max-Age=0/i)
     } finally {
       await Promise.all([
-        db.collection('users').deleteMany({ id: { $in: [ownerId, attackerId] } }),
+        db.collection('users').deleteMany({ id: { $in: [ownerId, attackerId, deleteUserId] } }),
         db.collection('students').deleteMany({ id: studentId }),
-        db.collection('worksheets').deleteMany({ id: worksheetId }),
+        db.collection('worksheets').deleteMany({ id: { $in: [worksheetId, deleteWorksheetId] } }),
         db.collection('classes').deleteMany({ id: classId }),
         db.collection('assignments').deleteMany({ id: assignmentId }),
         db.collection('submissions').deleteMany({ id: submissionId }),
         db.collection('shares').deleteMany({ $or: [{ owner_id: ownerId }, { shared_with_id: attackerId }] }),
         db.collection('comments').deleteMany({ worksheet_id: worksheetId }),
+        db.collection('password_reset_tokens').deleteMany({ user_id: { $in: [ownerId, deleteUserId] } }),
       ])
       await client.close()
     }
