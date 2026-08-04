@@ -2,9 +2,21 @@ import './globals.css'
 import PWARegister from '@/components/PWARegister'
 
 export const metadata = {
-  title: 'EduFlow - KI-gestuetzte Lernmaterialien fuer den Lehrplan 21',
-  description: 'Erstellen Sie in Sekunden Arbeitsblaetter, Pruefungen, Quizze und Vokabellisten mit KI - abgestimmt auf den Schweizer Lehrplan 21.',
+  title: 'EduFlow – Editierbare Lernmaterialien für den Lehrplan 21',
+  description: 'Aus eigenen Unterlagen werden differenzierte, editierbare Arbeitsblätter und Prüfungen mit Lehrplan-21-Bezug – bereit für PDF und DOCX.',
   applicationName: 'EduFlow',
+  keywords: ['Lehrplan 21', 'Arbeitsblätter', 'Unterrichtsmaterial', 'Differenzierung', 'Schweizer Lehrpersonen'],
+  openGraph: {
+    type: 'website',
+    locale: 'de_CH',
+    siteName: 'EduFlow',
+    title: 'EduFlow – Unterrichtsmaterial, das zu Ihrer Klasse passt',
+    description: 'Eigene Unterlagen hochladen, differenzieren, bearbeiten und druckfertig exportieren.',
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
   manifest: '/manifest.webmanifest',
   appleWebApp: {
     capable: true,

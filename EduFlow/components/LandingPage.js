@@ -1,206 +1,336 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
+import Link from 'next/link'
+import { useState } from 'react'
+import { motion, useReducedMotion } from 'framer-motion'
 import { Button } from '@/ui/button'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card'
 import { Alert, AlertDescription } from '@/ui/alert'
-import { BookOpen, Sparkles, Target, Layers, Download } from 'lucide-react'
+import {
+  ArrowRight,
+  BookOpen,
+  Check,
+  Download,
+  Eye,
+  EyeOff,
+  FileUp,
+  Layers,
+  PencilLine,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react'
 
-const features = [
-  { icon: Sparkles, title: 'KI-Generierung', description: 'Arbeitsblätter, Prüfungen, Quizze und Vokabellisten in Sekunden' },
-  { icon: Target, title: 'Lehrplan 21', description: 'Alle Inhalte an den Schweizer Lehrplan angepasst' },
-  { icon: Layers, title: 'Differenzierung', description: 'Drei Schwierigkeitsstufen für jeden Lernenden' },
-  { icon: Download, title: 'PDF-Export', description: 'Schüler- und Lehrerversion direkt als PDF' },
+const benefits = [
+  {
+    icon: FileUp,
+    title: 'Mit eigenem Material starten',
+    description: 'Vorhandene Unterlagen hochladen und als verlässliche Grundlage weiterverwenden.',
+  },
+  {
+    icon: Layers,
+    title: 'Passend differenzieren',
+    description: 'Varianten für unterschiedliche Lernniveaus erstellen, ohne alles neu aufzubauen.',
+  },
+  {
+    icon: PencilLine,
+    title: 'Volle Kontrolle behalten',
+    description: 'Jeden KI-Entwurf prüfen, bearbeiten und an die eigene Klasse anpassen.',
+  },
+  {
+    icon: Download,
+    title: 'Direkt einsetzen',
+    description: 'Schüler- und Lehrerversion als PDF oder DOCX druckfertig exportieren.',
+  },
 ]
 
-const ease = [0.25, 0.46, 0.45, 0.94]
+const workflow = [
+  ['01', 'Material oder Thema wählen', 'Unterlagen hochladen oder mit einem Lernziel beginnen.'],
+  ['02', 'Niveau und Lehrplanbezug festlegen', 'EduFlow erstellt einen strukturierten, editierbaren Entwurf.'],
+  ['03', 'Prüfen und exportieren', 'Inhalte anpassen und als PDF oder DOCX mitnehmen.'],
+]
 
 function GoogleIcon({ className }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
-      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18A10.96 10.96 0 0 0 1 12c0 1.77.42 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+    <svg className={className} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
+      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18A10.96 10.96 0 0 0 1 12c0 1.77.42 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
     </svg>
   )
 }
 
-export default function LandingPage({ authMode, setAuthMode, authForm, setAuthForm, handleAuth, handleGoogleLogin, error, setError }) {
-  const prefersReduced = useReducedMotion()
-  // Phases: 'splash' → 'reveal' → 'done'
-  const [phase, setPhase] = useState(prefersReduced ? 'done' : 'splash')
+export default function LandingPage({
+  authMode,
+  setAuthMode,
+  authForm,
+  setAuthForm,
+  handleAuth,
+  handleGoogleLogin,
+  error,
+  setError,
+}) {
+  const prefersReducedMotion = useReducedMotion()
+  const [showPassword, setShowPassword] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const isLogin = authMode === 'login'
+  const motionInitial = prefersReducedMotion ? false : { opacity: 0, y: 18 }
 
-  useEffect(() => {
-    if (prefersReduced) return
-    // splash (spin + open + wordmark) → then reveal page
-    const t1 = setTimeout(() => setPhase('reveal'), 2200)
-    const t2 = setTimeout(() => setPhase('done'), 3400)
-    return () => { clearTimeout(t1); clearTimeout(t2) }
-  }, [prefersReduced])
+  const switchMode = (mode) => {
+    setAuthMode(mode)
+    setError('')
+  }
 
-  const isSplash = phase === 'splash'
-  const isDone = phase === 'done'
+  const submitAuth = async (event) => {
+    setIsSubmitting(true)
+    try {
+      await handleAuth(event)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
 
   return (
-    <div className="min-h-screen gradient-liquid overflow-hidden relative">
-      {/* Ambient blobs — always present */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <motion.div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-200 rounded-full mix-blend-multiply filter blur-3xl opacity-30"
-          animate={{ x: [0, 100, 0], y: [0, 50, 0] }} transition={{ duration: 20, repeat: Infinity, ease: "easeInOut" }} />
-        <motion.div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-200 rounded-full mix-blend-multiply filter blur-3xl opacity-30"
-          animate={{ x: [0, -100, 0], y: [0, -50, 0] }} transition={{ duration: 25, repeat: Infinity, ease: "easeInOut" }} />
+    <main className="relative min-h-screen overflow-hidden bg-slate-50 text-slate-950">
+      <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+        <div className="absolute -left-32 top-20 h-80 w-80 rounded-full bg-blue-200/45 blur-3xl" />
+        <div className="absolute right-[-8rem] top-[-6rem] h-96 w-96 rounded-full bg-indigo-200/40 blur-3xl" />
+        <div className="absolute bottom-0 left-1/2 h-64 w-[46rem] -translate-x-1/2 rounded-full bg-cyan-100/50 blur-3xl" />
       </div>
 
-      {/* ===== SPLASH OVERLAY ===== */}
-      <AnimatePresence>
-        {isSplash && (
-          <motion.div
-            className="fixed inset-0 z-50 flex items-center justify-center gradient-liquid"
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.5, ease }}
+      <div className="relative mx-auto max-w-7xl px-5 pb-16 sm:px-8 lg:px-10">
+        <header className="flex min-h-20 items-center justify-between border-b border-slate-200/70">
+          <div className="flex items-center gap-3" aria-label="EduFlow">
+            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-600/20">
+              <BookOpen className="h-5 w-5" aria-hidden="true" />
+            </span>
+            <span className="text-xl font-semibold tracking-tight">EduFlow</span>
+          </div>
+          <Link
+            href="/schueler"
+            className="tap-target inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700"
           >
-            <div className="flex items-center">
-              {/* Spinning book icon */}
-              <motion.div
-                style={{ perspective: 800 }}
-                initial={{ opacity: 0, scale: 0.6 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.3, ease }}
-              >
-                <motion.div
-                  style={{ transformStyle: 'preserve-3d' }}
-                  animate={{ rotateY: [0, 360, 720, 810, 810] }}
-                  transition={{ duration: 2.0, times: [0, 0.35, 0.7, 0.85, 1], ease: [0.4, 0, 0.2, 1] }}
-                >
-                  <BookOpen className="h-16 w-16 text-blue-500" />
-                </motion.div>
-              </motion.div>
-              {/* Wordmark clips in after spin stops */}
-              <motion.div
-                style={{ overflow: 'hidden' }}
-                initial={{ width: 0, opacity: 0 }}
-                animate={{ width: 'auto', opacity: 1 }}
-                transition={{ delay: 1.6, duration: 0.45, ease }}
-              >
-                <h1 className="text-5xl sm:text-7xl font-bold text-gradient whitespace-nowrap ml-4">EduFlow</h1>
-              </motion.div>
+            Zum Schülerportal
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        </header>
+
+        <section className="grid items-start gap-12 py-12 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.75fr)] lg:gap-16 lg:py-20">
+          <motion.div initial={motionInitial} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45 }}>
+            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3.5 py-2 text-sm font-medium text-blue-800">
+              <Sparkles className="h-4 w-4" aria-hidden="true" />
+              Für Lehrpersonen in der Schweiz
+            </div>
+
+            <h1 className="max-w-3xl text-4xl font-semibold leading-[1.08] tracking-[-0.04em] text-slate-950 sm:text-5xl lg:text-6xl">
+              Aus Ihrem Material wird Unterricht, der zu Ihrer Klasse passt.
+            </h1>
+            <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600 sm:text-xl">
+              EduFlow erstellt editierbare Entwürfe für Arbeitsblätter und Prüfungen – mit Lehrplan-21-Bezug,
+              Differenzierung und druckfertigem Export.
+            </p>
+
+            <div className="mt-7 flex flex-wrap gap-x-6 gap-y-3 text-sm text-slate-700">
+              {['5 Materialien kostenlos', 'Keine Kreditkarte nötig', 'Jeder Entwurf bleibt editierbar'].map((item) => (
+                <span key={item} className="inline-flex items-center gap-2">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                  </span>
+                  {item}
+                </span>
+              ))}
+            </div>
+
+          </motion.div>
+
+          <motion.div
+            id="auth"
+            initial={motionInitial}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45, delay: prefersReducedMotion ? 0 : 0.08 }}
+            className="lg:sticky lg:top-8 lg:row-span-2"
+          >
+            <Card className="border-slate-200/80 bg-white/95 shadow-2xl shadow-slate-900/10 backdrop-blur">
+              <CardHeader className="space-y-5 pb-4">
+                <div className="grid grid-cols-2 rounded-xl bg-slate-100 p-1" aria-label="Anmeldung oder Registrierung">
+                  <button
+                    type="button"
+                    onClick={() => switchMode('login')}
+                    className={`tap-target rounded-lg px-3 py-2 text-sm font-medium transition ${isLogin ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                    aria-pressed={isLogin}
+                  >
+                    Anmelden
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchMode('register')}
+                    className={`tap-target rounded-lg px-3 py-2 text-sm font-medium transition ${!isLogin ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                    aria-pressed={!isLogin}
+                  >
+                    Kostenlos starten
+                  </button>
+                </div>
+                <div>
+                  <CardTitle className="text-2xl tracking-tight">{isLogin ? 'Willkommen zurück' : 'Erstes Material erstellen'}</CardTitle>
+                  <CardDescription className="mt-2 text-base leading-6">
+                    {isLogin ? 'Melden Sie sich bei Ihrem EduFlow-Konto an.' : 'Kostenlos registrieren und direkt mit dem ersten Entwurf beginnen.'}
+                  </CardDescription>
+                </div>
+              </CardHeader>
+
+              <CardContent>
+                <form onSubmit={submitAuth} className="space-y-4">
+                  {!isLogin && (
+                    <div>
+                      <Label htmlFor="auth-name" className="text-sm font-medium">Name</Label>
+                      <Input
+                        id="auth-name"
+                        name="name"
+                        type="text"
+                        autoComplete="name"
+                        placeholder="Anna Müller"
+                        value={authForm.name}
+                        onChange={(event) => setAuthForm({ ...authForm, name: event.target.value })}
+                        required
+                        className="input-premium mt-1.5 h-11"
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <Label htmlFor="auth-email" className="text-sm font-medium">E-Mail-Adresse</Label>
+                    <Input
+                      id="auth-email"
+                      name="email"
+                      type="email"
+                      inputMode="email"
+                      autoComplete="email"
+                      placeholder="name@schule.ch"
+                      value={authForm.email}
+                      onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })}
+                      required
+                      className="input-premium mt-1.5 h-11"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="auth-password" className="text-sm font-medium">Passwort</Label>
+                    <div className="relative mt-1.5">
+                      <Input
+                        id="auth-password"
+                        name="password"
+                        type={showPassword ? 'text' : 'password'}
+                        autoComplete={isLogin ? 'current-password' : 'new-password'}
+                        placeholder="Mindestens 8 Zeichen"
+                        value={authForm.password}
+                        onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })}
+                        minLength={8}
+                        required
+                        className="input-premium h-11 pr-11"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((current) => !current)}
+                        className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-md text-slate-500 transition hover:text-slate-800"
+                        aria-label={showPassword ? 'Passwort ausblenden' : 'Passwort anzeigen'}
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {error && (
+                    <Alert variant="destructive" role="alert" aria-live="polite">
+                      <AlertDescription>{error}</AlertDescription>
+                    </Alert>
+                  )}
+
+                  <Button type="submit" disabled={isSubmitting} className="h-12 w-full text-base font-semibold">
+                    {isSubmitting ? 'Bitte warten …' : isLogin ? 'Sicher anmelden' : 'Kostenloses Konto erstellen'}
+                    {!isSubmitting && <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />}
+                  </Button>
+
+                  <div className="relative py-1">
+                    <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200" /></div>
+                    <div className="relative flex justify-center text-xs uppercase tracking-[0.14em]"><span className="bg-white px-3 text-slate-400">oder</span></div>
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 w-full gap-3 border-slate-300 bg-white hover:bg-slate-50"
+                    onClick={handleGoogleLogin}
+                  >
+                    <GoogleIcon className="h-5 w-5" />
+                    Mit Google fortfahren
+                  </Button>
+                </form>
+
+                <div className="mt-5 flex items-start gap-3 rounded-xl bg-slate-50 p-3.5 text-xs leading-5 text-slate-600">
+                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" aria-hidden="true" />
+                  <p>KI-Inhalte sind editierbare Entwürfe. Sie prüfen und entscheiden, was im Unterricht eingesetzt wird.</p>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          <motion.div
+            initial={motionInitial}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45, delay: prefersReducedMotion ? 0 : 0.12 }}
+            className="overflow-hidden rounded-3xl border border-slate-200 bg-white/85 shadow-xl shadow-slate-900/5 backdrop-blur"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 sm:px-6">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Vom Ausgangsmaterial zum fertigen Arbeitsblatt</p>
+                <p className="mt-1 text-xs text-slate-500">Ein klarer Ablauf statt eines leeren KI-Chats</p>
+              </div>
+              <span className="hidden rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 sm:inline-flex">
+                Lehrperson entscheidet
+              </span>
+            </div>
+            <div className="grid gap-0 sm:grid-cols-3">
+              {workflow.map(([number, title, description], index) => (
+                <div key={number} className={`p-5 sm:p-6 ${index < workflow.length - 1 ? 'border-b border-slate-100 sm:border-b-0 sm:border-r' : ''}`}>
+                  <span className="text-xs font-bold tracking-[0.18em] text-blue-600">{number}</span>
+                  <h2 className="mt-3 text-sm font-semibold leading-5 text-slate-900">{title}</h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-500">{description}</p>
+                </div>
+              ))}
             </div>
           </motion.div>
-        )}
-      </AnimatePresence>
+        </section>
 
-      {/* ===== MAIN PAGE CONTENT ===== */}
-      <div className="container mx-auto px-4 py-16 relative z-10">
-        {/* Hero — logo in final position */}
-        <div className="text-center mb-12">
-          <motion.div
-            className="flex items-center justify-center mb-6"
-            initial={{ opacity: 0, y: 60 }}
-            animate={!isSplash ? { opacity: 1, y: 0 } : { opacity: 0, y: 60 }}
-            transition={{ duration: 0.7, ease }}
-          >
-            <motion.div style={{ perspective: 800 }}>
-              <BookOpen className="h-16 w-16 text-blue-500 mr-4" />
-            </motion.div>
-            <h1 className="text-5xl sm:text-7xl font-bold text-gradient">EduFlow</h1>
-          </motion.div>
+        <section aria-labelledby="benefits-title" className="border-t border-slate-200/80 py-14">
+          <div className="max-w-2xl">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-700">Weniger Vorbereitungszeit</p>
+            <h2 id="benefits-title" className="mt-3 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
+              Ein durchgängiger Workflow statt einzelner KI-Helfer.
+            </h2>
+          </div>
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {benefits.map((benefit) => (
+              <article key={benefit.title} className="rounded-2xl border border-slate-200 bg-white/80 p-5 shadow-sm">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+                  <benefit.icon className="h-5 w-5" aria-hidden="true" />
+                </span>
+                <h3 className="mt-4 font-semibold text-slate-900">{benefit.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">{benefit.description}</p>
+              </article>
+            ))}
+          </div>
+        </section>
 
-          <motion.p
-            className="text-xl sm:text-2xl text-gray-700 max-w-3xl mx-auto leading-relaxed"
-            initial={{ opacity: 0, y: 20 }}
-            animate={!isSplash ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
-            transition={{ duration: 0.5, delay: isSplash ? 0 : 0.2, ease }}
-          >
-            Erstellen Sie in Sekunden perfekte Arbeitsblätter mit KI – abgestimmt auf den{' '}
-            <span className="font-semibold text-blue-600">Lehrplan 21</span>
-          </motion.p>
-        </div>
-
-        {/* Feature cards */}
-        <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-6 mb-16 max-w-6xl mx-auto">
-          {features.map((feature, index) => (
-            <motion.div
-              key={index}
-              initial={{ opacity: 0, y: 30 }}
-              animate={!isSplash ? { opacity: 1, y: 0 } : { opacity: 0, y: 30 }}
-              transition={{ duration: 0.5, delay: isSplash ? 0 : 0.35 + index * 0.1, ease }}
-              whileHover={{ y: -8 }}
-            >
-              <Card className="glass-card hover-lift border-0 h-full">
-                <CardHeader className="pb-3">
-                  <feature.icon className="h-10 w-10 text-blue-500 mb-3" />
-                  <CardTitle className="text-lg">{feature.title}</CardTitle>
-                </CardHeader>
-                <CardContent><p className="text-gray-600 text-sm">{feature.description}</p></CardContent>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
-
-        {/* Login card */}
-        <motion.div
-          className="max-w-md mx-auto"
-          initial={{ opacity: 0, y: 20, scale: 0.97 }}
-          animate={!isSplash ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: 20, scale: 0.97 }}
-          transition={{ duration: 0.5, delay: isSplash ? 0 : 0.8, ease }}
-        >
-          <Card className="glass-card border-0">
-            <CardHeader className="space-y-2">
-              <CardTitle className="text-2xl">{authMode === 'login' ? 'Anmelden' : 'Konto erstellen'}</CardTitle>
-              <CardDescription className="text-base">
-                {authMode === 'login' ? 'Willkommen zurück bei EduFlow.' : 'Kostenlos starten – 5 Materialien gratis pro Monat.'}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleAuth} className="space-y-5">
-                {authMode === 'register' && (
-                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
-                    <Label className="text-sm font-medium">Ihr Name</Label>
-                    <Input type="text" placeholder="z.B. Anna Müller" value={authForm.name} onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })} required className="input-premium mt-1.5" />
-                  </motion.div>
-                )}
-                <div>
-                  <Label className="text-sm font-medium">E-Mail-Adresse</Label>
-                  <Input type="email" placeholder="name@schule.ch" value={authForm.email} onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })} required className="input-premium mt-1.5" />
-                </div>
-                <div>
-                  <Label className="text-sm font-medium">Passwort</Label>
-                  <Input type="password" placeholder="Mindestens 8 Zeichen" value={authForm.password} onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })} required className="input-premium mt-1.5" />
-                </div>
-                {error && (
-                  <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-                    <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>
-                  </motion.div>
-                )}
-                <Button type="submit" className="w-full btn-premium">{authMode === 'login' ? 'Anmelden' : 'Kostenlos registrieren'}</Button>
-
-                <div className="relative my-4">
-                  <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200" /></div>
-                  <div className="relative flex justify-center text-sm"><span className="px-3 bg-white/80 text-gray-500">oder</span></div>
-                </div>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full flex items-center justify-center gap-3 h-11 border-gray-300 hover:bg-gray-50"
-                  onClick={() => handleGoogleLogin()}
-                >
-                  <GoogleIcon className="h-5 w-5" />
-                  Mit Google anmelden
-                </Button>
-
-                <Button type="button" variant="ghost" className="w-full" onClick={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setError('') }}>
-                  {authMode === 'login' ? 'Noch kein Konto? Jetzt registrieren' : 'Bereits registriert? Anmelden'}
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-        </motion.div>
+        <footer className="flex flex-col gap-3 border-t border-slate-200/80 py-7 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+          <p>© {new Date().getFullYear()} EduFlow · Entwickelt für den Schweizer Unterricht</p>
+          <div className="flex items-center gap-2 text-slate-600">
+            <BookOpen className="h-4 w-4 text-blue-600" aria-hidden="true" />
+            Lehrplan 21 · Editierbar · Exportbereit
+          </div>
+        </footer>
       </div>
-    </div>
+    </main>
   )
 }
