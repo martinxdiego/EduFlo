@@ -2755,6 +2755,7 @@ WICHTIG:
 - "question": Fragen (type: "multiple_choice", "open", "fill_blank", "matching", "ordering", "true_false")
   Jede Frage braucht: id, number, type, question, answer, explanation, answerLines
   Bei multiple_choice zusätzlich: options (Array mit 4 Optionen)
+- Erzeuge mindestens 4 vollständige "question"-Blöcke mit unterschiedlichen Fragetypen und Musterlösungen
 - "text": Einleitende Texte zwischen Aufgaben`,
               source_text: `Erstelle einen Quellentext mit Verständnisfragen. Verwende:
 - "heading": Titel des Quellentexts
@@ -2847,19 +2848,23 @@ WICHTIG:
                 addDossierUsage(sectionResponse.usage)
                 sectionContent = JSON.parse(sectionResponse.choices[0].message.content)
                 let prepared = prepareDossierSection(sectionContent, { sectionType, grade })
-                if (!prepared.quality.passed) {
+                for (let repairAttempt = 0; repairAttempt < 2 && !prepared.quality.passed; repairAttempt++) {
+                  const exerciseRequirement = sectionType === 'exercises'
+                    ? ' Die korrigierte Sektion muss mindestens vier vollständige question-Blöcke mit answer enthalten.'
+                    : ''
                   const repairResponse = await openai.chat.completions.create({
                     model: dossierModel,
                     messages: [
                       { role: 'system', content: sectionPrompt },
                       { role: 'assistant', content: JSON.stringify(sectionContent) },
-                      { role: 'user', content: `Korrigiere die Sektion vollständig. Behebe: ${[...prepared.quality.errors, ...prepared.quality.warnings].join(' ')}. Gib nur das komplette JSON zurück.` },
+                      { role: 'user', content: `Korrigiere die Sektion vollständig. Behebe: ${[...prepared.quality.errors, ...prepared.quality.warnings].join(' ')}.${exerciseRequirement} Gib nur das komplette JSON zurück.` },
                     ],
-                    temperature: 0.2,
+                    temperature: 0.1,
                     response_format: { type: 'json_object' },
                   })
                   addDossierUsage(repairResponse.usage)
-                  prepared = prepareDossierSection(JSON.parse(repairResponse.choices[0].message.content), { sectionType, grade })
+                  sectionContent = JSON.parse(repairResponse.choices[0].message.content)
+                  prepared = prepareDossierSection(sectionContent, { sectionType, grade })
                 }
                 if (!prepared.quality.passed) throw new Error(prepared.quality.errors.join(' '))
                 sectionContent = prepared.content
