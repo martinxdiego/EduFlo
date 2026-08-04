@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
-import { generateWithGemini } from '@/lib/ai'
 import { applyCorsHeaders, verifyAuthToken } from '@/lib/server/security'
+import { generateOpenAIJson } from '@/lib/server/openai-service'
+import { logComplete, logFailure, requestContext } from '@/lib/server/logger'
+import { evaluateStudioArtifact } from '@/lib/server/studio-quality'
 
 export const runtime = 'nodejs'
 
@@ -50,7 +52,8 @@ const STUDIO_RESPONSE_SCHEMA = {
         properties: {
           title: { type: 'STRING' },
           bullets: { ...TEXT_ARRAY_SCHEMA, maxItems: '4' },
-          speakerNotes: { type: 'STRING' }
+          speakerNotes: { type: 'STRING' },
+          visualPrompt: { type: 'STRING' }
         }
       }
     },
@@ -112,7 +115,7 @@ function parseJsonObject(text) {
     if (start >= 0 && end > start) {
       return JSON.parse(clean.slice(start, end + 1))
     }
-    throw new Error('Gemini response was not valid JSON.')
+    throw new Error('Die KI-Antwort war kein valides JSON.')
   }
 }
 
@@ -140,11 +143,11 @@ function isRecoverableStudioError(error) {
 
 function getFallbackReason(error) {
   const text = getErrorText(error)
-  if (text.includes('429') || text.includes('quota')) return 'Google Gemini Quota/Billing limitiert diesen Studio-Request.'
-  if (text.includes('503') || text.includes('high demand') || text.includes('overloaded') || text.includes('unavailable')) return 'Google Gemini ist gerade ueberlastet oder nicht verfuegbar.'
-  if (text.includes('invalid_argument') || text.includes('schema')) return 'Gemini hat das angeforderte JSON-Schema nicht akzeptiert.'
-  if (error?.name === 'SyntaxError' || text.includes('expected') || text.includes('json') || text.includes('not valid json')) return 'Gemini hat keine gueltige JSON-Antwort geliefert.'
-  return 'Gemini hat fuer diesen Studio-Request nicht erfolgreich geantwortet.'
+  if (text.includes('429') || text.includes('quota')) return 'Das KI-Kontingent limitiert diesen Studio-Request.'
+  if (text.includes('503') || text.includes('high demand') || text.includes('overloaded') || text.includes('unavailable')) return 'Der KI-Dienst ist gerade überlastet oder nicht verfügbar.'
+  if (text.includes('invalid_argument') || text.includes('schema')) return 'Der KI-Dienst hat das angeforderte JSON-Schema nicht akzeptiert.'
+  if (error?.name === 'SyntaxError' || text.includes('expected') || text.includes('json') || text.includes('not valid json')) return 'Der KI-Dienst hat keine gültige JSON-Antwort geliefert.'
+  return 'Der KI-Dienst hat für diesen Studio-Request nicht erfolgreich geantwortet.'
 }
 
 function cleanText(value) {
@@ -235,7 +238,7 @@ function createFallbackArtifact({ sourceText, title, grade, subject }) {
     summary,
     keyPoints,
     learningGoals,
-    teachingNotes: 'Dieses Paket wurde als lokaler Ersatz erstellt, weil Gemini im Moment keine verwertbare Antwort geliefert hat. Inhalte bitte kurz pruefen und bei Bedarf mit einem erneuten Gemini-Lauf verfeinern.',
+    teachingNotes: 'Dieses Paket wurde als lokaler Ersatz erstellt, weil der KI-Dienst im Moment keine verwertbare Antwort geliefert hat. Inhalte bitte kurz prüfen und bei Bedarf erneut generieren.',
     slides,
     flashcards,
     quiz,
@@ -245,7 +248,7 @@ function createFallbackArtifact({ sourceText, title, grade, subject }) {
       keyPoints.length ? `Die wichtigsten Punkte sind: ${keyPoints.join(' ')}` : '',
       'Im Unterricht koennen diese Inhalte als Einstieg, Sicherung oder kurze Wiederholung genutzt werden.'
     ].filter(Boolean).join('\n\n'),
-    sourceNotes: 'Lokaler Ersatzmodus auf Basis des eingefuegten Quellentextes.'
+    sourceNotes: 'Lokaler Ersatzmodus auf Basis des eingefügten Quellentextes.'
   }
 }
 
@@ -253,7 +256,8 @@ function normalizeArtifact(raw, fallback) {
   const slides = asArray(raw.slides).map((slide, index) => ({
     title: String(slide?.title || `Folie ${index + 1}`).slice(0, 120),
     bullets: asArray(slide?.bullets).map(item => String(item).slice(0, 180)).slice(0, 6),
-    speakerNotes: String(slide?.speakerNotes || '').slice(0, 1400)
+    speakerNotes: String(slide?.speakerNotes || '').slice(0, 1400),
+    visualPrompt: String(slide?.visualPrompt || '').slice(0, 500),
   })).slice(0, 12)
 
   const flashcards = asArray(raw.flashcards).map(card => ({
@@ -285,7 +289,7 @@ function normalizeArtifact(raw, fallback) {
 }
 
 function buildStudioPrompt({ sourceText, title, grade, subject, mode }) {
-  return `Erstelle aus dem Quellenmaterial ein NotebookLM-aehnliches Studio-Paket fuer EduFlow.
+  return `Erstelle aus dem Quellenmaterial ein hochwertiges, sofort einsetzbares Studio-Paket fuer EduFlow.
 
 Zielgruppe: Schweizer Lehrperson.
 Titel: ${title || 'aus Quellen ableiten'}
@@ -301,12 +305,13 @@ JSON-Schema:
   "summary": "kompakte Zusammenfassung in maximal 2 Absaetzen",
   "keyPoints": ["maximal 5 wichtige Punkte"],
   "learningGoals": ["maximal 4 konkrete Lernziele"],
-  "teachingNotes": "kurze Hinweise fuer Unterricht, Differenzierung und Stolperstellen",
+  "teachingNotes": "konkreter Unterrichtsablauf mit Einstieg, Erarbeitung, Sicherung, Differenzierung und Stolperstellen",
   "slides": [
     {
       "title": "Folientitel",
       "bullets": ["maximal 4 kurze Stichpunkte"],
-      "speakerNotes": "kurzer Sprechtext fuer diese Folie"
+      "speakerNotes": "natuerlicher Sprechtext fuer diese Folie",
+      "visualPrompt": "kurze konkrete Idee fuer eine passende Illustration ohne Text"
     }
   ],
   "flashcards": [{ "front": "maximal 5 Frage/Begriff-Karten", "back": "Antwort/Erklaerung" }],
@@ -322,7 +327,15 @@ JSON-Schema:
   "sourceNotes": "kurze Notiz, welche Quelleninhalte besonders relevant sind"
 }
 
-Erzeuge maximal 4 slides, 5 flashcards und 3 quiz-Fragen.
+Qualitaetsregeln:
+- Arbeite ausschliesslich mit belegbaren Aussagen aus der Quelle und markiere Unsicherheiten in sourceNotes.
+- Formuliere altersgerecht, fachlich praezise und in Schweizer Rechtschreibung.
+- Baue die Folien als Lernprogression: Aktivierung, Verstehen, Anwenden, Sichern.
+- Jede Folie hat genau eine klare Kernaussage und maximal vier kurze Stichpunkte.
+- Quiz-Distraktoren muessen plausibel, aber eindeutig falsch sein; answer muss exakt einer Option entsprechen.
+- Lernziele sind beobachtbar und ueberpruefbar.
+
+Erzeuge 5 bis 8 slides, 6 bis 10 flashcards und 4 bis 6 quiz-Fragen.
 
 Quellenmaterial:
 ${sourceText}`
@@ -333,6 +346,7 @@ export async function OPTIONS() {
 }
 
 export async function POST(request) {
+  const context = requestContext(request, '/api/studio/generate')
   const user = verifyToken(request)
   if (!user?.userId || user.role === 'student') {
     return jsonResponse({ error: 'Nicht authentifiziert.' }, { status: 401 })
@@ -357,41 +371,56 @@ export async function POST(request) {
       mode
     })
 
-    const result = await generateWithGemini({
-      prompt,
+    const result = await generateOpenAIJson({
+      userId: user.userId,
+      feature: 'studio',
       model,
-      temperature: 0.35,
-      maxOutputTokens: 3072,
-      responseMimeType: 'application/json',
-      responseSchema: STUDIO_RESPONSE_SCHEMA,
-      taskType: 'source-transformation',
-      context: {
-        feature: 'studio',
-        title,
-        grade,
-        subject
-      }
+      temperature: 0.3,
+      messages: [
+        { role: 'system', content: 'Du bist ein erfahrener Schweizer Instructional Designer. Antworte nur als valides JSON.' },
+        { role: 'user', content: prompt },
+      ],
+      metadata: { title, grade, subject, mode: mode || 'full' },
     })
 
-    const artifact = normalizeArtifact(parseJsonObject(result.text), { title, grade, subject })
+    let artifact = normalizeArtifact(result.object, { title, grade, subject })
+    let quality = evaluateStudioArtifact(artifact)
+    if (!quality.passed) {
+      const repaired = await generateOpenAIJson({
+        userId: user.userId,
+        feature: 'studio-repair',
+        model: result.model,
+        temperature: 0.2,
+        messages: [
+          { role: 'system', content: 'Du bist ein strenger Schweizer Instructional Designer. Antworte nur als valides JSON.' },
+          { role: 'user', content: prompt },
+          { role: 'assistant', content: JSON.stringify(artifact) },
+          { role: 'user', content: `Überarbeite das gesamte Paket und behebe diese Qualitätsprobleme: ${[...quality.errors, ...quality.warnings].join(' ')} Gib nur das vollständige JSON zurück.` },
+        ],
+        metadata: { parentGenerationId: result.generationId, qualityRepair: true },
+      })
+      artifact = normalizeArtifact(repaired.object, { title, grade, subject })
+      quality = evaluateStudioArtifact(artifact)
+    }
+    if (!quality.passed) throw new Error(`Studio-Qualitätskontrolle fehlgeschlagen: ${quality.errors.join(' ')}`)
+    logComplete(context, { feature: 'studio', model: result.model, generationId: result.generationId })
 
     return jsonResponse({
       provider: result.provider,
       model: result.model,
+      generationId: result.generationId,
+      quality,
       artifact
     })
   } catch (error) {
-    console.error('Studio generate error:', {
-      message: error?.message,
-      name: error?.name
-    })
+    logFailure(context, error, { feature: 'studio' })
 
     if (requestData.sourceText && isRecoverableStudioError(error)) {
       const fallbackReason = getFallbackReason(error)
       return jsonResponse({
         provider: 'local-fallback',
         model: 'studio-source-fallback',
-        warning: `Gemini konnte gerade kein Studio-Paket liefern. Grund: ${fallbackReason} EduFlow hat ein lokales Ersatzpaket aus deinem Quellentext erstellt.`,
+        warning: `Die KI konnte gerade kein Studio-Paket liefern. EduFlow hat deshalb ein lokales Ersatzpaket aus deinem Quellentext erstellt.`,
         fallbackReason,
         fallbackDetails: process.env.NODE_ENV === 'development' ? String(error?.message || '').slice(0, 500) : undefined,
         artifact: createFallbackArtifact(requestData)
@@ -399,7 +428,7 @@ export async function POST(request) {
     }
 
     return jsonResponse({
-      error: 'Studio-Generierung fehlgeschlagen.',
+      error: 'Studio-Generierung fehlgeschlagen. Bitte versuche es erneut.',
       details: process.env.NODE_ENV === 'development' ? error?.message : undefined
     }, { status: 500 })
   }

@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid'
 import { NextResponse } from 'next/server'
-import OpenAI from 'openai'
+import OpenAI, { toFile } from 'openai'
 import mammoth from 'mammoth'
 import pdfParse from 'pdf-parse'
 import { getDatabase } from '@/lib/server/database'
@@ -11,6 +11,11 @@ import {
   verifyAuthToken,
 } from '@/lib/server/security'
 import { prepareWorksheetContent } from '@/lib/server/worksheet-quality'
+import { completeGeneration, failGeneration, startGeneration } from '@/lib/server/ai-telemetry'
+import { generateOpenAISpeech } from '@/lib/server/openai-service'
+import { validateChatToolCall } from '@/lib/chat-tools'
+import { evaluateDossier, prepareDossierSection, validateDossierOutline } from '@/lib/server/dossier-quality'
+import { logEvent } from '@/lib/server/logger'
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 const ALLOWED_UPLOAD_EXTENSIONS = new Set(['pdf', 'docx', 'txt', 'csv', 'rtf', 'pptx', 'xlsx', 'xls'])
@@ -473,6 +478,9 @@ async function handleRoute(request, { params }) {
   const { path = [] } = await params
   const route = `/${path.join('/')}`
   const method = request.method
+  const requestStartedAt = Date.now()
+  const requestId = request.headers.get('x-vercel-id') || request.headers.get('x-request-id') || uuidv4()
+  logEvent('info', 'api.request.started', { requestId, route, method })
 
   try {
     const db = await connectToMongo()
@@ -1258,7 +1266,15 @@ Regeln:
       const encoder = new TextEncoder()
       const stream = new ReadableStream({
         async start(controller) {
+          let worksheetGenerationId
           try {
+            worksheetGenerationId = await startGeneration({
+              userId: decoded.userId,
+              feature: 'worksheet',
+              model: selectedProvider === 'gemini' ? 'gemini' : OPENAI_GENERATION_MODEL,
+              prompt: `${subject}:${grade}:${topic}`,
+              metadata: { questionCount: questionCount || 10, resourceType: resourceType || 'worksheet' },
+            })
             // Send initial status
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({
               type: 'status',
@@ -1381,7 +1397,7 @@ ${sourceParts.join('\n\n')}
                 message: 'Didaktische Qualität wird geprüft...',
                 progress: 82
               })}\n\n`))
-              const { content: worksheetContent } = await ensureWorksheetQuality({
+              const { content: worksheetContent, quality } = await ensureWorksheetQuality({
                 content: draftContent,
                 provider: selectedProvider,
                 messages: generationMessages,
@@ -1419,6 +1435,11 @@ ${sourceParts.join('\n\n')}
                 aiProvider: selectedProvider
               })
 
+              await completeGeneration(worksheetGenerationId, {
+                result: { worksheetId: worksheet.id }, usage: {}, model: 'gemini', quality,
+                metadata: { questionCount: worksheetContent.questions?.length || 0 },
+              })
+
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                 type: 'complete',
                 worksheet,
@@ -1436,13 +1457,16 @@ ${sourceParts.join('\n\n')}
               ],
               temperature: 0.7,
               response_format: { type: "json_object" },
-              stream: true
+              stream: true,
+              stream_options: { include_usage: true },
             })
 
             let fullContent = ''
             let currentQuestionCount = 0
+            let finalUsage = {}
 
             for await (const chunk of stream) {
+              if (chunk.usage) finalUsage = chunk.usage
               const content = chunk.choices[0]?.delta?.content || ''
               fullContent += content
 
@@ -1498,7 +1522,7 @@ ${sourceParts.join('\n\n')}
               competencyCode: competencyCode || null,
               hasSourceText: Boolean(sourceText)
             }
-            const { content: worksheetContent } = await ensureWorksheetQuality({
+            const { content: worksheetContent, quality } = await ensureWorksheetQuality({
               content: parseJsonObject(fullContent),
               provider: selectedProvider,
               messages: generationMessages,
@@ -1519,6 +1543,11 @@ ${sourceParts.join('\n\n')}
               aiProvider: selectedProvider
             })
 
+            await completeGeneration(worksheetGenerationId, {
+              result: { worksheetId: worksheet.id }, usage: finalUsage, model: OPENAI_GENERATION_MODEL, quality,
+              metadata: { questionCount: worksheetContent.questions?.length || 0 },
+            })
+
             // Send completion
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
               type: 'complete', 
@@ -1528,6 +1557,7 @@ ${sourceParts.join('\n\n')}
 
             controller.close()
           } catch (error) {
+            if (worksheetGenerationId) await failGeneration(worksheetGenerationId, error, { feature: 'worksheet' })
             console.error('Streaming error:', error)
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
               type: 'error', 
@@ -1828,15 +1858,56 @@ Antworte als JSON:
           ]
         }
 
-        const completion = await openai.chat.completions.create({
-          model: 'gpt-4o-mini',
-          messages,
-          temperature: 0.5,
-          response_format: { type: 'json_object' },
-          max_tokens: 1500,
+        const analysisModel = process.env.OPENAI_ANALYSIS_MODEL || 'gpt-4o-mini'
+        const analysisGenerationId = await startGeneration({
+          userId: decoded.userId,
+          feature: useVision ? 'document-vision' : 'document-analysis',
+          model: analysisModel,
+          prompt: `${fileName}:${instructions}`,
+          metadata: { extension, fileSize, extractionMethod: extraction.method },
         })
-
-        const aiAnalysis = JSON.parse(completion.choices[0].message.content)
+        let aiAnalysis
+        let analysisUsage = {}
+        if (useVision && extension === 'pdf') {
+          let uploadedFile
+          try {
+            uploadedFile = await openai.files.create({
+              file: await toFile(buffer, fileName, { type: fileType || 'application/pdf' }),
+              purpose: 'user_data',
+            })
+            const response = await openai.responses.create({
+              model: analysisModel,
+              input: [{
+                role: 'user',
+                content: [
+                  { type: 'input_file', file_id: uploadedFile.id },
+                  { type: 'input_text', text: messages[0].content + `\n\nDatei: ${fileName}` },
+                ],
+              }],
+              text: { format: { type: 'json_object' } },
+            })
+            aiAnalysis = JSON.parse(response.output_text)
+            analysisUsage = response.usage || {}
+          } finally {
+            if (uploadedFile?.id) await openai.files.delete(uploadedFile.id).catch(() => {})
+          }
+        } else {
+          const completion = await openai.chat.completions.create({
+            model: analysisModel,
+            messages,
+            temperature: 0.35,
+            response_format: { type: 'json_object' },
+            max_tokens: 2200,
+          })
+          aiAnalysis = JSON.parse(completion.choices[0].message.content)
+          analysisUsage = completion.usage || {}
+        }
+        await completeGeneration(analysisGenerationId, {
+          result: aiAnalysis,
+          usage: analysisUsage,
+          model: analysisModel,
+          metadata: { extension, fileSize, extractionMethod: extraction.method },
+        })
 
         // Phase 3 & 4: Build structured source (intermediate format)
         // For Vision/OCR path, use AI-extracted text if our extraction was empty
@@ -1883,7 +1954,7 @@ Antworte als JSON:
       const body = await request.json()
       const { message, worksheetContext, chatHistory = [] } = body
 
-      if (!message) {
+      if (typeof message !== 'string' || !message.trim() || message.length > 4000 || !Array.isArray(chatHistory) || chatHistory.length > 60) {
         return handleCORS(NextResponse.json({ error: "Message is required" }, { status: 400 }))
       }
 
@@ -1916,7 +1987,7 @@ Fragetypen: ${worksheetContext.questionTypes || 'gemischt'}`
             parameters: {
               type: 'object',
               properties: {
-                questionIndex: { type: 'number', description: 'Index der Frage (0-basiert)' },
+                questionIndex: { type: 'integer', minimum: 0, description: 'Index der Frage (0-basiert)' },
                 action: { type: 'string', enum: ['harder', 'easier', 'to_mc', 'to_open', 'to_fill_blank', 'to_true_false', 'child_friendly', 'swiss_context', 'more_variety', 'better_distractors', 'precise_answer'], description: 'Art der Änderung' },
                 customInstruction: { type: 'string', description: 'Optionale benutzerdefinierte Anweisung für die Änderung' }
               },
@@ -1932,7 +2003,7 @@ Fragetypen: ${worksheetContext.questionTypes || 'gemischt'}`
             parameters: {
               type: 'object',
               properties: {
-                count: { type: 'number', description: 'Anzahl neuer Fragen (1-5)' },
+                count: { type: 'integer', minimum: 1, maximum: 5, description: 'Anzahl neuer Fragen (1-5)' },
                 type: { type: 'string', enum: ['multiple_choice', 'true_false', 'open', 'math', 'fill_blank', 'matching', 'ordering', 'either_or', 'image'], description: 'Fragetyp' },
                 topic: { type: 'string', description: 'Spezifisches Thema für die neuen Fragen (optional, sonst passt es zum bestehenden Material)' },
                 difficulty: { type: 'string', enum: ['easy', 'medium', 'hard'], description: 'Schwierigkeitsgrad' }
@@ -2035,27 +2106,35 @@ WICHTIGE REGELN:
         { role: 'user', content: message }
       ]
 
+      let chatGenerationId
       try {
+        const chatModel = process.env.OPENAI_CHAT_MODEL || 'gpt-4o'
+        chatGenerationId = await startGeneration({ userId: decoded.userId, feature: 'chat', model: chatModel, prompt: message, metadata: { hasWorksheet: Boolean(worksheetContext) } })
         const stream = await openai.chat.completions.create({
-          model: 'gpt-4o',
+          model: chatModel,
           messages,
           tools: worksheetContext ? chatTools : [chatTools[3]], // Only navigation tool if no worksheet
           temperature: 0.7,
           max_tokens: 1500,
           stream: true,
+          stream_options: { include_usage: true },
         })
 
         const encoder = new TextEncoder()
         const readable = new ReadableStream({
           async start(controller) {
             let toolCalls = {}
+            let assistantText = ''
+            let finalUsage = {}
             try {
               for await (const chunk of stream) {
+                if (chunk.usage) finalUsage = chunk.usage
                 const delta = chunk.choices[0]?.delta
                 const finishReason = chunk.choices[0]?.finish_reason
 
                 // Stream text content
                 if (delta?.content) {
+                  assistantText += delta.content
                   controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text', content: delta.content })}\n\n`))
                 }
 
@@ -2076,7 +2155,7 @@ WICHTIGE REGELN:
                 if (finishReason === 'tool_calls') {
                   for (const [, tc] of Object.entries(toolCalls)) {
                     try {
-                      const args = JSON.parse(tc.arguments)
+                      const args = validateChatToolCall(tc.name, JSON.parse(tc.arguments), { questionCount: worksheetContext?.questions?.length || 0 })
                       controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'tool_call', name: tc.name, arguments: args })}\n\n`))
                     } catch (e) {
                       console.error('Tool call parse error:', e)
@@ -2088,7 +2167,9 @@ WICHTIGE REGELN:
                   controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`))
                 }
               }
+              await completeGeneration(chatGenerationId, { result: { text: assistantText, toolCalls: Object.values(toolCalls).map(call => ({ name: call.name })) }, usage: finalUsage, model: chatModel, metadata: { hasWorksheet: Boolean(worksheetContext) } })
             } catch (streamError) {
+              await failGeneration(chatGenerationId, streamError, { feature: 'chat-stream' })
               console.error('Stream error:', streamError)
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', content: 'Stream-Fehler aufgetreten.' })}\n\n`))
             } finally {
@@ -2107,6 +2188,7 @@ WICHTIGE REGELN:
           },
         })
       } catch (aiError) {
+        if (chatGenerationId) await failGeneration(chatGenerationId, aiError, { feature: 'chat' })
         console.error('Chat AI error:', aiError)
         return handleCORS(NextResponse.json({ error: 'KI-Fehler. Bitte versuchen Sie es erneut.' }, { status: 500 }))
       }
@@ -2293,6 +2375,7 @@ Aktion: ${actionPrompt}`
         return handleCORS(NextResponse.json({ error: "Prompt is required" }, { status: 400 }))
       }
 
+      let imageGenerationId
       try {
         const styleMap = {
           educational: 'clean educational illustration, professional, suitable for classroom materials, clear and well-organized',
@@ -2307,21 +2390,57 @@ Aktion: ${actionPrompt}`
         const styleDesc = styleMap[style] || styleMap.educational
         const enhancedPrompt = `Educational illustration for Swiss school classroom: ${prompt}. Style: ${styleDesc}. No text or words in the image. The image should be pedagogically useful, clear, and age-appropriate.`
 
+        const imageModel = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2'
+        const generationId = await startGeneration({
+          userId: decoded.userId,
+          feature: 'image',
+          model: imageModel,
+          prompt: enhancedPrompt,
+          metadata: { style, size },
+        })
+        imageGenerationId = generationId
         const response = await openai.images.generate({
-          model: 'dall-e-3',
+          model: imageModel,
           prompt: enhancedPrompt,
           n: 1,
           size: size,
-          quality: 'standard',
+          quality: 'medium',
         })
 
-        const imageUrl = response.data[0]?.url
-        if (!imageUrl) {
-          return handleCORS(NextResponse.json({ error: 'Bildgenerierung fehlgeschlagen' }, { status: 500 }))
+        const item = response.data?.[0]
+        let imageBuffer
+        if (item?.b64_json) imageBuffer = Buffer.from(item.b64_json, 'base64')
+        else if (item?.url) {
+          const download = await fetch(item.url)
+          if (!download.ok) throw new Error('Generiertes Bild konnte nicht gespeichert werden.')
+          imageBuffer = Buffer.from(await download.arrayBuffer())
         }
+        if (!imageBuffer?.length) throw new Error('Bildgenerierung lieferte keine Bilddaten.')
 
-        return handleCORS(NextResponse.json({ imageUrl, revisedPrompt: response.data[0]?.revised_prompt }))
+        const assetId = uuidv4()
+        await db.collection('generated_assets').insertOne({
+          id: assetId,
+          user_id: decoded.userId,
+          kind: 'image',
+          mime_type: 'image/png',
+          filename: `eduflow-${assetId}.png`,
+          data: imageBuffer,
+          prompt: prompt.slice(0, 1000),
+          style,
+          model: imageModel,
+          created_at: new Date(),
+        })
+        const imageUrl = `/api/assets/images/${assetId}`
+        await completeGeneration(generationId, {
+          result: { assetId, imageUrl },
+          usage: response.usage || {},
+          model: imageModel,
+          metadata: { style, size, bytes: imageBuffer.length },
+        })
+
+        return handleCORS(NextResponse.json({ imageUrl, assetId, generationId, model: imageModel, revisedPrompt: item?.revised_prompt }))
       } catch (imgError) {
+        if (imageGenerationId) await failGeneration(imageGenerationId, imgError, { feature: 'image' })
         console.error('Image generation error:', imgError)
         return handleCORS(NextResponse.json({ error: publicErrorMessage(imgError, 'Bildgenerierung fehlgeschlagen') }, { status: 500 }))
       }
@@ -2441,16 +2560,17 @@ Bitte gib:
       const decoded = await verifyToken(request)
       if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
       const body = await request.json()
-      const { text, voice = 'alloy', speed = 1.0 } = body
+      const { text, voice = 'coral', speed = 1.0 } = body
       if (!text) return handleCORS(NextResponse.json({ error: 'Text ist erforderlich.' }, { status: 400 }))
       try {
-        const mp3 = await openai.audio.speech.create({
-          model: 'tts-1',
-          voice: voice, // alloy, echo, fable, onyx, nova, shimmer
-          input: text.substring(0, 4096),
-          speed: Math.max(0.25, Math.min(4.0, speed))
+        const speech = await generateOpenAISpeech({
+          userId: decoded.userId,
+          text: text.substring(0, 9000),
+          feature: 'tts',
+          voice,
+          instructions: `Sprich in klarem Schweizer Hochdeutsch, didaktisch, freundlich und mit Tempo ${Math.max(0.5, Math.min(1.5, speed))}.`,
         })
-        const buffer = Buffer.from(await mp3.arrayBuffer())
+        const buffer = speech.audio
         return new Response(buffer, { headers: { 'Content-Type': 'audio/mpeg', 'Content-Length': buffer.length.toString(), ...Object.fromEntries(handleCORS(new Response()).headers) } })
       } catch (e) {
         console.error('TTS error:', e)
@@ -2471,7 +2591,7 @@ Bitte gib:
       }
 
       const body = await request.json()
-      const { topic, grade, subject, difficulty, theme, competency_codes, sourceText } = body
+      const { topic, grade, subject, difficulty, theme, competency_codes, sourceText, resumeDossierId } = body
 
       if (!topic || !grade || !subject) {
         return handleCORS(NextResponse.json({ error: "Thema, Klasse und Fach sind erforderlich." }, { status: 400 }))
@@ -2500,9 +2620,35 @@ Bitte gib:
       }
 
       const encoder = new TextEncoder()
+      const dossierId = resumeDossierId || uuidv4()
       const stream = new ReadableStream({
         async start(controller) {
+          let dossierGenerationId
+          const dossierUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+          const addDossierUsage = (usage = {}) => {
+            dossierUsage.prompt_tokens += usage.prompt_tokens || 0
+            dossierUsage.completion_tokens += usage.completion_tokens || 0
+            dossierUsage.total_tokens += usage.total_tokens || 0
+          }
           try {
+            const existingCheckpoint = resumeDossierId
+              ? await db.collection('dossiers').findOne({ id: dossierId, user_id: decoded.userId, generation_status: { $in: ['pending', 'failed'] } })
+              : null
+            if (resumeDossierId && !existingCheckpoint) throw new Error('Der Dossier-Checkpoint wurde nicht gefunden oder ist bereits abgeschlossen.')
+            const checkpointCreatedAt = existingCheckpoint?.created_at || new Date()
+            if (!existingCheckpoint) {
+              await db.collection('dossiers').insertOne({
+                id: dossierId, user_id: decoded.userId, title: `${subject}: ${topic}`, topic, grade, subject,
+                difficulty: difficulty || 'medium', theme: theme || 'classic', competency_codes: competency_codes || [],
+                learning_objectives: [], sections: [], generation_status: 'pending', generated_sections: 0,
+                total_sections: 0, mode: 'dossier', created_at: checkpointCreatedAt, updated_at: checkpointCreatedAt,
+              })
+            } else {
+              await db.collection('dossiers').updateOne({ id: dossierId, user_id: decoded.userId }, { $set: { generation_status: 'pending', last_error: null, updated_at: new Date() } })
+            }
+            const dossierModel = process.env.OPENAI_DOSSIER_MODEL || 'gpt-4o'
+            dossierGenerationId = await startGeneration({ userId: decoded.userId, feature: 'dossier', model: dossierModel, prompt: `${subject}:${grade}:${topic}`, metadata: { dossierId, resumed: Boolean(existingCheckpoint) } })
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'checkpoint', dossierId, resumed: Boolean(existingCheckpoint), progress: 2 })}\n\n`))
             // STEP 1: Planning
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'status', message: 'Dossier wird geplant...', progress: 5 })}\n\n`))
 
@@ -2510,10 +2656,11 @@ Bitte gib:
               ? `\n\nLehrplan 21 Kompetenzen die abgedeckt werden sollen:\n${competency_codes.map(c => `- ${c}`).join('\n')}`
               : ''
 
-            const planningPrompt = `Du bist ein erfahrener Schweizer Primarschullehrer. Erstelle einen detaillierten Strukturplan für ein Lerndossier.
+            const schoolStage = Number(grade) >= 7 ? 'Sekundarstufe I' : 'Primarstufe'
+            const planningPrompt = `Du bist eine erfahrene Schweizer Lehrperson und Instructional Designer. Erstelle einen detaillierten Strukturplan für ein Lerndossier.
 
 Thema: ${topic}
-Klassenstufe: ${grade}. Klasse (Primarschule Schweiz)
+Klassenstufe: ${grade}. Klasse (${schoolStage}, Schweiz)
 Fach: ${subject}
 Schwierigkeit: ${difficulty || 'medium'}${competenciesText}${sourceContext}
 
@@ -2557,10 +2704,10 @@ WICHTIG:
 - Ende mit Zusammenfassung/Reflexion
 - Schweizer Kontext und Lehrplan 21`
 
-            let outline
-            try {
+            let outline = existingCheckpoint?.outline
+            if (!outline) try {
               const planningResponse = await openai.chat.completions.create({
-                model: 'gpt-4o',
+                model: dossierModel,
                 messages: [
                   { role: 'system', content: planningPrompt },
                   { role: 'user', content: `Erstelle einen Strukturplan für ein Lerndossier zum Thema: ${topic}` }
@@ -2568,11 +2715,12 @@ WICHTIG:
                 temperature: 0.7,
                 response_format: { type: 'json_object' }
               })
+              addDossierUsage(planningResponse.usage)
               outline = JSON.parse(planningResponse.choices[0].message.content)
+              const outlineQuality = validateDossierOutline(outline)
+              if (!outlineQuality.passed) throw new Error(`Plan hat die Qualitätskontrolle nicht bestanden: ${outlineQuality.errors.join(' ')}`)
             } catch (e) {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: `Planungsfehler: ${e.message}` })}\n\n`))
-              controller.close()
-              return
+              throw new Error(`Planungsfehler: ${e.message}`)
             }
 
             const dossierTitle = outline.title || `${subject}: ${topic}`
@@ -2580,12 +2728,17 @@ WICHTIG:
             const learningObjectives = outline.learning_objectives || []
             const totalSections = plannedSections.length
 
+            await db.collection('dossiers').updateOne({ id: dossierId }, { $set: {
+              title: dossierTitle, outline, learning_objectives: learningObjectives,
+              total_sections: totalSections, updated_at: new Date(), generation_status: 'pending',
+            } })
+
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'plan_complete', title: dossierTitle, sections: plannedSections, totalSections, progress: 15 })}\n\n`))
 
             // STEP 2: Generate sections one by one
-            const generatedSections = []
-            const previousSummaries = []
-            const allQuestions = []
+            const generatedSections = (existingCheckpoint?.sections || []).filter(section => section.type !== 'solutions')
+            const previousSummaries = generatedSections.map(section => section.summary ? `${section.title}: ${section.summary}` : '').filter(Boolean)
+            const allQuestions = generatedSections.flatMap(section => (section.blocks || []).filter(block => block.type === 'question').map(block => block.content || {}))
 
             const blockInstructions = {
               objectives: `Erstelle eine Lernziel-Checkliste. Verwende diese Block-Typen:
@@ -2622,7 +2775,7 @@ WICHTIG:
 - "glossary": Liste von Begriffen mit Definitionen (terms Array mit term und definition)`
             }
 
-            for (let idx = 0; idx < plannedSections.length; idx++) {
+            for (let idx = generatedSections.length; idx < plannedSections.length; idx++) {
               const planned = plannedSections[idx]
               const sectionType = planned.type || 'theory'
               const sectionTitle = planned.title || `Sektion ${idx + 1}`
@@ -2638,7 +2791,7 @@ WICHTIG:
                 ? learningObjectives.map(o => `- ${o}`).join('\n')
                 : 'Keine spezifischen Lernziele definiert'
 
-              const sectionPrompt = `Du bist ein erfahrener Schweizer Primarschullehrer. Generiere den Inhalt für EINE Sektion eines Lerndossiers.
+              const sectionPrompt = `Du bist eine erfahrene Schweizer Lehrperson und Instructional Designer. Generiere den Inhalt für EINE Sektion eines Lerndossiers.
 
 === KONTEXT ===
 Thema: ${topic}
@@ -2683,7 +2836,7 @@ WICHTIG:
               let sectionContent
               try {
                 const sectionResponse = await openai.chat.completions.create({
-                  model: 'gpt-4o',
+                  model: dossierModel,
                   messages: [
                     { role: 'system', content: sectionPrompt },
                     { role: 'user', content: `Generiere die Sektion '${sectionTitle}' für das Dossier '${dossierTitle}'.` }
@@ -2691,10 +2844,28 @@ WICHTIG:
                   temperature: 0.7,
                   response_format: { type: 'json_object' }
                 })
+                addDossierUsage(sectionResponse.usage)
                 sectionContent = JSON.parse(sectionResponse.choices[0].message.content)
+                let prepared = prepareDossierSection(sectionContent, { sectionType, grade })
+                if (!prepared.quality.passed) {
+                  const repairResponse = await openai.chat.completions.create({
+                    model: dossierModel,
+                    messages: [
+                      { role: 'system', content: sectionPrompt },
+                      { role: 'assistant', content: JSON.stringify(sectionContent) },
+                      { role: 'user', content: `Korrigiere die Sektion vollständig. Behebe: ${[...prepared.quality.errors, ...prepared.quality.warnings].join(' ')}. Gib nur das komplette JSON zurück.` },
+                    ],
+                    temperature: 0.2,
+                    response_format: { type: 'json_object' },
+                  })
+                  addDossierUsage(repairResponse.usage)
+                  prepared = prepareDossierSection(JSON.parse(repairResponse.choices[0].message.content), { sectionType, grade })
+                }
+                if (!prepared.quality.passed) throw new Error(prepared.quality.errors.join(' '))
+                sectionContent = prepared.content
               } catch (e) {
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'section_error', section: sectionTitle, sectionIndex: idx, message: e.message })}\n\n`))
-                sectionContent = { blocks: [{ type: 'text', content: { html: `<i>Fehler bei der Generierung: ${e.message}</i>` } }], summary: '' }
+                throw new Error(`Sektion "${sectionTitle}" konnte nicht qualitätsgesichert erstellt werden: ${e.message}`)
               }
 
               // Process blocks
@@ -2720,11 +2891,17 @@ WICHTIG:
                 type: sectionType,
                 title: sectionTitle,
                 order: idx,
-                blocks
+                blocks,
+                summary: sectionContent.summary || '',
               })
 
               const summary = sectionContent.summary || ''
               if (summary) previousSummaries.push(`${sectionTitle}: ${summary}`)
+
+              await db.collection('dossiers').updateOne({ id: dossierId }, { $set: {
+                sections: generatedSections, generated_sections: generatedSections.length,
+                generation_status: 'pending', last_completed_section: idx, updated_at: new Date(),
+              } })
 
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'section_complete', section: sectionTitle, sectionIndex: idx, totalSections, blockCount: blocks.length, progress: progressBase + Math.floor(70 / totalSections) })}\n\n`))
             }
@@ -2754,8 +2931,9 @@ WICHTIG:
             // STEP 4: Save to MongoDB
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'status', message: 'Dossier wird gespeichert...', progress: 95 })}\n\n`))
 
-            const dossierId = uuidv4()
             const now = new Date()
+            const dossierQuality = evaluateDossier(generatedSections, learningObjectives)
+            if (!dossierQuality.passed) throw new Error(`Dossier-Qualitätskontrolle fehlgeschlagen: ${dossierQuality.errors.join(' ')}`)
             const dossier = {
               id: dossierId,
               user_id: decoded.userId,
@@ -2772,21 +2950,34 @@ WICHTIG:
               generated_sections: generatedSections.length,
               total_sections: generatedSections.length,
               mode: 'dossier',
-              created_at: now,
+              quality: dossierQuality,
+              created_at: checkpointCreatedAt,
               updated_at: now
             }
 
-            await db.collection('dossiers').insertOne(dossier)
+            await db.collection('dossiers').updateOne(
+              { id: dossierId, user_id: decoded.userId },
+              { $set: { ...dossier, completed_at: now } },
+            )
             await db.collection('users').updateOne({ id: decoded.userId }, { $inc: { worksheets_used_this_month: 1 } })
+            await completeGeneration(dossierGenerationId, {
+              result: { dossierId, title: dossierTitle }, usage: dossierUsage, model: dossierModel,
+              quality: dossierQuality, metadata: { sections: generatedSections.length },
+            })
 
-            const dossierResponse = { ...dossier, created_at: now.toISOString(), updated_at: now.toISOString() }
+            const dossierResponse = { ...dossier, created_at: checkpointCreatedAt.toISOString(), updated_at: now.toISOString() }
             delete dossierResponse._id
 
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'dossier_complete', dossier: dossierResponse, progress: 100 })}\n\n`))
             controller.close()
           } catch (error) {
             console.error('Dossier streaming error:', error)
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: error.message })}\n\n`))
+            if (dossierGenerationId) await failGeneration(dossierGenerationId, error, { dossierId })
+            await db.collection('dossiers').updateOne(
+              { id: dossierId, user_id: decoded.userId },
+              { $set: { generation_status: 'failed', last_error: String(error.message || error).slice(0, 500), updated_at: new Date() } },
+            ).catch(() => {})
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: publicErrorMessage(error, 'Dossier-Generierung wurde unterbrochen.'), dossierId, recoverable: true })}\n\n`))
             controller.close()
           }
         }
@@ -2916,6 +3107,23 @@ WICHTIG:
 
         // Sections
         const sections = dossierData.sections || []
+        const visibleSections = sections.filter(section => includeSolutions || section.type !== 'solutions')
+        addPage()
+        doc.setFillColor(37, 99, 235)
+        doc.rect(0, 0, 210, 32, 'F')
+        doc.setTextColor(255, 255, 255)
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(20)
+        doc.text('Inhalt', margin, 21)
+        doc.setTextColor(0, 0, 0)
+        y = 48
+        visibleSections.forEach((section, index) => {
+          checkPage(9)
+          doc.setFont('helvetica', index === 0 ? 'bold' : 'normal')
+          doc.setFontSize(11)
+          doc.text(`${String(index + 1).padStart(2, '0')}  ${section.title || `Abschnitt ${index + 1}`}`, margin, y)
+          y += 8
+        })
         for (const section of sections) {
           if (section.type === 'solutions' && !includeSolutions) continue
 
@@ -3075,6 +3283,43 @@ WICHTIG:
                 }
                 y += 4
               }
+            } else if (block.type === 'creative_task') {
+              checkPage(35)
+              doc.setFillColor(255, 247, 237)
+              doc.roundedRect(margin, y - 3, contentWidth, 18, 2, 2, 'F')
+              doc.setFont('helvetica', 'bold')
+              doc.setFontSize(11)
+              doc.text('Kreativauftrag', margin + 4, y + 3)
+              doc.setFont('helvetica', 'normal')
+              const taskLines = doc.splitTextToSize(content.instruction || content.text || '', contentWidth - 10)
+              y += 10
+              taskLines.forEach(line => { checkPage(6); doc.text(line, margin + 4, y); y += 5 })
+              const spaceLines = Math.min(14, Math.max(3, Number(content.space_lines) || 8))
+              y += 4
+              for (let line = 0; line < spaceLines; line++) {
+                checkPage(8)
+                doc.setDrawColor(210, 215, 225)
+                doc.line(margin + 4, y, pageWidth - margin - 4, y)
+                y += 7
+              }
+            } else if (block.type === 'reflection') {
+              const prompts = content.questions || content.prompts || []
+              doc.setFont('helvetica', 'bold')
+              doc.setFontSize(11)
+              doc.text('Reflexion', margin, y)
+              y += 7
+              for (const prompt of prompts) {
+                checkPage(24)
+                doc.setFont('helvetica', 'normal')
+                const promptLines = doc.splitTextToSize(`- ${prompt}`, contentWidth - 4)
+                promptLines.forEach(line => { doc.text(line, margin + 2, y); y += 5 })
+                for (let answerLine = 0; answerLine < 2; answerLine++) {
+                  y += 5
+                  doc.setDrawColor(210, 215, 225)
+                  doc.line(margin + 4, y, pageWidth - margin - 4, y)
+                }
+                y += 6
+              }
             }
           }
         }
@@ -3087,6 +3332,11 @@ WICHTIG:
           doc.setFont('helvetica', 'normal')
           doc.setTextColor(150, 150, 150)
           doc.text(`${title} | Seite ${i} von ${totalPages}`, pageWidth / 2, 290, { align: 'center' })
+          if (i > 1) {
+            doc.setTextColor(37, 99, 235)
+            doc.setFont('helvetica', 'bold')
+            doc.text(version === 'teacher' ? 'EDUFLOW - LEHRPERSON' : 'EDUFLOW - LERNMATERIAL', margin, 10)
+          }
           doc.setTextColor(0, 0, 0)
         }
 
@@ -3114,7 +3364,7 @@ WICHTIG:
     ))
 
   } catch (error) {
-    console.error('API Error:', error)
+    logEvent('error', 'api.request.failed', { requestId, route, method, durationMs: Date.now() - requestStartedAt, error })
     return handleCORS(NextResponse.json(
       { error: publicErrorMessage(error) },
       { status: 500 }

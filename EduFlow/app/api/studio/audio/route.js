@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
-import { generateSpeechWithGemini } from '@/lib/ai'
 import { applyCorsHeaders, verifyAuthToken } from '@/lib/server/security'
+import { generateOpenAISpeech } from '@/lib/server/openai-service'
+import { logComplete, logFailure, requestContext } from '@/lib/server/logger'
 
 export const runtime = 'nodejs'
 
@@ -26,6 +27,7 @@ export async function OPTIONS() {
 }
 
 export async function POST(request) {
+  const context = requestContext(request, '/api/studio/audio')
   const user = verifyToken(request)
   if (!user?.userId || user.role === 'student') {
     return jsonResponse({ error: 'Nicht authentifiziert.' }, { status: 401 })
@@ -39,30 +41,30 @@ export async function POST(request) {
       return jsonResponse({ error: 'Bitte zuerst ein Audio-Skript generieren.' }, { status: 400 })
     }
 
-    const result = await generateSpeechWithGemini({
+    const result = await generateOpenAISpeech({
+      userId: user.userId,
       text: text.trim().slice(0, 9000),
+      feature: 'studio-audio',
       model,
-      voiceName
+      voice: voiceName || 'coral',
     })
+    logComplete(context, { feature: 'studio-audio', model: result.model, generationId: result.generationId })
 
     return new NextResponse(result.audio, {
       status: 200,
       headers: {
         'Content-Type': result.mimeType,
-        'Content-Disposition': `attachment; filename="${filename(title)}.wav"`,
+        'Content-Disposition': `attachment; filename="${filename(title)}.mp3"`,
         'X-AI-Provider': result.provider,
         'X-AI-Model': result.model,
         'Cache-Control': 'no-store'
       }
     })
   } catch (error) {
-    console.error('Studio audio error:', {
-      message: error?.message,
-      name: error?.name
-    })
+    logFailure(context, error, { feature: 'studio-audio' })
 
     return jsonResponse({
-      error: 'Audio-Generierung fehlgeschlagen. Pruefe, ob das Gemini-TTS-Modell fuer dein Google-Projekt verfuegbar ist.',
+      error: 'Audio-Generierung fehlgeschlagen. Bitte versuche es erneut.',
       details: process.env.NODE_ENV === 'development' ? error?.message : undefined
     }, { status: 502 })
   }

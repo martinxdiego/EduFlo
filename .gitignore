@@ -61,6 +61,8 @@ memory/
 **/memory/
 test_reports/
 **/test_reports/
+tmp/
+**/tmp/
 
 # Claude Code / AI tools
 .claude/

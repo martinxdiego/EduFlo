@@ -1,5 +1,7 @@
 import './globals.css'
 import PWARegister from '@/components/PWARegister'
+import { Analytics } from '@vercel/analytics/next'
+import { SpeedInsights } from '@vercel/speed-insights/next'
 
 export const metadata = {
   title: 'EduFlow – Editierbare Lernmaterialien für den Lehrplan 21',
@@ -61,6 +63,8 @@ export default function RootLayout({ children }) {
       <body className="antialiased overscroll-y-none">
         {children}
         <PWARegister />
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   )

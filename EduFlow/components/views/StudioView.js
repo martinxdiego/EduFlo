@@ -196,7 +196,7 @@ function StudioView() {
         throw new Error(await readError(response, 'Audio-Export fehlgeschlagen.'))
       }
 
-      downloadBlob(await response.blob(), slug(artifact.title, 'wav'))
+      downloadBlob(await response.blob(), slug(artifact.title, 'mp3'))
       setSuccessMessage('Audio wurde erstellt.')
     } catch (error) {
       const message = error.message || 'Audio-Export fehlgeschlagen.'
@@ -215,7 +215,7 @@ function StudioView() {
             <div className="h-10 w-10 rounded-xl bg-blue-100 flex items-center justify-center">
               <Sparkles className="h-5 w-5 text-blue-600" />
             </div>
-            <Badge variant="outline" className="bg-white text-blue-700 border-blue-200">Google Gemini</Badge>
+            <Badge variant="outline" className="bg-white text-blue-700 border-blue-200">OpenAI Studio</Badge>
           </div>
           <h1 className="text-3xl font-bold text-gray-900">Studio</h1>
           <p className="text-sm text-gray-500 mt-1">Quellen rein, Unterrichtspaket raus.</p>
@@ -415,7 +415,7 @@ function StudioView() {
                     <p className="text-sm leading-7 text-gray-700 whitespace-pre-wrap">{artifact.audioScript || 'Kein Audio-Skript vorhanden.'}</p>
                     <Button onClick={exportAudio} disabled={!artifact.audioScript || exportingAudio}>
                       {exportingAudio ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
-                      WAV erstellen
+                      MP3 erstellen
                     </Button>
                   </CardContent>
                 </Card>

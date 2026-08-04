@@ -22,6 +22,8 @@ export async function deleteTeacherAccountData(db, userId) {
     db.collection('versions').deleteMany({ $or: [{ user_id: userId }, { worksheet_id: { $in: worksheetIds } }] }),
     db.collection('shares').deleteMany({ $or: [{ owner_id: userId }, { shared_with_id: userId }, { worksheet_id: { $in: worksheetIds } }] }),
     db.collection('password_reset_tokens').deleteMany({ user_id: userId }),
+    db.collection('ai_generations').deleteMany({ user_id: userId }),
+    db.collection('generated_assets').deleteMany({ user_id: userId }),
   ])
 
   await Promise.all([

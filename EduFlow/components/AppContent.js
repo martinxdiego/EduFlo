@@ -40,6 +40,7 @@ import { LEHRPLAN_CYCLES, searchCompetencies, getAllSubjects, getSubjectsForCycl
 import { getThemeById } from '@/data/worksheetThemes'
 import { DashboardView, GeneratorView, LibraryView, UploadView, StudioView, SettingsView, AnalyticsView } from '@/components/views'
 import { useEduFlow } from '@/contexts/EduFlowContext'
+import { validateChatToolCall } from '@/lib/chat-tools'
 import OnboardingHint from '@/components/OnboardingHint'
 import BottomTabBar from '@/components/BottomTabBar'
 import MobileMoreSheet from '@/components/MobileMoreSheet'
@@ -1673,7 +1674,13 @@ const AppContent = () => {
 
   // Execute tool calls from AI assistant
   const executeChatToolCall = async (toolCall) => {
-    const { name, arguments: args } = toolCall
+    const { name } = toolCall
+    let args
+    try {
+      args = validateChatToolCall(name, toolCall.arguments, { questionCount: editedQuestions?.length || selectedWorksheet?.content?.questions?.length || 0 })
+    } catch (validationError) {
+      return { success: false, message: validationError.message }
+    }
 
     switch (name) {
       case 'modify_question': {

@@ -12,6 +12,7 @@ import { Switch } from '@/ui/switch'
 import { Alert, AlertDescription } from '@/ui/alert'
 import { User, Settings, Crown, Bell, Printer, CheckCircle2, ShieldAlert, Trash2 } from 'lucide-react'
 import { useEduFlow } from '@/contexts/EduFlowContext'
+import AIQualityCard from '@/components/AIQualityCard'
 
 export default function SettingsView({ GRADES, SUBJECTS, DIFFICULTY_LABELS }) {
   const ctx = useEduFlow()
@@ -55,6 +56,7 @@ export default function SettingsView({ GRADES, SUBJECTS, DIFFICULTY_LABELS }) {
         <p className="text-gray-600">Passen Sie EduFlow an Ihre Bedürfnisse an.</p>
       </div>
       <div className="space-y-6">
+        <AIQualityCard token={token} />
         {/* Profile */}
         <Card className="glass-card border-0">
           <CardHeader><CardTitle className="text-lg flex items-center gap-2"><User className="h-5 w-5 text-blue-500" /> Profil</CardTitle></CardHeader>

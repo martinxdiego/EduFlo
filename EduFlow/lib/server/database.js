@@ -22,6 +22,11 @@ async function ensureOperationalIndexes(db) {
       db.collection('password_reset_tokens').createIndex({ token_hash: 1 }, { unique: true }),
       db.collection('password_reset_tokens').createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 }),
       db.collection('password_reset_tokens').createIndex({ user_id: 1 }),
+      db.collection('ai_generations').createIndex({ id: 1 }, { unique: true }),
+      db.collection('ai_generations').createIndex({ user_id: 1, created_at: -1 }),
+      db.collection('ai_generations').createIndex({ user_id: 1, feature: 1, created_at: -1 }),
+      db.collection('generated_assets').createIndex({ id: 1 }, { unique: true }),
+      db.collection('generated_assets').createIndex({ user_id: 1, created_at: -1 }),
     ]).catch((error) => {
       indexPromise = null
       throw error

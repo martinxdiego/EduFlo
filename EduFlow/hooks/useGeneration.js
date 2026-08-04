@@ -93,45 +93,60 @@ export function useGeneration(token) {
     setShowGenerationTheater(true)
 
     try {
-      const response = await fetch('/api/generate-dossier-stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(params)
-      })
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}))
-        throw new Error(errData.error || 'Dossier-Generierung fehlgeschlagen')
-      }
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n\n')
-        buffer = lines.pop() || ''
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
+      let resumeDossierId = params.resumeDossierId
+      let completed = false
+      for (let attempt = 0; attempt < 2 && !completed; attempt++) {
+        try {
+          const response = await fetch('/api/generate-dossier-stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ ...params, resumeDossierId })
+          })
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({}))
+            throw new Error(errData.error || 'Dossier-Generierung fehlgeschlagen')
+          }
+          const reader = response.body.getReader()
+          const decoder = new TextDecoder()
+          let buffer = ''
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n\n')
+            buffer = lines.pop() || ''
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue
               const data = JSON.parse(line.slice(6))
-              if (data.type === 'section_start' || data.type === 'status') {
+              if (data.type === 'checkpoint') {
+                resumeDossierId = data.dossierId
+                if (data.resumed) setGenerationProgress(prev => [...prev, { step: prev.length + 1, message: 'Gespeicherten Stand wieder aufgenommen...', progress: data.progress || 2, type: 'status' }])
+              } else if (data.type === 'section_start' || data.type === 'status') {
                 setGenerationProgress(prev => [...prev, { step: prev.length + 1, message: data.message || `Sektion "${data.section}" wird erstellt...`, progress: data.progress || 0, type: 'status' }])
               } else if (data.type === 'section_complete') {
                 setGenerationProgress(prev => [...prev, { step: prev.length + 1, message: `Sektion "${data.section}" fertig`, progress: data.progress || 0, type: 'question' }])
               } else if (data.type === 'dossier_complete') {
+                completed = true
                 setGenerationProgress(prev => [...prev, { step: prev.length + 1, message: 'Arbeitsdossier erfolgreich erstellt!', progress: 100, type: 'complete' }])
-                await new Promise(resolve => setTimeout(resolve, 1500))
+                await new Promise(resolve => setTimeout(resolve, 1200))
                 setShowGenerationTheater(false)
                 if (onComplete) onComplete(data.dossier)
               } else if (data.type === 'error') {
-                throw new Error(data.message)
+                const generationError = new Error(data.message)
+                generationError.recoverable = data.recoverable
+                generationError.dossierId = data.dossierId || resumeDossierId
+                throw generationError
               }
-            } catch (parseError) {
-              if (parseError.message !== 'Dossier-Generierung fehlgeschlagen') console.error('Parse-Fehler:', parseError)
-              else throw parseError
             }
           }
+          if (!completed) throw new Error('Der Dossier-Stream wurde unerwartet beendet.')
+        } catch (attemptError) {
+          if (attempt === 0 && attemptError.recoverable && (attemptError.dossierId || resumeDossierId)) {
+            resumeDossierId = attemptError.dossierId || resumeDossierId
+            setGenerationProgress(prev => [...prev, { step: prev.length + 1, message: 'Unterbrechung erkannt - EduFlow setzt beim letzten Checkpoint fort...', progress: 5, type: 'status' }])
+            continue
+          }
+          throw attemptError
         }
       }
     } catch (error) {
