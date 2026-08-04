@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { motion, useReducedMotion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { Button } from '@/ui/button'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
@@ -72,11 +72,9 @@ export default function LandingPage({
   error,
   setError,
 }) {
-  const prefersReducedMotion = useReducedMotion()
   const [showPassword, setShowPassword] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const isLogin = authMode === 'login'
-  const motionInitial = prefersReducedMotion ? false : { opacity: 0, y: 18 }
 
   const switchMode = (mode) => {
     setAuthMode(mode)
@@ -118,7 +116,7 @@ export default function LandingPage({
         </header>
 
         <section className="grid items-start gap-12 py-12 lg:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.75fr)] lg:gap-16 lg:py-20">
-          <motion.div initial={motionInitial} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45 }}>
+          <motion.div initial={false} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
             <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3.5 py-2 text-sm font-medium text-blue-800">
               <Sparkles className="h-4 w-4" aria-hidden="true" />
               Für Lehrpersonen in der Schweiz
@@ -147,9 +145,9 @@ export default function LandingPage({
 
           <motion.div
             id="auth"
-            initial={motionInitial}
+            initial={false}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45, delay: prefersReducedMotion ? 0 : 0.08 }}
+            transition={{ duration: 0.25 }}
             className="lg:sticky lg:top-8 lg:row-span-2"
           >
             <Card className="border-slate-200/80 bg-white/95 shadow-2xl shadow-slate-900/10 backdrop-blur">
@@ -277,9 +275,9 @@ export default function LandingPage({
           </motion.div>
 
           <motion.div
-            initial={motionInitial}
+            initial={false}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45, delay: prefersReducedMotion ? 0 : 0.12 }}
+            transition={{ duration: 0.25 }}
             className="overflow-hidden rounded-3xl border border-slate-200 bg-white/85 shadow-xl shadow-slate-900/5 backdrop-blur"
           >
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 sm:px-6">
