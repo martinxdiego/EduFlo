@@ -2968,7 +2968,16 @@ const AppContent = () => {
                 const isGroupActive = group.items.some(item => item.id === activeView)
                 return (
                   <div key={group.label} className="relative" onMouseEnter={() => setHoveredNav(group.label)} onMouseLeave={() => setHoveredNav(null)}>
-                    <button className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${isGroupActive ? 'bg-blue-50 text-blue-700 shadow-sm ring-1 ring-blue-200/60' : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'}`}>
+                    <button
+                      type="button"
+                      aria-haspopup="menu"
+                      aria-expanded={hoveredNav === group.label}
+                      onClick={() => setHoveredNav(current => current === group.label ? null : group.label)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Escape') setHoveredNav(null)
+                      }}
+                      className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${isGroupActive ? 'bg-blue-50 text-blue-700 shadow-sm ring-1 ring-blue-200/60' : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'}`}
+                    >
                       {group.label}
                       <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${hoveredNav === group.label ? 'rotate-180' : ''}`} />
                     </button>
@@ -2979,10 +2988,11 @@ const AppContent = () => {
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: -4, scale: 0.98 }}
                           transition={{ duration: 0.15, ease: 'easeOut' }}
+                          role="menu"
                           className="absolute top-full left-0 mt-1 min-w-[180px] py-1.5 rounded-xl bg-white/95 backdrop-blur-xl shadow-xl border border-gray-200/60 z-50"
                         >
                           {group.items.map(item => (
-                            <button key={item.id} onClick={() => { setActiveView(item.id); setHoveredNav(null) }} className={`w-full flex items-center gap-2.5 px-3.5 py-2 text-sm transition-colors duration-150 ${activeView === item.id ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'}`}>
+                            <button key={item.id} role="menuitem" onClick={() => { setActiveView(item.id); setHoveredNav(null) }} className={`w-full flex items-center gap-2.5 px-3.5 py-2 text-sm transition-colors duration-150 ${activeView === item.id ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'}`}>
                               <item.icon className={`h-4 w-4 ${activeView === item.id ? 'text-blue-600' : 'text-gray-400'}`} />
                               {item.label}
                             </button>
@@ -4092,7 +4102,20 @@ const AppContent = () => {
                   {assignments.length > 0 ? (
                     <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
                       {assignments.map(a => (
-                        <Card key={a.id} className="glass-card border-0 cursor-pointer hover:shadow-lg transition-all group relative" onClick={() => loadSubmissions(a.id)}>
+                        <Card
+                          key={a.id}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`${a.worksheet_title || a.class_name || 'Aufgabe'} öffnen`}
+                          className="glass-card border-0 cursor-pointer hover:shadow-lg transition-all group relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                          onClick={() => loadSubmissions(a.id)}
+                          onKeyDown={(event) => {
+                            if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) {
+                              event.preventDefault()
+                              loadSubmissions(a.id)
+                            }
+                          }}
+                        >
                           <CardContent className="py-4">
                             <div className="flex items-center justify-between mb-2">
                               <Badge className={`text-xs ${a.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>

@@ -920,7 +920,7 @@ export default function SchuelerPage() {
                 <p className="font-medium">Fehler bei der Abgabe</p>
                 <p className="text-xs mt-0.5">{error}</p>
               </div>
-              <button onClick={() => setError('')} className="ml-auto text-red-400 hover:text-red-600">
+              <button onClick={() => setError('')} aria-label="Fehlermeldung schließen" className="ml-auto text-red-400 hover:text-red-600">
                 <XCircle className="h-4 w-4" />
               </button>
             </motion.div>
@@ -948,6 +948,8 @@ export default function SchuelerPage() {
           <div className="flex justify-center gap-1.5 mt-6">
             {questions.map((_, i) => (
               <button key={i} onClick={() => setCurrentQuestion(i)}
+                aria-label={`Zu Frage ${i + 1} wechseln${answers[i] !== undefined ? ', beantwortet' : ''}`}
+                aria-current={i === currentQuestion ? 'step' : undefined}
                 className={`w-3 h-3 rounded-full transition-all ${
                   i === currentQuestion ? 'bg-blue-600 scale-125' :
                   answers[i] !== undefined ? 'bg-green-400' : 'bg-gray-200'
@@ -1017,7 +1019,9 @@ export default function SchuelerPage() {
                 maxLength={8}
               />
               <button
+                type="button"
                 onClick={loadAssignment}
+                aria-label={loading ? 'Aufgabe wird geladen' : 'Aufgabe öffnen'}
                 disabled={!accessCode.trim() || (!studentName.trim() && studentToken === 'guest') || loading}
                 className="px-6 py-3 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
               >
