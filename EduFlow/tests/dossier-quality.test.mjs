@@ -27,6 +27,17 @@ test('drops malformed optional questions from theory sections', () => {
   assert.equal(result.content.blocks.some(block => block.type === 'question'), false)
 })
 
+test('keeps source texts usable when optional comprehension questions are malformed', () => {
+  const result = prepareDossierSection({ blocks: [
+    { type: 'heading', content: { text: 'Quellentext' } },
+    { type: 'text', content: { html: 'Ein ausfuehrlicher und sachlich verwertbarer Quellentext. '.repeat(30) } },
+    { type: 'question', content: { answer: 'Eine optionale Musterloesung ohne Frage.' } },
+  ] }, { sectionType: 'source_text', grade: 8 })
+  assert.equal(result.quality.passed, true)
+  assert.equal(result.content.blocks.some(block => block.type === 'question'), false)
+  assert.match(result.quality.warnings.join(' '), /optionale Aufgaben/)
+})
+
 test('evaluates complete dossiers and detects duplicates', () => {
   const sections = Array.from({ length: 6 }, (_, i) => ({ blocks: i === 2 ? Array.from({ length: 5 }, () => ({ type: 'question', content: { question: 'Gleich?', answer: 'Ja' } })) : [] }))
   const result = evaluateDossier(sections, ['Ich kann es.'])

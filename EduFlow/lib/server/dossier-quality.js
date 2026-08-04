@@ -39,7 +39,7 @@ export function prepareDossierSection(sectionContent, { sectionType = 'theory', 
   let blocks = arr(sectionContent?.blocks).map(normalizeBlock)
   const errors = []
   const warnings = []
-  if (!['exercises', 'source_text'].includes(sectionType)) {
+  if (sectionType !== 'exercises') {
     const before = blocks.length
     blocks = blocks.filter(block => block.type !== 'question' || (text(block.content.question) && text(block.content.answer)))
     if (blocks.length < before) warnings.push('Unvollständige optionale Aufgaben wurden aus dieser Sektion entfernt.')
