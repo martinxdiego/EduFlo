@@ -17,6 +17,7 @@ import { validateChatToolCall } from '@/lib/chat-tools'
 import { deduplicateDossierQuestions, evaluateDossier, prepareDossierSection, validateDossierOutline } from '@/lib/server/dossier-quality'
 import { logEvent } from '@/lib/server/logger'
 import { normalizeMaterialMetadata } from '@/lib/product-workspace'
+import { ACTIVITY_MODES, buildLearningGoalProgress, buildSupportRecommendations, isAssignmentFeedbackVisible, normalizeAssignmentSettings } from '@/lib/learning-workflow'
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 const ALLOWED_UPLOAD_EXTENSIONS = new Set(['pdf', 'docx', 'txt', 'csv', 'rtf', 'pptx', 'xlsx', 'xls'])
@@ -510,30 +511,56 @@ async function handleRoute(request, { params }) {
       }
 
       const submissions = await db.collection('submissions').find({ student_id: decoded.studentId }).sort({ submitted_at: -1 }).toArray()
+      const assignmentIds = [...new Set(submissions.map((submission) => submission.assignment_id))]
+      const assignments = await db.collection('assignments').find({ id: { $in: assignmentIds } }).toArray()
+      const assignmentMap = new Map(assignments.map((assignment) => [assignment.id, assignment]))
 
-      // Enrich with assignment info
-      const enriched = await Promise.all(submissions.map(async (sub) => {
+      const enriched = submissions.map((sub) => {
         const { _id, ...clean } = sub
-        const assignment = await db.collection('assignments').findOne({ id: clean.assignment_id })
+        const assignment = assignmentMap.get(clean.assignment_id)
+        const settings = normalizeAssignmentSettings(assignment || clean)
+        const feedbackVisible = assignment ? isAssignmentFeedbackVisible(assignment) : true
         clean.assignment_title = assignment?.worksheet_title || 'Unbenannt'
         clean.class_name = assignment?.class_name || ''
+        clean.subject = assignment?.subject || ''
+        clean.activity_type = settings.activityType
+        clean.activity_label = ACTIVITY_MODES[settings.activityType].label
+        clean.learning_goals = settings.learningGoals
+        clean.feedback_pending = !feedbackVisible
         // Calculate Swiss grade
         if (!clean.swiss_grade && clean.total_points > 0) {
           clean.swiss_grade = Math.round((clean.earned_points / clean.total_points * 5 + 1) * 2) / 2
         }
+        if (!feedbackVisible) {
+          clean.earned_points = null
+          clean.score_percentage = null
+          clean.swiss_grade = null
+          clean.question_results = []
+        } else if (!settings.graded) {
+          clean.swiss_grade = null
+        }
         return clean
-      }))
+      })
 
       // Calculate stats
       const totalQuizzes = enriched.length
       const totalPoints = enriched.reduce((sum, s) => sum + (s.earned_points || 0), 0)
-      const avgScore = totalQuizzes > 0 ? Math.round(enriched.reduce((sum, s) => sum + (s.score_percentage || 0), 0) / totalQuizzes) : 0
-      const avgGrade = totalQuizzes > 0 ? Math.round(enriched.reduce((sum, s) => sum + (s.swiss_grade || 1), 0) / totalQuizzes * 10) / 10 : 0
-      const bestGrade = totalQuizzes > 0 ? Math.max(...enriched.map(s => s.swiss_grade || 1)) : 0
+      const visibleScores = enriched.filter((submission) => Number.isFinite(submission.score_percentage))
+      const visibleGrades = enriched.filter((submission) => Number.isFinite(submission.swiss_grade))
+      const avgScore = visibleScores.length ? Math.round(visibleScores.reduce((sum, s) => sum + s.score_percentage, 0) / visibleScores.length) : 0
+      const avgGrade = visibleGrades.length ? Math.round(visibleGrades.reduce((sum, s) => sum + s.swiss_grade, 0) / visibleGrades.length * 10) / 10 : 0
+      const bestGrade = visibleGrades.length ? Math.max(...visibleGrades.map(s => s.swiss_grade)) : 0
+      const visibleGoalSubmissions = submissions.filter((submission) => {
+        const assignment = assignmentMap.get(submission.assignment_id)
+        return !assignment || isAssignmentFeedbackVisible(assignment)
+      })
+      const learningGoals = buildLearningGoalProgress(assignments, visibleGoalSubmissions)
 
       return handleCORS(NextResponse.json({
         submissions: enriched,
-        stats: { totalQuizzes, totalPoints, avgScore, avgGrade, bestGrade }
+        stats: { totalQuizzes, totalPoints, avgScore, avgGrade, bestGrade },
+        learningGoals,
+        recommendations: buildSupportRecommendations(learningGoals),
       }))
     }
 
@@ -939,12 +966,16 @@ Regeln:
         status: 'active'
       }).sort({ created_at: -1 }).toArray()
 
-      // Check which ones the student already submitted
-      const mySubmissions = await db.collection('submissions').find({ student_id: decoded.studentId }).toArray()
-      const submittedAssignmentIds = new Set(mySubmissions.map(s => s.assignment_id))
+      const [mySubmissions, classes, worksheets] = await Promise.all([
+        db.collection('submissions').find({ student_id: decoded.studentId, assignment_id: { $in: assignments.map((assignment) => assignment.id) } }).toArray(),
+        db.collection('classes').find({ id: { $in: classIds } }).toArray(),
+        db.collection('worksheets').find({ id: { $in: assignments.map((assignment) => assignment.worksheet_id) } }).project({ id: 1, subject: 1, topic: 1 }).toArray(),
+      ])
+      const attemptMap = new Map()
+      for (const submission of mySubmissions) attemptMap.set(submission.assignment_id, (attemptMap.get(submission.assignment_id) || 0) + 1)
+      const worksheetMap = new Map(worksheets.map((worksheet) => [worksheet.id, worksheet]))
 
       // Get student's niveau per class
-      const classes = await db.collection('classes').find({ id: { $in: classIds } }).toArray()
       const niveauMap = {}
       classes.forEach(cls => {
         const enrolled = (cls.enrolled_students || []).find(s => s.student_id === decoded.studentId)
@@ -960,6 +991,10 @@ Regeln:
         })
         .map(a => {
           const cls = classes.find(c => c.id === a.class_id)
+          const settings = normalizeAssignmentSettings(a)
+          const attemptCount = attemptMap.get(a.id) || 0
+          const worksheet = worksheetMap.get(a.worksheet_id)
+          const expired = Boolean(a.deadline && new Date(a.deadline) < new Date())
           return {
             id: a.id,
             code: a.code,
@@ -969,9 +1004,21 @@ Regeln:
             target_niveau: a.target_niveau,
             deadline: a.deadline,
             created_at: a.created_at,
-            already_submitted: submittedAssignmentIds.has(a.id),
-            access_url: a.access_url
+            subject: a.subject || worksheet?.subject || '', topic: a.topic || worksheet?.topic || '', unit: settings.unit,
+            activity_type: settings.activityType, activity_label: ACTIVITY_MODES[settings.activityType].label,
+            learning_goals: settings.learningGoals, instructions: settings.instructions,
+            max_attempts: settings.maxAttempts, attempt_count: attemptCount,
+            already_submitted: attemptCount > 0, can_retry: !expired && attemptCount < settings.maxAttempts, expired,
+            time_limit_minutes: settings.timeLimitMinutes,
+            feedback_pending: attemptCount > 0 && !isAssignmentFeedbackVisible(a),
+            access_url: a.access_url,
           }
+        }).sort((a, b) => {
+          if (a.already_submitted !== b.already_submitted) return a.already_submitted ? 1 : -1
+          if (a.deadline && b.deadline) return new Date(a.deadline) - new Date(b.deadline)
+          if (a.deadline) return -1
+          if (b.deadline) return 1
+          return String(a.class_name).localeCompare(String(b.class_name), 'de') || String(a.title).localeCompare(String(b.title), 'de')
         })
 
       return handleCORS(NextResponse.json(enriched))

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { BookOpen, CheckCircle2, ArrowRight, Clock, Send, ArrowLeft, Star, Trophy, Loader2, XCircle, AlertCircle, Sparkles, ChevronDown, ChevronUp, LogOut, User, BarChart3, Award, TrendingUp, Hash, Trash2, Users, Zap, Target, Crown, Flame, Brain, Lightbulb, ChevronRight, RefreshCw } from 'lucide-react'
+import StudentLearningHome from '@/components/StudentLearningHome'
 
 const SESSION_MARKER = 'cookie-session'
 
@@ -28,6 +29,7 @@ export default function SchuelerPage() {
   const [submitted, setSubmitted] = useState(false)
   const [currentQuestion, setCurrentQuestion] = useState(0)
   const [startTime, setStartTime] = useState(Date.now())
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [results, setResults] = useState(null)
@@ -36,7 +38,7 @@ export default function SchuelerPage() {
 
   // Gamification state
   const [gamification, setGamification] = useState(null)
-  const [dashboardTab, setDashboardTab] = useState('results') // 'results' | 'gamification' | 'classes'
+  const [dashboardTab, setDashboardTab] = useState('home')
 
   // Classes state
   const [myClasses, setMyClasses] = useState([])
@@ -56,6 +58,19 @@ export default function SchuelerPage() {
   const [exerciseResult, setExerciseResult] = useState(null) // { correct, xp }
   const [showHint, setShowHint] = useState(false)
   const [completedExercises, setCompletedExercises] = useState(new Set())
+
+  useEffect(() => {
+    if (!assignment?.assignmentCode || submitted) return
+    localStorage.setItem(`eduflow_assignment_draft_v1:${assignment.assignmentCode}`, JSON.stringify({ answers, currentQuestion, savedAt: new Date().toISOString() }))
+  }, [assignment?.assignmentCode, answers, currentQuestion, submitted])
+
+  useEffect(() => {
+    if (view !== 'quiz' || !assignment) return
+    const tick = () => setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startTime) / 1000)))
+    tick()
+    const timer = setInterval(tick, 1000)
+    return () => clearInterval(timer)
+  }, [view, assignment, startTime])
 
   // Restore the HttpOnly cookie session on mount.
   useEffect(() => {
@@ -308,12 +323,14 @@ export default function SchuelerPage() {
   // QUIZ FUNCTIONS
   // ============================================================
 
-  const loadAssignment = async () => {
-    if (!accessCode.trim()) return
+  const loadAssignment = async (codeOverride) => {
+    const resolvedCode = typeof codeOverride === 'string' ? codeOverride.trim().toUpperCase() : accessCode.trim()
+    if (!resolvedCode) return
+    setAccessCode(resolvedCode)
     setLoading(true)
     setError('')
     try {
-      const res = await fetch(`/api/student/assignment/${accessCode.trim()}`)
+      const res = await fetch(`/api/student/assignment/${resolvedCode}`)
       if (!res.ok) {
         const data = await res.json()
         setError(data.error || 'Aufgabe nicht gefunden.')
@@ -322,7 +339,13 @@ export default function SchuelerPage() {
       }
       const data = await res.json()
       setAssignment(data)
+      try {
+        const draft = JSON.parse(localStorage.getItem(`eduflow_assignment_draft_v1:${resolvedCode}`) || 'null')
+        if (draft?.answers) setAnswers(draft.answers)
+        if (Number.isInteger(draft?.currentQuestion)) setCurrentQuestion(draft.currentQuestion)
+      } catch {}
       setStartTime(Date.now())
+      setElapsedSeconds(0)
       setView('quiz')
     } catch (err) {
       setError('Verbindungsfehler. Bitte versuche es erneut.')
@@ -367,6 +390,7 @@ export default function SchuelerPage() {
       }
       setResults(data)
       setSubmitted(true)
+      if (assignment?.assignmentCode) localStorage.removeItem(`eduflow_assignment_draft_v1:${assignment.assignmentCode}`)
       // Calculate XP earned for animation
       if (studentToken && studentToken !== 'guest') {
         let xp = 10 + (data.earnedPoints || 0)
@@ -507,7 +531,8 @@ export default function SchuelerPage() {
     const totalQuestions = results.totalQuestions || questions.length
     const percentage = results.scorePercentage ?? (results.correctCount ? Math.round((results.correctCount / totalQuestions) * 100) : 0)
     const questionFeedback = results.questionResults || []
-    const swissGrade = results.swissGrade || (results.totalPoints > 0 ? Math.round((results.earnedPoints / results.totalPoints * 5 + 1) * 2) / 2 : null)
+    const swissGrade = results.swissGrade ?? null
+    const feedbackPending = Boolean(results.feedbackPending)
 
     return (
       <div className="min-h-screen bg-gradient-to-b from-green-50 via-white to-blue-50 p-4">
@@ -515,13 +540,16 @@ export default function SchuelerPage() {
           {/* Score Summary */}
           <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="text-center mb-8">
             <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', delay: 0.2 }}
-              className={`w-24 h-24 mx-auto mb-6 rounded-full flex items-center justify-center ${percentage >= 80 ? 'bg-green-100' : percentage >= 50 ? 'bg-yellow-100' : 'bg-red-100'}`}>
-              <Trophy className={`h-12 w-12 ${percentage >= 80 ? 'text-green-600' : percentage >= 50 ? 'text-yellow-600' : 'text-red-600'}`} />
+              className={`w-24 h-24 mx-auto mb-6 rounded-full flex items-center justify-center ${feedbackPending ? 'bg-blue-100' : percentage >= 80 ? 'bg-green-100' : percentage >= 50 ? 'bg-yellow-100' : 'bg-red-100'}`}>
+              {feedbackPending ? <Clock className="h-12 w-12 text-blue-600" /> : <Trophy className={`h-12 w-12 ${percentage >= 80 ? 'text-green-600' : percentage >= 50 ? 'text-yellow-600' : 'text-red-600'}`} />}
             </motion.div>
             <h2 className="text-3xl font-bold text-gray-900 mb-2">Geschafft!</h2>
             <p className="text-gray-600 mb-6">Du hast die Aufgabe abgeschlossen.</p>
 
             <div className="bg-white rounded-2xl shadow-lg p-6 mb-6 space-y-4">
+              {feedbackPending ? (
+                <div className="rounded-2xl bg-blue-50 p-6 text-center"><Clock className="mx-auto h-7 w-7 text-blue-600" /><p className="mt-2 font-semibold text-blue-900">Deine Abgabe ist gespeichert.</p><p className="mt-1 text-sm text-blue-700">Die Lehrperson gibt Ergebnis und Feedback später frei.</p></div>
+              ) : <>
               <div className={`grid ${swissGrade ? 'grid-cols-4' : 'grid-cols-3'} gap-3`}>
                 <div className="bg-blue-50 rounded-xl p-3">
                   <p className="text-2xl font-bold text-blue-600">{totalQuestions}</p>
@@ -547,6 +575,7 @@ export default function SchuelerPage() {
                 <motion.div initial={{ width: 0 }} animate={{ width: `${percentage}%` }} transition={{ duration: 1, delay: 0.5 }}
                   className={`h-full rounded-full ${percentage >= 80 ? 'bg-green-500' : percentage >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`} />
               </div>
+              </>}
 
               {/* XP gained animation */}
               {xpGained && (
@@ -564,7 +593,7 @@ export default function SchuelerPage() {
                 </motion.div>
               )}
 
-              {percentage >= 80 && (
+              {!feedbackPending && percentage >= 80 && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1 }}
                   className="flex items-center gap-2 justify-center text-green-700 bg-green-50 p-3 rounded-xl">
                   <Star className="h-5 w-5" /> Sehr gut gemacht!
@@ -901,6 +930,11 @@ export default function SchuelerPage() {
         </header>
 
         <main className="max-w-2xl mx-auto px-4 py-8">
+          <div className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2"><div><span className="rounded-full bg-blue-100 px-2 py-1 text-[10px] font-semibold text-blue-700">{assignment.activityLabel || 'Übung'}</span>{assignment.attemptNumber ? <span className="ml-2 text-[11px] text-gray-500">Versuch {assignment.attemptNumber}/{assignment.maxAttempts}</span> : null}</div>{assignment.timeLimitMinutes ? <span className={`inline-flex items-center gap-1 text-xs font-semibold ${elapsedSeconds > assignment.timeLimitMinutes * 60 ? 'text-red-600' : 'text-blue-700'}`}><Clock className="h-3.5 w-3.5" /> {Math.max(0, assignment.timeLimitMinutes * 60 - elapsedSeconds) > 0 ? `${Math.floor(Math.max(0, assignment.timeLimitMinutes * 60 - elapsedSeconds) / 60)}:${String(Math.max(0, assignment.timeLimitMinutes * 60 - elapsedSeconds) % 60).padStart(2, '0')}` : 'Zeit abgelaufen'}</span> : null}</div>
+            {assignment.instructions ? <p className="mt-3 text-sm text-gray-700">{assignment.instructions}</p> : null}
+            {assignment.learningGoals?.length ? <div className="mt-3 flex flex-wrap gap-1.5">{assignment.learningGoals.map((goal) => <span key={goal} className="rounded-full bg-white px-2 py-1 text-[10px] text-gray-600">Ziel: {goal}</span>)}</div> : null}
+          </div>
           <AnimatePresence mode="wait">
             <motion.div key={currentQuestion} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.2 }}>
               <div className="mb-6">
@@ -995,6 +1029,7 @@ export default function SchuelerPage() {
 
       <main className="max-w-3xl mx-auto px-4 py-6 space-y-6">
         {/* Quick access: Enter code */}
+        {(studentToken === 'guest' || dashboardTab === 'code') ? (
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
           <div className="bg-white rounded-2xl shadow-lg p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-1">Aufgabe starten</h2>
@@ -1033,9 +1068,20 @@ export default function SchuelerPage() {
             )}
           </div>
         </motion.div>
+        ) : null}
+
+        {studentToken !== 'guest' && dashboardTab === 'home' ? (
+          <StudentLearningHome
+            assignments={classAssignments}
+            resultsData={myResults}
+            gamification={gamification}
+            onStart={loadAssignment}
+            onNavigate={setDashboardTab}
+          />
+        ) : null}
 
         {/* Pending class assignments */}
-        {studentToken !== 'guest' && classAssignments.filter(a => !a.already_submitted).length > 0 && (
+        {studentToken !== 'guest' && dashboardTab !== 'home' && classAssignments.filter(a => !a.already_submitted).length > 0 && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
             <div className="bg-white rounded-2xl shadow-lg p-5">
               <div className="flex items-center gap-2 mb-3">
@@ -1046,7 +1092,7 @@ export default function SchuelerPage() {
               <div className="grid gap-2">
                 {classAssignments.filter(a => !a.already_submitted).map(a => (
                   <div key={a.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl hover:bg-blue-50 transition-colors cursor-pointer"
-                    onClick={() => { setAccessCode(a.code); setError('') }}>
+                    onClick={() => loadAssignment(a.code)}>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{a.title}</p>
                       <div className="flex items-center gap-2 mt-0.5">
@@ -1079,7 +1125,7 @@ export default function SchuelerPage() {
         {studentToken !== 'guest' && (
           <>
             {/* Gamification hero bar */}
-            {gamification && (
+            {gamification && dashboardTab !== 'home' && (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
                 <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl shadow-lg p-5 text-white">
                   <div className="flex items-center justify-between flex-wrap gap-4">
@@ -1126,7 +1172,7 @@ export default function SchuelerPage() {
             )}
 
             {/* Stats cards */}
-            {myResults?.stats && (
+            {myResults?.stats && dashboardTab !== 'home' && (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div className="bg-white rounded-xl shadow-sm p-4 text-center">
@@ -1134,7 +1180,7 @@ export default function SchuelerPage() {
                       <Hash className="h-5 w-5 text-blue-600" />
                     </div>
                     <p className="text-2xl font-bold text-gray-900">{myResults.stats.totalQuizzes}</p>
-                    <p className="text-xs text-gray-500">Prüfungen</p>
+                    <p className="text-xs text-gray-500">Aktivitäten</p>
                   </div>
                   <div className="bg-white rounded-xl shadow-sm p-4 text-center">
                     <div className="w-10 h-10 mx-auto mb-2 bg-green-100 rounded-xl flex items-center justify-center">
@@ -1163,15 +1209,16 @@ export default function SchuelerPage() {
 
             {/* Tab navigation */}
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
-              <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+              <div className="flex gap-1 overflow-x-auto bg-gray-100 rounded-xl p-1">
                 {[
+                  { id: 'home', label: 'Start', icon: BookOpen },
                   { id: 'results', label: 'Ergebnisse', icon: BarChart3 },
                   { id: 'coach', label: 'Lerncoach', icon: Brain },
                   { id: 'gamification', label: 'Badges & XP', icon: Trophy },
                   { id: 'classes', label: 'Meine Klassen', icon: Users }
                 ].map(tab => (
                   <button key={tab.id} onClick={() => setDashboardTab(tab.id)}
-                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
+                    className={`min-w-fit flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
                       dashboardTab === tab.id ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'
                     }`}>
                     <tab.icon className="h-3.5 w-3.5" /> {tab.label}
@@ -1198,12 +1245,12 @@ export default function SchuelerPage() {
                 ) : myResults?.submissions?.length > 0 ? (
                   <div className="divide-y divide-gray-50">
                     {myResults.submissions.map((sub, i) => {
-                      const grade = sub.swiss_grade || 1
+                      const grade = Number.isFinite(sub.swiss_grade) ? sub.swiss_grade : null
                       return (
                         <div key={sub.id || i} className="px-6 py-4 hover:bg-gray-50/50 transition-colors">
                           <div className="flex items-center gap-4">
-                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${gradeBg(grade)}`}>
-                              <span className={`text-xl font-bold ${gradeColor(grade)}`}>{grade}</span>
+                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${grade ? gradeBg(grade) : sub.feedback_pending ? 'bg-amber-100' : 'bg-blue-100'}`}>
+                              <span className={`text-sm font-bold ${grade ? gradeColor(grade) : sub.feedback_pending ? 'text-amber-700' : 'text-blue-700'}`}>{grade || (sub.feedback_pending ? '…' : `${sub.score_percentage || 0}%`)}</span>
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="font-medium text-gray-900 text-sm truncate">{sub.assignment_title}</p>
@@ -1216,7 +1263,7 @@ export default function SchuelerPage() {
                               </div>
                             </div>
                             <div className="text-right flex-shrink-0">
-                              <p className="text-sm font-bold text-gray-600">{sub.earned_points}/{sub.total_points} P.</p>
+                              <p className="text-sm font-bold text-gray-600">{sub.feedback_pending ? 'Auswertung folgt' : `${sub.earned_points}/${sub.total_points} P.`}</p>
                               <p className={`text-xs font-medium ${sub.score_percentage >= 80 ? 'text-green-600' : sub.score_percentage >= 50 ? 'text-amber-600' : 'text-red-600'}`}>
                                 {sub.score_percentage}%
                               </p>

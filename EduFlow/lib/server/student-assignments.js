@@ -6,6 +6,7 @@ import { checkRateLimit } from './rate-limit.js'
 import { studentSubmissionSchema } from './schemas/assignments.js'
 import { applyCorsHeaders, publicErrorMessage, verifyAuthToken } from './security.js'
 import { parseJsonBody } from './validation.js'
+import { ACTIVITY_MODES, isAssignmentFeedbackVisible, normalizeAssignmentSettings } from '../learning-workflow.js'
 
 function jsonResponse(body, init, request) { return applyCorsHeaders(NextResponse.json(body, init), request) }
 
@@ -76,10 +77,21 @@ export async function getStudentAssignment(request, { params }) {
     if (!await enforceTargetNiveau(db, assignment, session)) return jsonResponse({ error: 'Diese Aufgabe ist nicht für dein Niveau freigegeben.' }, { status: 403 }, request)
     const worksheet = await db.collection('worksheets').findOne({ id: assignment.worksheet_id })
     if (!worksheet) return jsonResponse({ error: 'Material nicht gefunden.' }, { status: 404 }, request)
+    const settings = normalizeAssignmentSettings(assignment)
+    const attemptCount = session?.studentId
+      ? await db.collection('submissions').countDocuments({ assignment_id: assignment.id, student_id: session.studentId })
+      : 0
+    if (session?.studentId && attemptCount >= settings.maxAttempts) {
+      return jsonResponse({ error: 'Du hast alle verfügbaren Versuche verwendet.' }, { status: 409 }, request)
+    }
     return jsonResponse({
       title: worksheet.title, subject: worksheet.subject, grade: worksheet.grade,
       content: { ...worksheet.content, questions: (worksheet.content?.questions || []).map(studentQuestion) },
-      assignmentId: assignment.id, className: assignment.class_name,
+      assignmentId: assignment.id, assignmentCode: assignment.code, className: assignment.class_name,
+      activityType: settings.activityType, activityLabel: ACTIVITY_MODES[settings.activityType].label,
+      instructions: settings.instructions, learningGoals: settings.learningGoals,
+      timeLimitMinutes: settings.timeLimitMinutes, maxAttempts: settings.maxAttempts,
+      attemptNumber: attemptCount + 1, feedbackMode: settings.feedbackMode,
     }, { headers: { 'Cache-Control': 'no-store' } }, request)
   } catch (error) {
     console.error('Student assignment access error:', error)
@@ -148,9 +160,9 @@ export async function submitStudentAssignment(request) {
     if (!assignment) return jsonResponse({ error: 'Aufgabe nicht gefunden oder nicht aktiv.' }, { status: 404 }, request)
     if (assignment.deadline && new Date(assignment.deadline) < new Date()) return jsonResponse({ error: 'Die Abgabefrist ist abgelaufen.' }, { status: 410 }, request)
     if (!await enforceTargetNiveau(db, assignment, session)) return jsonResponse({ error: 'Diese Aufgabe ist nicht für dein Niveau freigegeben.' }, { status: 403 }, request)
-    if (studentId && await db.collection('submissions').findOne({ assignment_id: assignment.id, student_id: studentId })) {
-      return jsonResponse({ error: 'Du hast diese Aufgabe bereits abgegeben.' }, { status: 409 }, request)
-    }
+    const settings = normalizeAssignmentSettings(assignment)
+    const attemptCount = studentId ? await db.collection('submissions').countDocuments({ assignment_id: assignment.id, student_id: studentId }) : 0
+    if (studentId && attemptCount >= settings.maxAttempts) return jsonResponse({ error: 'Du hast alle verfügbaren Versuche verwendet.' }, { status: 409 }, request)
     const worksheet = await db.collection('worksheets').findOne({ id: assignment.worksheet_id })
     if (!worksheet) return jsonResponse({ error: 'Material nicht gefunden.' }, { status: 404 }, request)
     const questions = worksheet.content?.questions || []
@@ -171,16 +183,25 @@ export async function submitStudentAssignment(request) {
     const swissGrade = totalPoints ? Math.round((earnedPoints / totalPoints * 5 + 1) * 2) / 2 : 1
     const needsReview = results.some((result) => result.needsManualReview || result.isCorrect === null)
     const submission = { id: uuidv4(), assignment_id: assignment.id, student_id: studentId, student_name: studentName, answers,
+      activity_type: settings.activityType, learning_goals: settings.learningGoals, attempt_number: attemptCount + 1,
       question_results: results, correct_count: results.filter((result) => result.isCorrect === true).length, total_questions: questions.length,
       total_points: totalPoints, earned_points: earnedPoints, score_percentage: scorePercentage, swiss_grade: swissGrade,
-      needs_review: needsReview, duration, submitted_at: new Date() }
+      needs_review: needsReview, duration, time_limit_exceeded: Boolean(settings.timeLimitMinutes && duration > settings.timeLimitMinutes * 60), submitted_at: new Date() }
     await db.collection('submissions').insertOne(submission)
     if (studentId) {
       let xp = 10 + earnedPoints + (swissGrade >= 5.5 ? 20 : swissGrade >= 4.5 ? 10 : 0) + (scorePercentage === 100 ? 25 : 0)
       await db.collection('students').updateOne({ id: studentId }, { $inc: { total_quizzes: 1, total_points: earnedPoints, xp }, $set: { last_activity: new Date() } })
     }
-    return jsonResponse({ correctCount: submission.correct_count, totalQuestions: questions.length, totalPoints, earnedPoints,
-      scorePercentage, duration, submissionId: submission.id, questionResults: results.map(({ correctAnswer, ...result }) => result), swissGrade, needsReview }, { status: 201 }, request)
+    const feedbackVisible = isAssignmentFeedbackVisible(assignment)
+    const visibleResults = feedbackVisible ? results.map((result) => {
+      const { correctAnswer, ...visible } = result
+      return settings.showSolutions ? { ...visible, correctAnswer } : visible
+    }) : []
+    return jsonResponse({ correctCount: feedbackVisible ? submission.correct_count : null, totalQuestions: questions.length, totalPoints,
+      earnedPoints: feedbackVisible ? earnedPoints : null, scorePercentage: feedbackVisible ? scorePercentage : null,
+      duration, submissionId: submission.id, questionResults: visibleResults, swissGrade: feedbackVisible && settings.graded ? swissGrade : null,
+      needsReview, feedbackPending: !feedbackVisible, canRetry: attemptCount + 1 < settings.maxAttempts,
+      attemptNumber: attemptCount + 1, maxAttempts: settings.maxAttempts, activityType: settings.activityType }, { status: 201 }, request)
   } catch (error) {
     console.error('Student submission error:', error)
     return jsonResponse({ error: publicErrorMessage(error) }, { status: 500 }, request)

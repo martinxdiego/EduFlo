@@ -7,6 +7,7 @@ import { checkRateLimit } from '@/lib/server/rate-limit'
 import { classIdSchema, classSchema, niveauSchema, studentIdSchema } from '@/lib/server/schemas/classes'
 import { applyCorsHeaders, publicErrorMessage, verifyAuthToken } from '@/lib/server/security'
 import { parseJsonBody } from '@/lib/server/validation'
+import { ACTIVITY_MODES, buildLearningGoalProgress, buildSupportRecommendations, normalizeAssignmentSettings } from '@/lib/learning-workflow'
 
 export const runtime = 'nodejs'
 
@@ -158,10 +159,14 @@ async function classStats(request, db, session, classId) {
   } : null
   const summaries = assignments.map((assignment) => {
     const assignmentGrades = submissions.filter((submission) => submission.assignment_id === assignment.id).map((submission) => submission.swiss_grade || 1)
+    const settings = normalizeAssignmentSettings(assignment)
     return { id: assignment.id, title: assignment.worksheet_title, target_niveau: assignment.target_niveau, created_at: assignment.created_at,
+      status: assignment.status, deadline: assignment.deadline, code: assignment.code, unit: settings.unit,
+      activity_type: settings.activityType, activity_label: ACTIVITY_MODES[settings.activityType].label, learning_goals: settings.learningGoals,
       submission_count: assignmentGrades.length, avg_grade: assignmentGrades.length ? Math.round(assignmentGrades.reduce((a, b) => a + b, 0) / assignmentGrades.length * 10) / 10 : null }
   })
-  return jsonResponse({ assignments: summaries, studentStats, classStats: classStatsValue }, undefined, request)
+  const learningGoals = buildLearningGoalProgress(assignments, submissions)
+  return jsonResponse({ assignments: summaries, studentStats, classStats: classStatsValue, learningGoals, recommendations: buildSupportRecommendations(learningGoals) }, undefined, request)
 }
 
 async function classInsights(request, db, session, classId) {
@@ -198,8 +203,12 @@ async function classInsights(request, db, session, classId) {
     const weakTopics = Object.entries(insight.topics).filter(([, value]) => value.total >= 2 && value.wrong / value.total > 0.3)
       .sort((a, b) => b[1].wrong / b[1].total - a[1].wrong / a[1].total).slice(0, 3)
       .map(([topic, value]) => ({ topic, errorRate: Math.round(value.wrong / value.total * 100), wrong: value.wrong, total: value.total }))
+    const studentSubmissions = submissions.filter((submission) => submission.student_id === student.student_id)
+    const learningGoals = buildLearningGoalProgress(assignments, studentSubmissions)
     return { student_id: student.student_id, display_name: student.display_name, niveau: student.niveau || 'B', totalQuestions: insight.totalQuestions,
-      totalWrong: insight.totalWrong, errorRate: insight.totalQuestions ? Math.round(insight.totalWrong / insight.totalQuestions * 100) : 0, weakTopics, needsHelp: weakTopics.length > 0 }
+      totalWrong: insight.totalWrong, errorRate: insight.totalQuestions ? Math.round(insight.totalWrong / insight.totalQuestions * 100) : 0, weakTopics,
+      learningGoals, recommendations: buildSupportRecommendations(learningGoals, student.display_name),
+      needsHelp: weakTopics.length > 0 || learningGoals.some((goal) => goal.mastery === 'support') }
   })
   const topicWeaknesses = Object.entries(topics).filter(([, value]) => value.total >= 3).map(([topic, value]) => ({
     topic, subject: value.subject, errorRate: Math.round(value.wrong / value.total * 100), affectedStudents: value.studentsWrong.size,
@@ -214,7 +223,16 @@ async function classInsights(request, db, session, classId) {
       recommendations = result.choices[0]?.message?.content || ''
     } catch (error) { console.error('Class insights AI error:', error) }
   }
-  return jsonResponse({ students: students.sort((a, b) => b.errorRate - a.errorRate), topicWeaknesses, recommendations, totalSubmissions: submissions.length }, undefined, request)
+  const learningGoals = buildLearningGoalProgress(assignments, submissions)
+  const supportGroups = learningGoals.filter((goal) => goal.mastery !== 'secure').map((goal) => ({
+    goal: goal.goal,
+    priority: goal.mastery === 'support' ? 'high' : 'medium',
+    suggestedMode: goal.mastery === 'support' ? 'exercise' : 'practice_check',
+    students: students.filter((student) => student.learningGoals.some((entry) => entry.goal === goal.goal && entry.mastery !== 'secure'))
+      .map((student) => ({ student_id: student.student_id, display_name: student.display_name, niveau: student.niveau })),
+  })).filter((group) => group.students.length)
+  return jsonResponse({ students: students.sort((a, b) => b.errorRate - a.errorRate), topicWeaknesses, recommendations,
+    learningGoals, followUpRecommendations: buildSupportRecommendations(learningGoals), supportGroups, totalSubmissions: submissions.length }, undefined, request)
 }
 
 export async function OPTIONS(request) { return jsonResponse({}, { status: 200 }, request) }

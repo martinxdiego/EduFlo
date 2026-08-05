@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Button } from '@/ui/button'
 import { Input } from '@/ui/input'
@@ -47,6 +47,8 @@ import MobileMoreSheet from '@/components/MobileMoreSheet'
 import AuthTransition from '@/components/AuthTransition'
 import CreationWorkspaceHeader from '@/components/CreationWorkspaceHeader'
 import GenerationDock from '@/components/GenerationDock'
+import TeacherClassWorkspace from '@/components/TeacherClassWorkspace'
+import { ACTIVITY_MODES, normalizeAssignmentSettings } from '@/lib/learning-workflow'
 
 // ============================================================
 // CONSTANTS
@@ -322,6 +324,25 @@ const AppContent = () => {
     libraryFilterSubject, setLibraryFilterSubject,
     libraryFilterGrade, setLibraryFilterGrade,
   } = useEduFlow()
+
+  const [classSearch, setClassSearch] = useState('')
+  const [classSort, setClassSort] = useState('name')
+  const [assignmentSearch, setAssignmentSearch] = useState('')
+  const [assignmentClassFilter, setAssignmentClassFilter] = useState('all')
+  const [assignmentModeFilter, setAssignmentModeFilter] = useState('all')
+  const visibleTeacherClasses = useMemo(() => [...teacherClasses]
+    .filter((cls) => cls.name.toLowerCase().includes(classSearch.trim().toLowerCase()))
+    .sort((a, b) => {
+      if (classSort === 'size') return (b.enrolled_students?.length || 0) - (a.enrolled_students?.length || 0) || a.name.localeCompare(b.name, 'de')
+      if (classSort === 'recent') return new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0)
+      return a.name.localeCompare(b.name, 'de')
+    }), [teacherClasses, classSearch, classSort])
+  const visibleAssignments = useMemo(() => assignments.filter((assignment) => {
+    const needle = assignmentSearch.trim().toLowerCase()
+    if (needle && !`${assignment.worksheet_title} ${assignment.class_name} ${assignment.unit} ${(assignment.learning_goals || []).join(' ')}`.toLowerCase().includes(needle)) return false
+    if (assignmentClassFilter !== 'all' && assignment.class_id !== assignmentClassFilter) return false
+    return assignmentModeFilter === 'all' || (assignment.activity_type || 'exercise') === assignmentModeFilter
+  }), [assignments, assignmentSearch, assignmentClassFilter, assignmentModeFilter])
 
   // Wrappers for context functions that use callback patterns
   const handleAuth = async (e) => {
@@ -2338,10 +2359,18 @@ const AppContent = () => {
 
   const shareWorksheetAsAssignment = async (worksheetId) => {
     try {
+      const activitySettings = normalizeAssignmentSettings(shareForm)
       const res = await fetch('/api/assignments/share', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ worksheetId, className: shareForm.className, classId: shareForm.classId || null, deadline: shareForm.deadline || null, targetNiveau: shareForm.targetNiveau || null })
+        body: JSON.stringify({
+          worksheetId, className: shareForm.className, classId: shareForm.classId || null,
+          deadline: shareForm.deadline || null, targetNiveau: shareForm.targetNiveau || null,
+          activityType: activitySettings.activityType, feedbackMode: activitySettings.feedbackMode,
+          maxAttempts: activitySettings.maxAttempts, timeLimitMinutes: activitySettings.timeLimitMinutes,
+          showSolutions: activitySettings.showSolutions, graded: activitySettings.graded,
+          learningGoals: activitySettings.learningGoals, instructions: activitySettings.instructions, unit: activitySettings.unit,
+        })
       })
       if (res.ok) {
         const data = await res.json()
@@ -2349,7 +2378,7 @@ const AppContent = () => {
         setSuccessMessage(`Zugangscode: ${data.code} — Schüler-Link wurde in die Zwischenablage kopiert! Teilen Sie diesen Link mit Ihren Schülern: ${studentUrl}`)
         try { navigator.clipboard.writeText(studentUrl) } catch(e) {}
         setShareModalOpen(false)
-        setShareForm({ className: '', classId: '', deadline: '', targetNiveau: '' })
+        setShareForm({ className: '', classId: '', deadline: '', targetNiveau: '', worksheetId: '', activityType: 'exercise', feedbackMode: 'immediate', maxAttempts: 5, timeLimitMinutes: 0, showSolutions: true, graded: false, learningGoals: '', instructions: '', unit: '' })
         loadAssignments()
       }
     } catch (err) { setError('Freigabe fehlgeschlagen.') }
@@ -2876,6 +2905,21 @@ const AppContent = () => {
 
   if (authTransition) {
     return <AuthTransition message={authTransition} />
+  }
+
+  const updateAssignmentWorkflow = async (assignmentId, updates) => {
+    try {
+      const res = await fetch(`/api/assignments/${assignmentId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(updates),
+      })
+      if (!res.ok) throw new Error('Aktualisierung fehlgeschlagen.')
+      const updated = await res.json()
+      setAssignments(prev => prev.map(item => item.id === assignmentId ? { ...item, ...updated } : item))
+      setSelectedAssignment(prev => prev?.id === assignmentId ? { ...prev, ...updated } : prev)
+      setSuccessMessage('Auftrag aktualisiert.')
+    } catch (err) { setError(err.message || 'Aktualisierung fehlgeschlagen.') }
   }
 
   if (!token) {
@@ -4043,16 +4087,39 @@ const AppContent = () => {
                     {shareModalOpen && (
                       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4"
                         onClick={() => setShareModalOpen(false)}>
-                        <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }} className="bg-white rounded-2xl shadow-2xl p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto"
+                        <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }} className="bg-white rounded-2xl shadow-2xl p-6 max-w-3xl w-full max-h-[88vh] overflow-y-auto"
                           onClick={(e) => e.stopPropagation()}>
                           <h3 className="text-lg font-bold text-gray-900 mb-4">Aufgabe freigeben</h3>
                           <div className="space-y-4">
+                            <div>
+                              <Label className="text-xs">Lernmodus wählen</Label>
+                              <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                                {Object.entries(ACTIVITY_MODES).map(([id, mode]) => (
+                                  <button key={id} type="button" onClick={() => {
+                                    const settings = normalizeAssignmentSettings({ activityType: id })
+                                    setShareForm(prev => ({ ...prev, activityType: id, feedbackMode: settings.feedbackMode, maxAttempts: settings.maxAttempts, timeLimitMinutes: settings.timeLimitMinutes, showSolutions: settings.showSolutions, graded: settings.graded }))
+                                  }} className={`rounded-xl border p-3 text-left transition ${shareForm.activityType === id ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'border-gray-200 hover:border-blue-300'}`}>
+                                    <span className="block text-xs font-semibold text-gray-900">{mode.label}</span>
+                                    <span className="mt-1 block text-[10px] leading-snug text-gray-500">{mode.description}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
                             <div>
                               <Label className="text-xs">Material auswählen</Label>
                               <select
                                 className="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
                                 value={shareForm.worksheetId || ''}
-                                onChange={(e) => setShareForm(prev => ({ ...prev, worksheetId: e.target.value }))}
+                                onChange={(e) => {
+                                  const worksheet = worksheets.find((item) => item.id === e.target.value)
+                                  const generatedGoals = worksheet?.content?.learning_objectives || worksheet?.content?.learningGoals || []
+                                  setShareForm(prev => ({
+                                    ...prev,
+                                    worksheetId: e.target.value,
+                                    learningGoals: prev.learningGoals || (Array.isArray(generatedGoals) ? generatedGoals.join('\n') : String(generatedGoals || '')),
+                                    unit: prev.unit || worksheet?.topic || worksheet?.subject || '',
+                                  }))
+                                }}
                               >
                                 <option value="" disabled>Material wählen...</option>
                                 {worksheets.map(ws => (
@@ -4094,6 +4161,23 @@ const AppContent = () => {
                               <Input type="datetime-local" value={shareForm.deadline} onChange={(e) => setShareForm(prev => ({ ...prev, deadline: e.target.value }))}
                                 className="mt-1 text-sm" />
                             </div>
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <div><Label className="text-xs">Unterrichtseinheit / Ordner</Label><Input value={shareForm.unit || ''} onChange={(e) => setShareForm(prev => ({ ...prev, unit: e.target.value }))} placeholder="z.B. Bruchrechnen · Woche 3" className="mt-1 text-sm" /></div>
+                              <div><Label className="text-xs">Lernziele</Label><textarea value={shareForm.learningGoals || ''} onChange={(e) => setShareForm(prev => ({ ...prev, learningGoals: e.target.value }))} placeholder="Ein Lernziel pro Zeile" className="mt-1 min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm" /></div>
+                            </div>
+                            <div><Label className="text-xs">Auftrag für die Schüler:innen</Label><textarea value={shareForm.instructions || ''} onChange={(e) => setShareForm(prev => ({ ...prev, instructions: e.target.value }))} placeholder="Was ist zu beachten? Was wird erwartet?" className="mt-1 min-h-16 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm" /></div>
+                            <div className="rounded-xl bg-gray-50 p-4">
+                              <p className="mb-3 text-xs font-semibold text-gray-700">Ablauf und Rückmeldung</p>
+                              <div className="grid gap-3 sm:grid-cols-3">
+                                <div><Label className="text-[11px]">Versuche</Label><Input type="number" min="1" max="10" value={shareForm.maxAttempts ?? 1} onChange={(e) => setShareForm(prev => ({ ...prev, maxAttempts: Number(e.target.value) }))} className="mt-1 h-9 text-sm" /></div>
+                                <div><Label className="text-[11px]">Zeitlimit in Minuten (0 = keines)</Label><Input type="number" min="0" max="180" value={shareForm.timeLimitMinutes ?? 0} onChange={(e) => setShareForm(prev => ({ ...prev, timeLimitMinutes: Number(e.target.value) }))} className="mt-1 h-9 text-sm" /></div>
+                                <div><Label className="text-[11px]">Feedback</Label><select value={shareForm.feedbackMode || 'immediate'} onChange={(e) => setShareForm(prev => ({ ...prev, feedbackMode: e.target.value }))} className="mt-1 h-9 w-full rounded-md border border-input bg-white px-2 text-sm"><option value="immediate">Direkt</option><option value="after_submission">Nach Abgabe</option><option value="after_deadline">Nach Frist</option><option value="teacher_release">Durch Lehrperson</option></select></div>
+                              </div>
+                              <div className="mt-3 flex flex-wrap gap-4 text-xs text-gray-600">
+                                <label className="flex items-center gap-2"><input type="checkbox" checked={Boolean(shareForm.showSolutions)} onChange={(e) => setShareForm(prev => ({ ...prev, showSolutions: e.target.checked }))} /> Lösungen zeigen</label>
+                                <label className="flex items-center gap-2"><input type="checkbox" checked={Boolean(shareForm.graded)} onChange={(e) => setShareForm(prev => ({ ...prev, graded: e.target.checked }))} /> Benotete Aktivität</label>
+                              </div>
+                            </div>
                             <div className="flex gap-2 justify-end">
                               <Button variant="outline" size="sm" onClick={() => setShareModalOpen(false)}>Abbrechen</Button>
                               <Button size="sm" className="btn-premium" disabled={!shareForm.worksheetId}
@@ -4112,10 +4196,16 @@ const AppContent = () => {
                     )}
                   </AnimatePresence>
 
+                  <div className="mb-4 grid gap-2 sm:grid-cols-[1fr_auto_auto]">
+                    <label className="relative"><Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" /><input value={assignmentSearch} onChange={(event) => setAssignmentSearch(event.target.value)} placeholder="Aufträge, Einheiten oder Lernziele suchen" className="h-9 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-3 text-sm" /></label>
+                    <select value={assignmentClassFilter} onChange={(event) => setAssignmentClassFilter(event.target.value)} className="h-9 rounded-xl border border-gray-200 bg-white px-3 text-sm"><option value="all">Alle Klassen</option>{teacherClasses.map((cls) => <option key={cls.id} value={cls.id}>{cls.name}</option>)}</select>
+                    <select value={assignmentModeFilter} onChange={(event) => setAssignmentModeFilter(event.target.value)} className="h-9 rounded-xl border border-gray-200 bg-white px-3 text-sm"><option value="all">Alle Lernmodi</option>{Object.entries(ACTIVITY_MODES).map(([id, mode]) => <option key={id} value={id}>{mode.label}</option>)}</select>
+                  </div>
+
                   {/* Existing assignments */}
                   {assignments.length > 0 ? (
                     <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {assignments.map(a => (
+                      {visibleAssignments.map(a => (
                         <Card
                           key={a.id}
                           role="button"
@@ -4132,9 +4222,7 @@ const AppContent = () => {
                         >
                           <CardContent className="py-4">
                             <div className="flex items-center justify-between mb-2">
-                              <Badge className={`text-xs ${a.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                                {a.status === 'active' ? 'Aktiv' : 'Geschlossen'}
-                              </Badge>
+                              <div className="flex gap-1.5"><Badge className={`text-xs ${a.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{a.status === 'active' ? 'Aktiv' : 'Geschlossen'}</Badge><Badge variant="outline" className="text-[10px]">{a.activity_label || ACTIVITY_MODES[a.activity_type || 'exercise'].label}</Badge></div>
                               <div className="flex items-center gap-2">
                                 <span className="text-xs font-mono text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{a.code}</span>
                                 <button
@@ -4148,6 +4236,8 @@ const AppContent = () => {
                             </div>
                             <p className="font-medium text-gray-900 text-sm truncate">{a.worksheet_title || a.class_name || 'Alle Schüler'}</p>
                             <p className="text-xs text-gray-500 mt-1">{a.class_name ? `${a.class_name} · ` : ''}{new Date(a.created_at).toLocaleDateString('de-CH')}</p>
+                            {a.unit && <p className="mt-1 text-[10px] font-medium text-indigo-600">Einheit: {a.unit}</p>}
+                            {a.learning_goals?.length > 0 && <p className="mt-1 truncate text-[10px] text-gray-500">Ziel: {a.learning_goals.join(' · ')}</p>}
                             {a.submission_count > 0 && <p className="text-xs text-blue-600 mt-1">{a.submission_count} Abgabe{a.submission_count !== 1 ? 'n' : ''}</p>}
                             {a.deadline && <p className="text-xs text-amber-600 mt-1">Frist: {new Date(a.deadline).toLocaleDateString('de-CH')}</p>}
                             <div className="mt-2 p-2 bg-blue-50 rounded-lg border border-blue-100" onClick={(e) => e.stopPropagation()}>
@@ -4199,6 +4289,7 @@ const AppContent = () => {
                         <div>
                           <h3 className="font-semibold text-gray-900">{selectedAssignment.worksheet_title || selectedAssignment.class_name || 'Aufgabe'}</h3>
                           <p className="text-xs text-gray-500 mb-1">{selectedAssignment.class_name ? `${selectedAssignment.class_name} · ` : ''}Code: <span className="font-mono text-blue-600">{selectedAssignment.code}</span> · {assignmentSubmissions.length} Abgaben</p>
+                          <div className="mb-2 flex flex-wrap gap-1.5"><Badge variant="outline" className="text-[10px]">{selectedAssignment.activity_label || ACTIVITY_MODES[selectedAssignment.activity_type || 'exercise'].label}</Badge>{selectedAssignment.unit ? <Badge variant="outline" className="text-[10px]">{selectedAssignment.unit}</Badge> : null}{selectedAssignment.learning_goals?.map((goal) => <Badge key={goal} className="bg-indigo-50 text-[10px] text-indigo-700">{goal}</Badge>)}</div>
                           <div className="flex items-center gap-2 mt-1">
                             <p className="text-xs text-gray-400 font-mono truncate max-w-[300px]">{typeof window !== 'undefined' ? `${window.location.origin}/schueler?code=${selectedAssignment.code}` : ''}</p>
                             <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/schueler?code=${selectedAssignment.code}`); setSuccessMessage('Schüler-Link kopiert!') }}
@@ -4208,6 +4299,8 @@ const AppContent = () => {
                           </div>
                         </div>
                         <div className="flex gap-2 flex-wrap">
+                          {selectedAssignment.feedback_mode === 'teacher_release' && <Button variant="outline" size="sm" className="text-xs" onClick={() => updateAssignmentWorkflow(selectedAssignment.id, { feedbackReleased: !selectedAssignment.feedback_released })}>{selectedAssignment.feedback_released ? 'Feedback zurückziehen' : 'Ergebnisse freigeben'}</Button>}
+                          <Button variant="outline" size="sm" className="text-xs" onClick={() => updateAssignmentWorkflow(selectedAssignment.id, { status: selectedAssignment.status === 'active' ? 'closed' : 'active' })}>{selectedAssignment.status === 'active' ? 'Auftrag beenden' : 'Wieder öffnen'}</Button>
                           <Button variant="outline" size="sm" className="text-xs" onClick={() => loadClassOverview(selectedAssignment.id)}>
                             <Target className="h-3.5 w-3.5 mr-1" /> Klassenübersicht
                           </Button>
@@ -4638,6 +4731,16 @@ const AppContent = () => {
               </Card>
               </motion.div>
 
+              <div className="mb-4 grid gap-2 sm:grid-cols-[1fr_auto]">
+                <label className="relative">
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                  <input value={classSearch} onChange={(event) => setClassSearch(event.target.value)} placeholder="Klasse suchen" className="h-9 w-full rounded-xl border border-gray-200 bg-white pl-9 pr-3 text-sm" />
+                </label>
+                <select value={classSort} onChange={(event) => setClassSort(event.target.value)} className="h-9 rounded-xl border border-gray-200 bg-white px-3 text-sm">
+                  <option value="name">Alphabetisch</option><option value="size">Grösste Klasse zuerst</option><option value="recent">Zuletzt bearbeitet</option>
+                </select>
+              </div>
+
               <div className="grid lg:grid-cols-3 gap-6">
                 {/* Class list */}
                 <motion.div
@@ -4660,7 +4763,7 @@ const AppContent = () => {
                     </motion.div>
                   ) : (
                     <AnimatePresence mode="popLayout">
-                    {teacherClasses.map(cls => {
+                    {visibleTeacherClasses.map(cls => {
                       const isSelected = selectedClass === cls.id
                       return (
                       <motion.div
@@ -4703,6 +4806,27 @@ const AppContent = () => {
                 <div className="lg:col-span-2">
                   {classDetailData ? (
                     <>
+                    <TeacherClassWorkspace
+                      classData={classDetailData}
+                      stats={classStats}
+                      insights={classInsights}
+                      insightsLoading={insightsLoading}
+                      onAnalyze={() => loadClassInsights(classDetailData.id)}
+                      onCreateAssignment={(preset = {}) => {
+                        const settings = normalizeAssignmentSettings({ activityType: preset.activityType || 'exercise' })
+                        setShareForm(prev => ({ ...prev, classId: classDetailData.id, className: classDetailData.name,
+                          activityType: settings.activityType, feedbackMode: settings.feedbackMode, maxAttempts: settings.maxAttempts,
+                          timeLimitMinutes: settings.timeLimitMinutes, showSolutions: settings.showSolutions, graded: settings.graded,
+                          learningGoals: preset.learningGoals || prev.learningGoals,
+                        }))
+                        setShareModalOpen(true)
+                      }}
+                      onOpenAssignment={async (assignmentId) => { await loadSubmissions(assignmentId); setActiveView('students') }}
+                      onUpdateNiveau={updateStudentNiveau}
+                      onRemoveStudent={removeStudentFromClass}
+                      onDeleteClass={(classId) => { if (confirm(`Klasse "${classDetailData.name}" wirklich löschen?`)) deleteClass(classId) }}
+                    />
+                    <div className="hidden">
                     <Card className="glass-card border-0">
                       <CardHeader className="pb-3">
                         <div className="flex items-center justify-between">
@@ -4937,6 +5061,7 @@ const AppContent = () => {
                         )}
                       </CardContent>
                     </Card>
+                    </div>
                     </>
                   ) : (
                     <Card className="glass-card border-0">

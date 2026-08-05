@@ -29,6 +29,10 @@ async function ensureOperationalIndexes(db) {
       db.collection('generated_assets').createIndex({ user_id: 1, created_at: -1 }),
       db.collection('studio_packages').createIndex({ id: 1 }, { unique: true }),
       db.collection('studio_packages').createIndex({ user_id: 1, updated_at: -1 }),
+      db.collection('assignments').createIndex({ teacher_id: 1, status: 1, created_at: -1 }),
+      db.collection('assignments').createIndex({ class_id: 1, status: 1, deadline: 1 }),
+      db.collection('submissions').createIndex({ student_id: 1, assignment_id: 1, submitted_at: -1 }),
+      db.collection('submissions').createIndex({ assignment_id: 1, submitted_at: -1 }),
     ]).catch((error) => {
       indexPromise = null
       throw error

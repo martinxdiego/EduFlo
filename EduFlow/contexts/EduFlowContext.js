@@ -95,7 +95,11 @@ export function EduFlowProvider({ children }) {
   const [expandedSubmission, setExpandedSubmission] = useState(null)
   const [errorAnalysisOpen, setErrorAnalysisOpen] = useState(true)
   const [shareModalOpen, setShareModalOpen] = useState(false)
-  const [shareForm, setShareForm] = useState({ className: '', classId: '', deadline: '', targetNiveau: '' })
+  const [shareForm, setShareForm] = useState({
+    className: '', classId: '', deadline: '', targetNiveau: '', worksheetId: '',
+    activityType: 'exercise', feedbackMode: 'immediate', maxAttempts: 5, timeLimitMinutes: 0,
+    showSolutions: true, graded: false, learningGoals: '', instructions: '', unit: '',
+  })
   const [editingQuestion, setEditingQuestion] = useState(null)
   const [classOverview, setClassOverview] = useState(null)
   const [classOverviewOpen, setClassOverviewOpen] = useState(false)
