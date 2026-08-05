@@ -31,21 +31,42 @@ export function useWorksheets(token) {
     }
   }, [token, selectedWorksheet, fetchWorksheets])
 
-  const handleDuplicate = useCallback((worksheet) => {
-    const duplicate = {
-      ...worksheet,
-      id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(),
-      title: `${worksheet.title} (Kopie)`,
-      created_at: new Date().toISOString()
+  const updateMetadata = useCallback(async (worksheetId, updates) => {
+    try {
+      const response = await fetch(`/api/worksheets/${worksheetId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(updates),
+      })
+      if (!response.ok) return null
+      const updated = await response.json()
+      setWorksheets(previous => previous.map(item => item.id === worksheetId ? updated : item))
+      if (selectedWorksheet?.id === worksheetId) setSelectedWorksheet(updated)
+      return updated
+    } catch {
+      return null
     }
-    setWorksheets(prev => [duplicate, ...prev])
-    return duplicate
-  }, [])
+  }, [token, selectedWorksheet])
+
+  const handleDuplicate = useCallback(async (worksheet) => {
+    try {
+      const response = await fetch(`/api/worksheets/${worksheet.id}/duplicate`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      })
+      if (!response.ok) return null
+      const duplicate = await response.json()
+      setWorksheets(previous => [duplicate, ...previous])
+      return duplicate
+    } catch {
+      return null
+    }
+  }, [token])
 
   return {
     worksheets, setWorksheets,
     selectedWorksheet, setSelectedWorksheet,
     showEditorPanel, setShowEditorPanel,
-    fetchWorksheets, handleDelete, handleDuplicate,
+    fetchWorksheets, handleDelete, handleDuplicate, updateMetadata,
   }
 }

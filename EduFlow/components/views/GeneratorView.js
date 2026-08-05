@@ -29,6 +29,7 @@ import dynamic from 'next/dynamic'
 import { LEHRPLAN_CYCLES } from '@/data/lehrplan21'
 import { WORKSHEET_THEMES, getThemeById, getQuestionDecoration } from '@/data/worksheetThemes'
 import { useEduFlow } from '@/contexts/EduFlowContext'
+import QualityReviewPanel from '@/components/QualityReviewPanel'
 
 const RichTextEditor = dynamic(() => import('@/components/RichTextEditor'), { ssr: false, loading: () => <div className="h-24 bg-gray-50 rounded-lg animate-pulse" /> })
 
@@ -159,7 +160,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
         questions: editedQuestions,
         total_points: totalPoints
       }
-      const updated = { ...selectedWorksheet, content: updatedContent }
+      const updated = { ...selectedWorksheet, content: updatedContent, status: 'review', reviewed_at: null, revision: (selectedWorksheet.revision || 1) + 1 }
 
       try {
         const res = await fetch(`/api/worksheets/${selectedWorksheet.id}`, {
@@ -191,7 +192,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
       setSaveStatus('saving')
       const totalPoints = editedQuestions.reduce((sum, q) => q.type === 'image_block' ? sum : sum + (q.points || 1), 0)
       const updatedContent = { ...selectedWorksheet.content, questions: editedQuestions, total_points: totalPoints }
-      const updated = { ...selectedWorksheet, content: updatedContent }
+      const updated = { ...selectedWorksheet, content: updatedContent, status: 'draft', reviewed_at: null, revision: (selectedWorksheet.revision || 1) + 1 }
 
       try {
         await fetch(`/api/worksheets/${selectedWorksheet.id}`, {
@@ -623,6 +624,8 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {!editMode ? <QualityReviewPanel worksheet={selectedWorksheet} onEdit={startEditMode} /> : null}
 
             {(() => {
               const isExam = selectedWorksheet.resourceType === 'exam' || selectedWorksheet.content?.resourceType === 'exam'

@@ -4,10 +4,11 @@ import { motion, useMotionValue, useTransform, animate, useReducedMotion } from 
 import { Button } from '@/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/ui/card'
 import {
-  PlusCircle, FileText, ChevronRight, Send, Users, GraduationCap
+  PlusCircle, FileText, ChevronRight, Send, Users, GraduationCap, BookOpen, Sparkles
 } from 'lucide-react'
 import { useEduFlow } from '@/contexts/EduFlowContext'
 import { WelcomeBanner } from '@/components/OnboardingHint'
+import FirstSuccessFlow from '@/components/FirstSuccessFlow'
 
 const staggerContainer = {
   hidden: { opacity: 0 },
@@ -52,7 +53,7 @@ function FloatingSparkle({ className = '', delay = 0 }) {
 export default function DashboardView({ STARTER_TEMPLATES, handleUseTemplate }) {
   const ctx = useEduFlow()
   const {
-    user, worksheets, assignments, teacherClasses,
+    user, worksheets, assignments, teacherClasses, dossiers, generationJob, worksheetStatuses,
     setActiveView, setSelectedWorksheet, setShowEditorPanel,
     loadAssignments, loadSubmissions, loadTeacherClasses,
   } = ctx
@@ -63,6 +64,11 @@ export default function DashboardView({ STARTER_TEMPLATES, handleUseTemplate }) 
   })()
 
   const totalStudents = teacherClasses.reduce((sum, c) => sum + (c.enrolled_students?.length || 0), 0)
+  const recentWorksheet = worksheets[0]
+  const draftWorksheet = worksheets.find(worksheet => worksheet.status === 'draft' || worksheetStatuses?.[worksheet.id] === 'draft')
+  const interruptedDossier = dossiers.find(dossier => ['pending', 'failed'].includes(dossier.generation_status))
+  const activeAssignments = assignments.filter(assignment => assignment.status === 'active')
+  const showFirstSuccess = worksheets.length === 0 && dossiers.length === 0
 
   return (
     <motion.div key="home" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.4 }} className="max-w-6xl mx-auto">
@@ -70,6 +76,8 @@ export default function DashboardView({ STARTER_TEMPLATES, handleUseTemplate }) 
         hasMaterial={worksheets.length > 0}
         onStart={() => { setActiveView('create'); setSelectedWorksheet(null); setShowEditorPanel(false) }}
       />
+
+      {showFirstSuccess ? <FirstSuccessFlow /> : null}
 
       {/* Hero greeting with ambient sparkles */}
       <div className="mb-8 relative">
@@ -89,6 +97,32 @@ export default function DashboardView({ STARTER_TEMPLATES, handleUseTemplate }) 
           <p className="text-gray-500 text-lg">Willkommen zurück bei EduFlow. Was möchten Sie heute machen?</p>
         </motion.div>
       </div>
+
+      {!showFirstSuccess ? (
+        <motion.section className="mb-8" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} aria-labelledby="next-actions-title">
+          <div className="mb-3 flex items-end justify-between">
+            <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-600">Heute wichtig</p><h3 id="next-actions-title" className="text-xl font-bold text-gray-900">Direkt weiterarbeiten</h3></div>
+            <Button variant="ghost" size="sm" onClick={() => setActiveView('library')}>Alle Materialien <ChevronRight className="ml-1 h-4 w-4" /></Button>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <button type="button" onClick={() => { const target = draftWorksheet || recentWorksheet; if (target) { setSelectedWorksheet(target); setShowEditorPanel(true); setActiveView('create') } }} className="rounded-2xl border border-blue-100 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-md">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-100"><FileText className="h-4 w-4 text-blue-600" /></div>
+              <p className="mt-3 text-sm font-semibold text-gray-900">{draftWorksheet ? 'Entwurf fertigstellen' : 'Letztes Material öffnen'}</p>
+              <p className="mt-1 truncate text-xs text-gray-500">{(draftWorksheet || recentWorksheet)?.title || 'Material auswählen'}</p>
+            </button>
+            <button type="button" onClick={() => setActiveView(interruptedDossier ? 'library' : 'students')} className="rounded-2xl border border-indigo-100 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-md">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-100"><BookOpen className="h-4 w-4 text-indigo-600" /></div>
+              <p className="mt-3 text-sm font-semibold text-gray-900">{interruptedDossier ? 'Dossier fortsetzen' : `${activeAssignments.length} aktive Aufgaben`}</p>
+              <p className="mt-1 text-xs text-gray-500">{interruptedDossier?.title || 'Abgaben und Lernstand ansehen'}</p>
+            </button>
+            <button type="button" onClick={() => setActiveView(generationJob?.status === 'running' ? 'library' : 'create')} className="rounded-2xl border border-emerald-100 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100"><Sparkles className="h-4 w-4 text-emerald-600" /></div>
+              <p className="mt-3 text-sm font-semibold text-gray-900">{generationJob?.status === 'running' ? 'Generierung läuft' : 'Neues Material'}</p>
+              <p className="mt-1 text-xs text-gray-500">{generationJob?.message || 'Thema, Quelle oder Studio verwenden'}</p>
+            </button>
+          </div>
+        </motion.section>
+      ) : null}
 
       {/* Quick Actions */}
       <motion.div

@@ -27,6 +27,8 @@ async function ensureOperationalIndexes(db) {
       db.collection('ai_generations').createIndex({ user_id: 1, feature: 1, created_at: -1 }),
       db.collection('generated_assets').createIndex({ id: 1 }, { unique: true }),
       db.collection('generated_assets').createIndex({ user_id: 1, created_at: -1 }),
+      db.collection('studio_packages').createIndex({ id: 1 }, { unique: true }),
+      db.collection('studio_packages').createIndex({ user_id: 1, updated_at: -1 }),
     ]).catch((error) => {
       indexPromise = null
       throw error

@@ -24,6 +24,7 @@ export async function deleteTeacherAccountData(db, userId) {
     db.collection('password_reset_tokens').deleteMany({ user_id: userId }),
     db.collection('ai_generations').deleteMany({ user_id: userId }),
     db.collection('generated_assets').deleteMany({ user_id: userId }),
+    db.collection('studio_packages').deleteMany({ user_id: userId }),
   ])
 
   await Promise.all([

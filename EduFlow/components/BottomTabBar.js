@@ -27,9 +27,10 @@ export default function BottomTabBar({ activeView, onSelect, onMore }) {
       <ul className="flex items-stretch justify-around h-16 px-1">
         {TABS.map((tab) => {
           const Icon = tab.icon
+          const creationActive = tab.id === 'create' && ['create', 'upload', 'studio'].includes(activeView)
           const isActive = tab.id === 'more'
-            ? !TABS.slice(0, -1).some((t) => t.id === activeView)
-            : activeView === tab.id
+            ? !TABS.slice(0, -1).some((t) => t.id === activeView) && !['upload', 'studio'].includes(activeView)
+            : activeView === tab.id || creationActive
 
           return (
             <li key={tab.id} className="flex-1 flex">

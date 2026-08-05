@@ -38,6 +38,8 @@ export function EduFlowProvider({ children }) {
   const [dossiers, setDossiers] = useState([])
   const [selectedDossier, setSelectedDossier] = useState(null)
   const [dossierSaving, setDossierSaving] = useState(false)
+  const [studioPackages, setStudioPackages] = useState([])
+  const [selectedStudioPackage, setSelectedStudioPackage] = useState(null)
 
   // Library state
   const [librarySearch, setLibrarySearch] = useState('')
@@ -147,6 +149,7 @@ export function EduFlowProvider({ children }) {
             if (userData?.teacher_type) {
               worksheetsMgr.fetchWorksheets(result.token)
               fetchDossiers(result.token)
+              fetchStudioPackages(result.token)
               loadAssignments(result.token)
               loadTeacherClasses(result.token)
             }
@@ -162,6 +165,7 @@ export function EduFlowProvider({ children }) {
         if (userData?.teacher_type) {
           worksheetsMgr.fetchWorksheets(savedToken)
           fetchDossiers(savedToken)
+          fetchStudioPackages(savedToken)
           loadAssignments(savedToken)
           loadTeacherClasses(savedToken)
         }
@@ -239,6 +243,13 @@ export function EduFlowProvider({ children }) {
     } catch (error) { console.error('Fehler beim Laden der Dossiers:', error) }
   }, [auth.token])
 
+  const fetchStudioPackages = useCallback(async (authToken) => {
+    try {
+      const response = await fetch('/api/studio/packages', { headers: { 'Authorization': `Bearer ${authToken || auth.token}` } })
+      if (response.ok) setStudioPackages(await response.json())
+    } catch (error) { console.error('Fehler beim Laden der Studio-Pakete:', error) }
+  }, [auth.token])
+
   const loadAssignments = useCallback(async (authToken) => {
     try {
       const response = await fetch('/api/assignments', { headers: { 'Authorization': `Bearer ${authToken || auth.token}` } })
@@ -308,6 +319,25 @@ export function EduFlowProvider({ children }) {
     })
   }, [form, upload, generation, auth, fetchDossiers])
 
+  const resumeGenerationJob = useCallback(async () => {
+    const job = generation.generationJob
+    if (job?.kind !== 'dossier' || !job.resumeDossierId) return
+    setError('')
+    await generation.handleGenerateDossier({
+      ...(job.params || {}),
+      resumeDossierId: job.resumeDossierId,
+    }, {
+      onComplete: (dossier) => {
+        setSelectedDossier(dossier)
+        setActiveView('dossier-editor')
+        fetchDossiers(auth.token)
+        auth.fetchCurrentUser(auth.token)
+        setSuccessMessage('Ihr Arbeitsdossier wurde erfolgreich fortgesetzt.')
+      },
+      onError: (message) => setError(message),
+    })
+  }, [generation.generationJob, generation.handleGenerateDossier, auth.token, auth.fetchCurrentUser, fetchDossiers])
+
   // ============================================================
   // AFTER AUTH SUCCESS
   // ============================================================
@@ -315,9 +345,10 @@ export function EduFlowProvider({ children }) {
   const onAuthSuccess = useCallback((authToken) => {
     worksheetsMgr.fetchWorksheets(authToken)
     fetchDossiers(authToken)
+    fetchStudioPackages(authToken)
     loadAssignments(authToken)
     loadTeacherClasses(authToken)
-  }, [worksheetsMgr.fetchWorksheets, fetchDossiers, loadAssignments, loadTeacherClasses])
+  }, [worksheetsMgr.fetchWorksheets, fetchDossiers, fetchStudioPackages, loadAssignments, loadTeacherClasses])
 
   // Bundle everything into context value
   const value = {
@@ -330,15 +361,19 @@ export function EduFlowProvider({ children }) {
     fetchWorksheets: worksheetsMgr.fetchWorksheets,
     handleDeleteWorksheet: worksheetsMgr.handleDelete,
     handleDuplicate: worksheetsMgr.handleDuplicate,
+    updateWorksheetMetadata: worksheetsMgr.updateMetadata,
     // Upload
     ...upload,
     // Generation
     generating: generation.generating,
     generationProgress: generation.generationProgress,
+    generationJob: generation.generationJob,
+    dismissGenerationJob: generation.dismissGenerationJob,
     streamingQuestions: generation.streamingQuestions,
     showGenerationTheater: generation.showGenerationTheater,
     setShowGenerationTheater: generation.setShowGenerationTheater,
     handleGenerate, handleGenerateDossier,
+    resumeGenerationJob,
     handleRegenerate: generation.handleRegenerate,
     // Editor
     ...editor,
@@ -356,6 +391,7 @@ export function EduFlowProvider({ children }) {
     // Dossiers
     dossiers, setDossiers, selectedDossier, setSelectedDossier, dossierSaving, setDossierSaving,
     fetchDossiers,
+    studioPackages, setStudioPackages, selectedStudioPackage, setSelectedStudioPackage, fetchStudioPackages,
     // Library
     librarySearch, setLibrarySearch,
     libraryFilterSubject, setLibraryFilterSubject,

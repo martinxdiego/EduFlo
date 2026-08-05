@@ -16,6 +16,7 @@ import { generateOpenAISpeech } from '@/lib/server/openai-service'
 import { validateChatToolCall } from '@/lib/chat-tools'
 import { deduplicateDossierQuestions, evaluateDossier, prepareDossierSection, validateDossierOutline } from '@/lib/server/dossier-quality'
 import { logEvent } from '@/lib/server/logger'
+import { normalizeMaterialMetadata } from '@/lib/product-workspace'
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 const ALLOWED_UPLOAD_EXTENSIONS = new Set(['pdf', 'docx', 'txt', 'csv', 'rtf', 'pptx', 'xlsx', 'xls'])
@@ -222,7 +223,14 @@ async function saveGeneratedWorksheet({
         checked_at: new Date().toISOString(),
       },
     },
-    created_at: new Date()
+    status: 'review',
+    revision: 1,
+    archived: false,
+    favorite: false,
+    tags: [],
+    folder: '',
+    created_at: new Date(),
+    updated_at: new Date(),
   }
 
   await db.collection('worksheets').insertOne(worksheet)
@@ -1652,6 +1660,34 @@ ${sourceParts.join('\n\n')}
       return handleCORS(NextResponse.json({ success: true }))
     }
 
+    // Persisted duplicate - POST /api/worksheets/:id/duplicate
+    if (route.startsWith('/worksheets/') && route.endsWith('/duplicate') && method === 'POST') {
+      const decoded = await verifyToken(request)
+      if (!decoded) return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }))
+
+      const worksheetId = path[1]
+      const original = await db.collection('worksheets').findOne({ id: worksheetId, user_id: decoded.userId })
+      if (!original) return handleCORS(NextResponse.json({ error: 'Worksheet not found' }, { status: 404 }))
+
+      const { _id, ...source } = original
+      const now = new Date()
+      const duplicate = {
+        ...source,
+        id: uuidv4(),
+        title: `${source.title || 'Material'} (Kopie)`,
+        status: 'draft',
+        archived: false,
+        reviewed_at: null,
+        revision: 1,
+        duplicated_from: worksheetId,
+        created_at: now,
+        updated_at: now,
+      }
+      await db.collection('worksheets').insertOne(duplicate)
+      const { _id: duplicateId, ...cleaned } = duplicate
+      return handleCORS(NextResponse.json(cleaned, { status: 201 }))
+    }
+
     // Regenerate worksheet with different difficulty - POST /api/regenerate-worksheet
     if (route === '/regenerate-worksheet' && method === 'POST') {
       const decoded = await verifyToken(request)
@@ -1727,7 +1763,14 @@ ${sourceParts.join('\n\n')}
             checked_at: new Date().toISOString(),
           },
         },
+        status: 'review',
+        revision: 1,
+        archived: false,
+        favorite: false,
+        tags: [],
+        folder: '',
         created_at: new Date(),
+        updated_at: new Date(),
         regenerated_from: worksheetId
       }
 
@@ -2334,17 +2377,30 @@ Aktion: ${actionPrompt}`
 
       const worksheetId = path[1]
       const body = await request.json()
-      const { content, title, status: wsStatus } = body
+      const { content, title } = body
 
       const updateFields = {}
-      if (content) updateFields.content = content
+      if (content) {
+        updateFields.content = content
+        updateFields.status = 'review'
+        updateFields.reviewed_at = null
+      }
       if (title) updateFields.title = title
-      if (wsStatus) updateFields.status = wsStatus
+      const metadataKeys = ['status', 'folder', 'tags', 'favorite', 'archived', 'reviewed_at']
+      if (metadataKeys.some(key => Object.prototype.hasOwnProperty.call(body, key))) {
+        const currentMetadata = await db.collection('worksheets').findOne(
+          { id: worksheetId, user_id: decoded.userId },
+          { projection: { status: 1, folder: 1, tags: 1, favorite: 1, archived: 1, reviewed_at: 1 } },
+        )
+        Object.assign(updateFields, normalizeMaterialMetadata({ ...(currentMetadata || {}), ...body }))
+      }
       updateFields.updated_at = new Date()
 
+      const updateOperation = { $set: updateFields }
+      if (content) updateOperation.$inc = { revision: 1 }
       const result = await db.collection('worksheets').updateOne(
         { id: worksheetId, user_id: decoded.userId },
-        { $set: updateFields }
+        updateOperation
       )
 
       if (result.matchedCount === 0) {
@@ -2354,7 +2410,7 @@ Aktion: ${actionPrompt}`
         ))
       }
 
-      const updated = await db.collection('worksheets').findOne({ id: worksheetId })
+      const updated = await db.collection('worksheets').findOne({ id: worksheetId, user_id: decoded.userId })
       const { _id, ...cleanedWorksheet } = updated
       return handleCORS(NextResponse.json(cleanedWorksheet))
     }

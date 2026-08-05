@@ -51,7 +51,7 @@ export default function UploadView({ RESOURCE_TYPES, SUBJECTS }) {
     uploadFileResults, uploadAnalysisResult, uploadStructuredSource,
     fileInputRef,
     handleFileDrop, handleRemoveFile, handleAnalyzeUpload, handleReAnalyze, updateFileResult,
-    resetUpload, addMoreFiles,
+    resetUpload, addMoreFiles, getCombinedSourceText,
     setForm, setActiveView, setSuccessMessage,
   } = ctx
 
@@ -542,6 +542,13 @@ export default function UploadView({ RESOURCE_TYPES, SUBJECTS }) {
                     </motion.div>
                   )
                 })}
+                <motion.div variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}>
+                  <Button variant="outline" size="sm" onClick={() => {
+                    const sourceText = getCombinedSourceText()
+                    if (sourceText) sessionStorage.setItem('eduflow_studio_source', sourceText.slice(0, 30000))
+                    setActiveView('studio')
+                  }}><Sparkles className="h-4 w-4 mr-1.5" /> Studio-Paket erstellen</Button>
+                </motion.div>
               </motion.div>
             </div>
           ) : (

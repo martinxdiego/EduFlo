@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/ui/button'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
@@ -20,7 +20,12 @@ import {
   MessageSquareText,
   Presentation,
   Sparkles,
-  UploadCloud
+  UploadCloud,
+  Check,
+  Edit3,
+  Save,
+  Library,
+  PackageCheck
 } from 'lucide-react'
 import { useEduFlow } from '@/contexts/EduFlowContext'
 
@@ -45,6 +50,20 @@ const DEFAULT_FORM = {
   mode: 'full',
   sourceText: ''
 }
+
+const OUTPUT_OPTIONS = [
+  { id: 'slides', label: 'Folien' },
+  { id: 'cards', label: 'Lernkarten & Quiz' },
+  { id: 'audio', label: 'Audio' },
+]
+
+const PRESETS = [
+  { id: 'lesson', label: 'Unterrichtslektion', mode: 'Aktivierung, Erarbeitung, Anwendung und Sicherung' },
+  { id: 'review', label: 'Prüfungsvorbereitung', mode: 'Kernwissen, typische Fehler, Lernkarten und anspruchsvolles Quiz' },
+  { id: 'substitute', label: 'Vertretungslektion', mode: 'Selbsterklärend, klar getaktet und ohne Vorwissen der Lehrperson einsetzbar' },
+]
+
+const GENERATION_STAGES = ['Quelle wird analysiert', 'Lernziele werden abgeleitet', 'Medien werden erstellt', 'Inhalte werden qualitätsgeprüft']
 
 function slug(value, extension) {
   const base = String(value || 'eduflow-studio')
@@ -89,7 +108,7 @@ function ListBlock({ items, empty = 'Noch keine Inhalte.' }) {
 }
 
 function StudioView() {
-  const { token, setError, setSuccessMessage } = useEduFlow()
+  const { token, setError, setSuccessMessage, setActiveView, worksheets, fetchStudioPackages, selectedStudioPackage, setSelectedStudioPackage } = useEduFlow()
   const [form, setForm] = useState(DEFAULT_FORM)
   const [artifact, setArtifact] = useState(null)
   const [activeTab, setActiveTab] = useState('overview')
@@ -98,10 +117,74 @@ function StudioView() {
   const [exportingAudio, setExportingAudio] = useState(false)
   const [localError, setLocalError] = useState('')
   const [notice, setNotice] = useState('')
+  const [outputs, setOutputs] = useState(['slides', 'cards', 'audio'])
+  const [generationStage, setGenerationStage] = useState(0)
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [quality, setQuality] = useState(null)
+  const [packageId, setPackageId] = useState(null)
+
+  useEffect(() => {
+    if (!generating) return
+    setGenerationStage(0)
+    const timer = setInterval(() => setGenerationStage(current => Math.min(GENERATION_STAGES.length - 1, current + 1)), 2400)
+    return () => clearInterval(timer)
+  }, [generating])
+
+  useEffect(() => {
+    if (!selectedStudioPackage?.artifact) return
+    setArtifact(selectedStudioPackage.artifact)
+    setQuality(selectedStudioPackage.quality || null)
+    setOutputs(selectedStudioPackage.outputs?.length ? selectedStudioPackage.outputs : ['slides', 'cards', 'audio'])
+    setPackageId(selectedStudioPackage.id)
+    setForm(previous => ({ ...previous, title: selectedStudioPackage.title || '', subject: selectedStudioPackage.subject || previous.subject, grade: selectedStudioPackage.grade || previous.grade }))
+    setSelectedStudioPackage(null)
+  }, [selectedStudioPackage, setSelectedStudioPackage])
+
+  useEffect(() => {
+    const uploadedSource = sessionStorage.getItem('eduflow_studio_source')
+    if (!uploadedSource) return
+    setForm(previous => previous.sourceText ? previous : { ...previous, sourceText: uploadedSource })
+    sessionStorage.removeItem('eduflow_studio_source')
+  }, [])
 
   const updateForm = (field, value) => {
     setForm(prev => ({ ...prev, [field]: value }))
   }
+
+  const toggleOutput = id => setOutputs(previous => previous.includes(id) ? previous.filter(item => item !== id) : [...previous, id])
+
+  const useWorksheetSource = worksheetId => {
+    const worksheet = worksheets.find(item => item.id === worksheetId)
+    if (!worksheet) return
+    const questions = (worksheet.content?.questions || []).map(item => `${item.question}\nMusterlösung: ${item.answer || '–'}`).join('\n\n')
+    setForm(previous => ({ ...previous, title: worksheet.title, grade: `${worksheet.grade}. Klasse`, subject: worksheet.subject, sourceText: `${worksheet.topic || worksheet.title}\n\n${questions}` }))
+  }
+
+  const savePackage = async (nextArtifact, silent = false, targetPackageId = packageId) => {
+    if (!nextArtifact) return null
+    setSaving(true)
+    try {
+      const response = await fetch('/api/studio/packages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ id: targetPackageId, artifact: nextArtifact, subject: form.subject, grade: form.grade, outputs }),
+      })
+      if (!response.ok) throw new Error(await readError(response, 'Studio-Paket konnte nicht gespeichert werden.'))
+      const saved = await response.json()
+      setPackageId(saved.id)
+      await fetchStudioPackages(token)
+      if (!silent) setSuccessMessage('Studio-Paket wurde in der Bibliothek gespeichert.')
+      return saved
+    } catch (error) {
+      setLocalError(error.message)
+      return null
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const updateArtifact = (field, value) => setArtifact(previous => ({ ...previous, [field]: value }))
 
   const generateStudio = async (event) => {
     event.preventDefault()
@@ -109,6 +192,7 @@ function StudioView() {
     setLocalError('')
     setNotice('')
     setError('')
+    setPackageId(null)
 
     try {
       const response = await fetch('/api/studio/generate', {
@@ -126,12 +210,14 @@ function StudioView() {
 
       const data = await response.json()
       setArtifact(data.artifact)
+      setQuality(data.quality || null)
       setActiveTab('overview')
+      await savePackage(data.artifact, true, null)
       if (data.warning) {
         setNotice(data.warning)
         setSuccessMessage('Studio-Ersatzpaket erstellt.')
       } else {
-        setSuccessMessage(`Studio-Paket mit ${data.model} erstellt.`)
+        setSuccessMessage('Studio-Paket erstellt und in der Bibliothek gespeichert.')
       }
     } catch (error) {
       const message = error.message || 'Studio-Generierung fehlgeschlagen.'
@@ -215,13 +301,15 @@ function StudioView() {
             <div className="h-10 w-10 rounded-xl bg-blue-100 flex items-center justify-center">
               <Sparkles className="h-5 w-5 text-blue-600" />
             </div>
-            <Badge variant="outline" className="bg-white text-blue-700 border-blue-200">OpenAI Studio</Badge>
+            <Badge variant="outline" className="bg-white text-blue-700 border-blue-200">Unterrichtsmedien</Badge>
           </div>
           <h1 className="text-3xl font-bold text-gray-900">Studio</h1>
-          <p className="text-sm text-gray-500 mt-1">Quellen rein, Unterrichtspaket raus.</p>
+          <p className="text-sm text-gray-500 mt-1">Aus einer Quelle entstehen editierbare Folien, Lernkarten, Quiz und Audio.</p>
         </div>
 
         <div className="flex flex-wrap gap-2">
+          {artifact ? <Button variant="outline" onClick={() => setEditing(current => !current)}><Edit3 className="h-4 w-4 mr-2" />{editing ? 'Vorschau' : 'Bearbeiten'}</Button> : null}
+          {artifact ? <Button variant="outline" onClick={() => savePackage(artifact)} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}Speichern</Button> : null}
           <Button variant="outline" onClick={exportPptx} disabled={!artifact || exportingPptx}>
             {exportingPptx ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Presentation className="h-4 w-4 mr-2" />}
             PPTX
@@ -230,6 +318,7 @@ function StudioView() {
             {exportingAudio ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <AudioLines className="h-4 w-4 mr-2" />}
             Audio
           </Button>
+          {artifact ? <Button onClick={() => setActiveView('library')}><Library className="h-4 w-4 mr-2" /> Bibliothek</Button> : null}
         </div>
       </div>
 
@@ -255,6 +344,19 @@ function StudioView() {
           </CardHeader>
           <CardContent>
             <form onSubmit={generateStudio} className="space-y-4">
+              <div>
+                <Label>Vorlage</Label>
+                <div className="mt-2 grid gap-2 sm:grid-cols-3 xl:grid-cols-1">
+                  {PRESETS.map(preset => <button type="button" key={preset.id} onClick={() => updateForm('mode', preset.mode)} className={`rounded-xl border p-3 text-left text-xs font-semibold transition ${form.mode === preset.mode ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-blue-200'}`}>{preset.label}</button>)}
+                </div>
+              </div>
+
+              {worksheets.length > 0 ? <div><Label>Quelle aus der Bibliothek</Label><Select onValueChange={useWorksheetSource}><SelectTrigger className="mt-2"><SelectValue placeholder="Material auswählen…" /></SelectTrigger><SelectContent>{worksheets.slice(0, 30).map(item => <SelectItem key={item.id} value={item.id}>{item.title}</SelectItem>)}</SelectContent></Select></div> : null}
+
+              <div>
+                <Label>Gewünschte Ausgaben</Label>
+                <div className="mt-2 flex flex-wrap gap-2">{OUTPUT_OPTIONS.map(option => <button type="button" key={option.id} onClick={() => toggleOutput(option.id)} className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold ${outputs.includes(option.id) ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-500'}`}>{outputs.includes(option.id) ? <Check className="h-3 w-3" /> : null}{option.label}</button>)}</div>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-4">
                 <div>
                   <Label>Titel</Label>
@@ -289,9 +391,12 @@ function StudioView() {
                   className="mt-2 min-h-[320px] resize-y"
                   required
                 />
+                <Button type="button" variant="ghost" size="sm" className="mt-2" onClick={() => setActiveView('upload')}><UploadCloud className="h-4 w-4 mr-2" /> PDF, Word, Bild oder Audio analysieren</Button>
               </div>
 
-              <Button type="submit" disabled={generating || form.sourceText.trim().length < 20} className="w-full btn-premium">
+              {generating ? <div className="rounded-xl border border-blue-100 bg-blue-50 p-3"><div className="flex items-center gap-2 text-sm font-semibold text-blue-800"><Loader2 className="h-4 w-4 animate-spin" />{GENERATION_STAGES[generationStage]}</div><div className="mt-3 grid grid-cols-4 gap-1">{GENERATION_STAGES.map((_, index) => <span key={index} className={`h-1 rounded-full ${index <= generationStage ? 'bg-blue-500' : 'bg-blue-100'}`} />)}</div><p className="mt-2 text-xs text-blue-600">Das Paket wird danach automatisch gespeichert.</p></div> : null}
+
+              <Button type="submit" disabled={generating || form.sourceText.trim().length < 20 || outputs.length === 0} className="w-full btn-premium">
                 {generating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
                 Studio-Paket erstellen
               </Button>
@@ -314,21 +419,22 @@ function StudioView() {
             <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
               <TabsList className="bg-white border border-gray-200 shadow-sm flex flex-wrap h-auto justify-start">
                 <TabsTrigger value="overview">Übersicht</TabsTrigger>
-                <TabsTrigger value="slides">Folien</TabsTrigger>
-                <TabsTrigger value="cards">Karten</TabsTrigger>
-                <TabsTrigger value="audio">Audio</TabsTrigger>
+                {outputs.includes('slides') ? <TabsTrigger value="slides">Folien</TabsTrigger> : null}
+                {outputs.includes('cards') ? <TabsTrigger value="cards">Karten</TabsTrigger> : null}
+                {outputs.includes('audio') ? <TabsTrigger value="audio">Audio</TabsTrigger> : null}
               </TabsList>
 
               <TabsContent value="overview" className="space-y-4">
                 <Card className="glass-card border-0">
                   <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
+                    <CardTitle className="flex flex-wrap items-center gap-2">
                       <BookOpenCheck className="h-5 w-5 text-blue-500" />
                       {artifact.title}
+                      {quality ? <Badge className="ml-auto bg-emerald-100 text-emerald-700"><PackageCheck className="mr-1 h-3 w-3" /> Qualität {quality.score}</Badge> : null}
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-5">
-                    <p className="text-sm leading-7 text-gray-700 whitespace-pre-wrap">{artifact.summary}</p>
+                    {editing ? <Textarea value={artifact.summary} onChange={event => updateArtifact('summary', event.target.value)} className="min-h-28" aria-label="Zusammenfassung bearbeiten" /> : <p className="text-sm leading-7 text-gray-700 whitespace-pre-wrap">{artifact.summary}</p>}
                     <div className="grid md:grid-cols-2 gap-5">
                       <div>
                         <h3 className="text-sm font-semibold text-gray-900 mb-3">Kernaussagen</h3>
@@ -350,7 +456,7 @@ function StudioView() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-sm leading-7 text-gray-700 whitespace-pre-wrap">{artifact.teachingNotes || 'Keine Notizen vorhanden.'}</p>
+                    {editing ? <Textarea value={artifact.teachingNotes || ''} onChange={event => updateArtifact('teachingNotes', event.target.value)} className="min-h-36" aria-label="Unterrichtsnotizen bearbeiten" /> : <p className="text-sm leading-7 text-gray-700 whitespace-pre-wrap">{artifact.teachingNotes || 'Keine Notizen vorhanden.'}</p>}
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -412,7 +518,7 @@ function StudioView() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <p className="text-sm leading-7 text-gray-700 whitespace-pre-wrap">{artifact.audioScript || 'Kein Audio-Skript vorhanden.'}</p>
+                    {editing ? <Textarea value={artifact.audioScript || ''} onChange={event => updateArtifact('audioScript', event.target.value)} className="min-h-64" aria-label="Audio-Skript bearbeiten" /> : <p className="text-sm leading-7 text-gray-700 whitespace-pre-wrap">{artifact.audioScript || 'Kein Audio-Skript vorhanden.'}</p>}
                     <Button onClick={exportAudio} disabled={!artifact.audioScript || exportingAudio}>
                       {exportingAudio ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
                       MP3 erstellen

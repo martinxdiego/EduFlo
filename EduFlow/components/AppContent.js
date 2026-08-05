@@ -45,6 +45,8 @@ import OnboardingHint from '@/components/OnboardingHint'
 import BottomTabBar from '@/components/BottomTabBar'
 import MobileMoreSheet from '@/components/MobileMoreSheet'
 import AuthTransition from '@/components/AuthTransition'
+import CreationWorkspaceHeader from '@/components/CreationWorkspaceHeader'
+import GenerationDock from '@/components/GenerationDock'
 
 // ============================================================
 // CONSTANTS
@@ -2846,10 +2848,13 @@ const AppContent = () => {
   const [hoveredNav, setHoveredNav] = useState(null)
 
   const navGroups = [
-    { label: 'Material', items: [
+    { label: 'Erstellen', items: [
       { id: 'create', label: 'Erstellen', icon: PlusCircle },
+      { id: 'upload', label: 'Quellen verwenden', icon: Upload },
+      { id: 'studio', label: 'Studio', icon: Sparkles },
+    ]},
+    { label: 'Materialien', items: [
       { id: 'library', label: 'Bibliothek', icon: FolderOpen },
-      { id: 'upload', label: 'Hochladen', icon: Upload },
       { id: 'templates', label: 'Vorlagen', icon: LayoutTemplate },
       { id: 'exports', label: 'Exporte', icon: Clock },
     ]},
@@ -2857,13 +2862,10 @@ const AppContent = () => {
       { id: 'curriculum', label: 'Lehrplan 21', icon: GraduationCap },
       { id: 'planner', label: 'Jahresplaner', icon: Calendar },
     ]},
-    { label: 'Classroom', items: [
+    { label: 'Klassen', items: [
       { id: 'classes', label: 'Klassen', icon: Users },
       { id: 'students', label: 'Schüler', icon: User },
       { id: 'analytics', label: 'Lernanalyse', icon: BarChart3 },
-    ]},
-    { label: 'Studio', items: [
-      { id: 'studio', label: 'Studio', icon: Sparkles },
     ]},
   ]
   const navItems = navGroups.flatMap(g => g.items)
@@ -3064,7 +3066,7 @@ const AppContent = () => {
 
           {/* ============ CREATE VIEW ============ */}
           {activeView === 'create' && (
-            <GeneratorView handleExportPDF={handleExportPDF} handleExportDOCX={handleExportDOCX} handleRegenerate={handleRegenerate} handleUpgrade={handleUpgrade} />
+            <div><CreationWorkspaceHeader current="create" /><GeneratorView handleExportPDF={handleExportPDF} handleExportDOCX={handleExportDOCX} handleRegenerate={handleRegenerate} handleUpgrade={handleUpgrade} /></div>
           )}
 
           {/* ============ LIBRARY VIEW ============ */}
@@ -3074,7 +3076,7 @@ const AppContent = () => {
 
           {/* ============ UPLOAD VIEW ============ */}
           {activeView === 'upload' && (
-            <UploadView RESOURCE_TYPES={RESOURCE_TYPES} SUBJECTS={SUBJECTS} />
+            <div><CreationWorkspaceHeader current="upload" /><UploadView RESOURCE_TYPES={RESOURCE_TYPES} SUBJECTS={SUBJECTS} /></div>
           )}
 
           {/* ============ TEMPLATES VIEW ============ */}
@@ -4971,7 +4973,7 @@ const AppContent = () => {
 
           {/* ============ STUDIO VIEW ============ */}
           {activeView === 'studio' && (
-            <StudioView />
+            <div><CreationWorkspaceHeader current="studio" /><StudioView /></div>
           )}
 
           {/* ============ SETTINGS VIEW ============ */}
@@ -5240,7 +5242,8 @@ const AppContent = () => {
       <AnimatePresence>
         {showGenerationTheater && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }} className="glass-card rounded-3xl p-6 sm:p-8 max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }} className="glass-card relative rounded-3xl p-6 sm:p-8 max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+              <Button type="button" variant="ghost" size="sm" onClick={() => setShowGenerationTheater(false)} className="absolute right-4 top-4" aria-label="Generierung minimieren"><Minus className="mr-1.5 h-4 w-4" /> Minimieren</Button>
               <div className="text-center mb-8">
                 <motion.div animate={{ rotate: 360 }} transition={{ duration: 2, repeat: Infinity, ease: "linear" }} className="inline-block mb-4">
                   <Sparkles className="h-12 w-12 text-blue-500" />
@@ -5258,12 +5261,12 @@ const AppContent = () => {
                 </p>
                 {generationProgress.length > 0 && generationProgress[generationProgress.length - 1].progress < 100 && (
                   <motion.p animate={{ opacity: [0.5, 1, 0.5] }} transition={{ duration: 2, repeat: Infinity }} className="text-blue-500 text-xs mt-1 font-medium">
-                    Bitte nicht schliessen...
+                    Sie können minimieren und in EduFlow weiterarbeiten.
                   </motion.p>
                 )}
               </div>
               <div className="space-y-3 mb-8">
-                {generationProgress.map((stage, index) => (
+                {generationProgress.slice(-8).map((stage, index) => (
                   <motion.div key={`${stage.step}-${index}`} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}
                     className={`p-3 rounded-xl ${stage.type === 'question' ? 'bg-blue-50 border border-blue-200' : stage.type === 'complete' ? 'bg-green-50 border border-green-200' : 'bg-white/50'}`}>
                     <div className="flex items-start gap-3">
@@ -5314,6 +5317,8 @@ const AppContent = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <GenerationDock />
 
       {/* ====== MOBILE BOTTOM TAB BAR ====== */}
       <BottomTabBar
