@@ -442,12 +442,14 @@ export default function SchuelerPage() {
           <div className="bg-white rounded-2xl shadow-lg p-6">
             {/* Auth tabs */}
             <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-xl">
-              <button onClick={() => { setAuthMode('login'); setAuthError('') }}
-                className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all ${authMode === 'login' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500'}`}>
+              <button type="button" onClick={() => { setAuthMode('login'); setAuthError('') }}
+                aria-pressed={authMode === 'login'}
+                className={`flex-1 min-h-11 py-2.5 rounded-lg text-sm font-medium transition-all ${authMode === 'login' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500'}`}>
                 Anmelden
               </button>
-              <button onClick={() => { setAuthMode('register'); setAuthError('') }}
-                className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all ${authMode === 'register' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500'}`}>
+              <button type="button" onClick={() => { setAuthMode('register'); setAuthError('') }}
+                aria-pressed={authMode === 'register'}
+                className={`flex-1 min-h-11 py-2.5 rounded-lg text-sm font-medium transition-all ${authMode === 'register' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500'}`}>
                 Registrieren
               </button>
             </div>
@@ -455,9 +457,12 @@ export default function SchuelerPage() {
             <form onSubmit={handleAuth} className="space-y-4">
               {authMode === 'register' && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Anzeigename</label>
+                  <label htmlFor="student-display-name" className="block text-sm font-medium text-gray-700 mb-1.5">Anzeigename</label>
                   <input
+                    id="student-display-name"
+                    name="displayName"
                     type="text"
+                    autoComplete="name"
                     value={authForm.displayName}
                     onChange={(e) => setAuthForm(prev => ({ ...prev, displayName: e.target.value }))}
                     placeholder="Vorname Nachname"
@@ -467,9 +472,12 @@ export default function SchuelerPage() {
                 </div>
               )}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Benutzername</label>
+                <label htmlFor="student-username" className="block text-sm font-medium text-gray-700 mb-1.5">Benutzername</label>
                 <input
+                  id="student-username"
+                  name="username"
                   type="text"
+                  autoComplete="username"
                   value={authForm.username}
                   onChange={(e) => setAuthForm(prev => ({ ...prev, username: e.target.value.toLowerCase().replace(/\s/g, '') }))}
                   placeholder="z.B. max.muster"
@@ -479,20 +487,23 @@ export default function SchuelerPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Passwort</label>
+                <label htmlFor="student-password" className="block text-sm font-medium text-gray-700 mb-1.5">Passwort</label>
                 <input
+                  id="student-password"
+                  name="password"
                   type="password"
+                  autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
                   value={authForm.password}
                   onChange={(e) => setAuthForm(prev => ({ ...prev, password: e.target.value }))}
                   placeholder="Mindestens 8 Zeichen"
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 text-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none transition-all"
                   required
-                  minLength={4}
+                  minLength={8}
                 />
               </div>
 
               {authError && (
-                <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-red-600 text-sm text-center bg-red-50 p-2 rounded-lg">{authError}</motion.p>
+                <motion.p role="alert" aria-live="polite" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-red-600 text-sm text-center bg-red-50 p-2 rounded-lg">{authError}</motion.p>
               )}
 
               <button
@@ -508,12 +519,12 @@ export default function SchuelerPage() {
             {/* Guest mode */}
             <div className="mt-4 pt-4 border-t border-gray-100 text-center">
               <p className="text-xs text-gray-400 mb-2">Hast du einen Zugangscode?</p>
-              <button onClick={() => {
+              <button type="button" onClick={() => {
                 setStudentToken('guest')
                 setStudent({ display_name: 'Gast', username: 'gast' })
                 setView('quiz')
               }}
-                className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+                className="inline-flex min-h-11 items-center justify-center px-3 text-sm text-blue-600 hover:text-blue-800 font-medium">
                 Als Gast starten (ohne Account)
               </button>
             </div>
@@ -962,32 +973,34 @@ export default function SchuelerPage() {
 
           <div className="flex items-center justify-between mt-8 pt-6 border-t">
             <button onClick={() => setCurrentQuestion(prev => Math.max(0, prev - 1))} disabled={currentQuestion === 0}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-gray-600 hover:bg-gray-100 disabled:opacity-30 transition-all">
+              className="flex min-h-11 items-center gap-2 px-4 py-2.5 rounded-xl text-gray-600 hover:bg-gray-100 disabled:opacity-30 transition-all">
               <ArrowLeft className="h-4 w-4" /> Zurück
             </button>
             {currentQuestion < questions.length - 1 ? (
               <button onClick={() => setCurrentQuestion(prev => prev + 1)}
-                className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-blue-600 text-white font-medium hover:bg-blue-700 transition-all">
+                className="flex min-h-11 items-center gap-2 px-6 py-2.5 rounded-xl bg-blue-600 text-white font-medium hover:bg-blue-700 transition-all">
                 Weiter <ArrowRight className="h-4 w-4" />
               </button>
             ) : (
               <button onClick={submitAnswers} disabled={loading}
-                className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-green-600 text-white font-medium hover:bg-green-700 disabled:opacity-50 transition-all">
+                className="flex min-h-11 items-center gap-2 px-6 py-2.5 rounded-xl bg-green-600 text-white font-medium hover:bg-green-700 disabled:opacity-50 transition-all">
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 Abgeben
               </button>
             )}
           </div>
 
-          <div className="flex justify-center gap-1.5 mt-6">
+          <div className="flex flex-wrap justify-center gap-1.5 mt-6">
             {questions.map((_, i) => (
-              <button key={i} onClick={() => setCurrentQuestion(i)}
+              <button key={i} type="button" onClick={() => setCurrentQuestion(i)}
                 aria-label={`Zu Frage ${i + 1} wechseln${answers[i] !== undefined ? ', beantwortet' : ''}`}
                 aria-current={i === currentQuestion ? 'step' : undefined}
-                className={`w-3 h-3 rounded-full transition-all ${
+                className="flex h-11 w-11 items-center justify-center rounded-full transition-colors hover:bg-white/70">
+                <span aria-hidden="true" className={`block h-3 w-3 rounded-full transition-all ${
                   i === currentQuestion ? 'bg-blue-600 scale-125' :
                   answers[i] !== undefined ? 'bg-green-400' : 'bg-gray-200'
                 }`} />
+              </button>
             ))}
           </div>
         </main>
@@ -1015,11 +1028,11 @@ export default function SchuelerPage() {
           </div>
           <div className="flex items-center gap-2">
             {studentToken === 'guest' ? (
-              <button onClick={logout} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
+              <button type="button" onClick={logout} className="flex min-h-11 items-center gap-1 rounded-lg px-2 text-xs text-gray-500 hover:text-gray-700">
                 <User className="h-3.5 w-3.5" /> Anmelden
               </button>
             ) : (
-              <button onClick={logout} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
+              <button type="button" onClick={logout} className="flex min-h-11 items-center gap-1 rounded-lg px-2 text-xs text-gray-500 hover:text-gray-700">
                 <LogOut className="h-3.5 w-3.5" /> Abmelden
               </button>
             )}
@@ -1035,30 +1048,43 @@ export default function SchuelerPage() {
             <h2 className="text-lg font-bold text-gray-900 mb-1">Aufgabe starten</h2>
             <p className="text-sm text-gray-500 mb-4">Gib den Zugangscode deiner Lehrperson ein.</p>
 
-            <div className="flex gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row">
               {studentToken === 'guest' && (
-                <input
-                  type="text"
-                  value={studentName}
-                  onChange={(e) => setStudentName(e.target.value)}
-                  placeholder="Dein Name"
-                  className="flex-1 px-4 py-3 rounded-xl border border-gray-200 text-base focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none"
-                />
+                <div className="flex-1">
+                  <label htmlFor="guest-student-name" className="sr-only">Dein Name</label>
+                  <input
+                    id="guest-student-name"
+                    name="studentName"
+                    type="text"
+                    autoComplete="name"
+                    value={studentName}
+                    onChange={(e) => setStudentName(e.target.value)}
+                    placeholder="Dein Name"
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 text-base focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none"
+                  />
+                </div>
               )}
-              <input
-                type="text"
-                value={accessCode}
-                onChange={(e) => setAccessCode(e.target.value.toUpperCase().trim())}
-                placeholder="Zugangscode"
-                className="flex-1 px-4 py-3 rounded-xl border border-gray-200 text-lg font-mono text-center tracking-widest focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none"
-                maxLength={8}
-              />
+              <div className="flex-1">
+                <label htmlFor="student-access-code" className="sr-only">Zugangscode</label>
+                <input
+                  id="student-access-code"
+                  name="accessCode"
+                  type="text"
+                  autoComplete="off"
+                  inputMode="text"
+                  value={accessCode}
+                  onChange={(e) => setAccessCode(e.target.value.toUpperCase().trim())}
+                  placeholder="Zugangscode"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 text-lg font-mono text-center tracking-widest focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none"
+                  maxLength={8}
+                />
+              </div>
               <button
                 type="button"
                 onClick={loadAssignment}
                 aria-label={loading ? 'Aufgabe wird geladen' : 'Aufgabe öffnen'}
                 disabled={!accessCode.trim() || (!studentName.trim() && studentToken === 'guest') || loading}
-                className="px-6 py-3 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
+                className="min-h-12 justify-center px-6 py-3 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
               >
                 {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <ArrowRight className="h-5 w-5" />}
               </button>
@@ -1217,8 +1243,8 @@ export default function SchuelerPage() {
                   { id: 'gamification', label: 'Badges & XP', icon: Trophy },
                   { id: 'classes', label: 'Meine Klassen', icon: Users }
                 ].map(tab => (
-                  <button key={tab.id} onClick={() => setDashboardTab(tab.id)}
-                    className={`min-w-fit flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
+                  <button key={tab.id} type="button" onClick={() => setDashboardTab(tab.id)}
+                    className={`min-h-11 min-w-fit flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
                       dashboardTab === tab.id ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'
                     }`}>
                     <tab.icon className="h-3.5 w-3.5" /> {tab.label}
@@ -1697,7 +1723,7 @@ export default function SchuelerPage() {
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
             <div className="bg-blue-50 border border-blue-200 rounded-2xl p-6 text-center">
               <p className="text-sm text-blue-800 mb-2">Du bist als Gast unterwegs. Erstelle ein Konto, um deine Ergebnisse zu speichern!</p>
-              <button onClick={logout} className="text-sm text-blue-600 font-semibold hover:text-blue-800">
+              <button type="button" onClick={logout} className="inline-flex min-h-11 items-center justify-center rounded-lg px-3 text-sm text-blue-600 font-semibold hover:text-blue-800">
                 Jetzt registrieren
               </button>
             </div>
