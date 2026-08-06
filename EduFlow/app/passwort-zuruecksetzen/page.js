@@ -81,7 +81,7 @@ export default function PasswordResetPage() {
       </div>
 
       <div className="relative w-full max-w-md">
-        <Link href="/" className="mb-6 inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-blue-700">
+        <Link href="/" className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-md px-1 text-sm font-medium text-slate-600 transition hover:text-blue-700">
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           Zurück zur Anmeldung
         </Link>
