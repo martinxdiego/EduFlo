@@ -1,3 +1,5 @@
+import { refreshWorksheetUsage } from '@/lib/server/worksheet-usage'
+import { withHostingPolicy } from '@/lib/server/hosting-route-policy'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { NextResponse } from 'next/server'
@@ -55,7 +57,7 @@ function signTeacherSession(user) {
 }
 
 function safeUser(user) {
-  const { _id, password_hash, google_id, ...safe } = user
+  const { _id, password_hash, google_id, account_deletion, account_write_fence, ...safe } = user
   return { ...safe, has_password: Boolean(password_hash) }
 }
 
@@ -217,16 +219,8 @@ async function currentUser(request, db) {
   const user = await db.collection('users').findOne({ id: session.userId })
   if (!user) return jsonResponse({ error: 'User not found' }, { status: 404 }, request)
 
-  const now = new Date()
-  const lastReset = new Date(user.month_reset_date || user.created_at || now)
-  if (now.getMonth() !== lastReset.getMonth() || now.getFullYear() !== lastReset.getFullYear()) {
-    await db.collection('users').updateOne(
-      { id: user.id },
-      { $set: { worksheets_used_this_month: 0, month_reset_date: now } },
-    )
-    user.worksheets_used_this_month = 0
-    user.month_reset_date = now
-  }
+  Object.assign(user, await refreshWorksheetUsage(db, user))
+
 
   return jsonResponse(safeUser(user), { headers: { 'Cache-Control': 'no-store' } }, request)
 }
@@ -347,7 +341,7 @@ async function handleAuthRoute(request, { params }) {
   }
 }
 
-export const GET = handleAuthRoute
-export const POST = handleAuthRoute
-export const PATCH = handleAuthRoute
-export const DELETE = handleAuthRoute
+export const GET = withHostingPolicy(handleAuthRoute)
+export const POST = withHostingPolicy(handleAuthRoute)
+export const PATCH = withHostingPolicy(handleAuthRoute)
+export const DELETE = withHostingPolicy(handleAuthRoute)

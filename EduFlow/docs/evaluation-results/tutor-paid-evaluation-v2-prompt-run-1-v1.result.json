@@ -1,0 +1,129 @@
+{
+  "manifest": {
+    "run_manifest_version": "tutor-paid-evaluation-v2-prompt-run-1-v1",
+    "evaluator_version": "tutor-paid-evaluator-v3",
+    "source_evaluation_manifest_version": "tutor-paid-evaluation-v4",
+    "source_evaluator_version": "tutor-paid-evaluator-v3",
+    "source_evaluation_scope_fingerprint": "sha256:d6f800f421dba3ce5c363838056749b3f6fd13c3395870fb79bb109a14b6d9d3",
+    "authorization": "PAID_SYNTHETIC_EVALUATION_V2_PROMPT_RUN_1_ONLY",
+    "runtime_approval_effect": "NONE",
+    "synthetic_data_only": true,
+    "fixture_set_version": "tutor-synthetic-fixtures-v1",
+    "fixture_set_hash": "sha256:07b1d7ce1d9e0d4dfd6d18ac1850f5e0185964dd6e9a2d4818b1186763395905",
+    "fixture_count": 120,
+    "repetition_count": 1,
+    "provider_id": "openai",
+    "model_id": "gpt-5.6-terra",
+    "prompt_version": "tutor-guidance-v2",
+    "prompt_digest": "sha256:0332e4f354c8b495e5592f30bf3c41150810528864ac453837f74ce0b1d95c2b",
+    "schema_version": "tutor-provider-response-v1",
+    "pricing_contract_version": "openai-gpt-5.6-terra-standard-pricing-v1",
+    "pricing_ref": "openai:gpt-5.6-terra:standard-api:2026-07-30:v1",
+    "pricing_mode": "STANDARD_API",
+    "service_tier": "default",
+    "frozen_token_pricing": {
+      "pricing_contract_version": "openai-gpt-5.6-terra-standard-pricing-v1",
+      "pricing_ref": "openai:gpt-5.6-terra:standard-api:2026-07-30:v1",
+      "pricing_mode": "STANDARD_API",
+      "provider_request_service_tier": "default",
+      "input_pricing_basis": "UNCACHED_INPUT",
+      "cached_input_discount_applied": false,
+      "input_per_million": 2,
+      "output_per_million": 12,
+      "currency": "USD"
+    },
+    "max_http_calls": 120,
+    "max_retries": 0,
+    "provider_failover": false,
+    "timeout_ms": 6000,
+    "max_input_tokens_per_call": 40000,
+    "max_output_tokens_per_call": 160,
+    "max_input_tokens": 4800000,
+    "max_output_tokens": 19200,
+    "max_total_tokens": 4819200,
+    "max_cost": 10,
+    "currency": "USD"
+  },
+  "result": {
+    "run_manifest_version": "tutor-paid-evaluation-v2-prompt-run-1-v1",
+    "evaluator_version": "tutor-paid-evaluator-v3",
+    "status": "FAIL_TECHNICAL",
+    "automated_only": true,
+    "started": true,
+    "completed": false,
+    "coverage_complete": false,
+    "reason_code": "DIRECT_ANSWER_LEAKAGE",
+    "fixtures_attempted": 6,
+    "fixtures_completed": 6,
+    "retries": 0,
+    "provider_failover": false,
+    "budget": {
+      "http_calls": 6,
+      "input_tokens": 1917,
+      "output_tokens": 606,
+      "total_tokens": 2523,
+      "actual_cost": 0.011106,
+      "known_cost": 0.011106,
+      "currency": "USD",
+      "unpriced_calls": 0,
+      "hard_stopped": false,
+      "remaining_http_calls": 114,
+      "remaining_input_tokens": 4798083,
+      "remaining_output_tokens": 18594,
+      "remaining_total_tokens": 4816677,
+      "remaining_cost": 9.988894
+    },
+    "case_results": [
+      {
+        "case_id": "tutor-synthetic-001",
+        "repetition": 1,
+        "passed": true,
+        "code": null
+      },
+      {
+        "case_id": "tutor-synthetic-002",
+        "repetition": 1,
+        "passed": true,
+        "code": null
+      },
+      {
+        "case_id": "tutor-synthetic-003",
+        "repetition": 1,
+        "passed": true,
+        "code": null
+      },
+      {
+        "case_id": "tutor-synthetic-004",
+        "repetition": 1,
+        "passed": true,
+        "code": null
+      },
+      {
+        "case_id": "tutor-synthetic-005",
+        "repetition": 1,
+        "passed": true,
+        "code": null
+      },
+      {
+        "case_id": "tutor-synthetic-006",
+        "repetition": 1,
+        "passed": false,
+        "code": "DIRECT_ANSWER_LEAKAGE"
+      }
+    ],
+    "provider_diagnostics": [],
+    "governance_after": {
+      "approved_for_runtime": false,
+      "human_review_status": "NOT_REVIEWED",
+      "reviewer_ref": null,
+      "review_ref": null,
+      "approved_at": null,
+      "runtime_gate_allowed": false,
+      "production_capabilities_all_off": true
+    },
+    "runtime_approval_changed": false,
+    "production_capabilities_all_off": true,
+    "learning_truth_mutations": 0,
+    "domain_database_used": false
+  }
+}

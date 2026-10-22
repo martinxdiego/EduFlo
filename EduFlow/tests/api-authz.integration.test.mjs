@@ -16,6 +16,11 @@ if (!enabled) {
     const dbName = process.env.DB_NAME
     const jwtSecret = process.env.JWT_SECRET
     assert.ok(mongoUrl && dbName && jwtSecret, 'MongoDB and JWT test configuration are required')
+    assert.match(
+      dbName,
+      /^eduflow_learning_v2_test_[a-z0-9_-]+$/,
+      'DB_NAME must name an explicitly disposable Learning V2 test database',
+    )
 
     const runId = `ci-${Date.now()}-${Math.random().toString(16).slice(2)}`
     const ownerId = `${runId}-owner`
@@ -38,6 +43,7 @@ if (!enabled) {
     const db = client.db(dbName)
 
     try {
+      await db.collection('rate_limits').deleteMany({})
       await db.collection('users').insertMany([
         {
           id: ownerId,
@@ -239,6 +245,62 @@ if (!enabled) {
         body: JSON.stringify({ prompt: 'Do not execute this prompt' }),
       })
       assert.equal(studentGemini.status, 401)
+
+      // Hosting A: real HTTP entrypoints boot without keys and deny before Provider work.
+      for (const route of ['generate-worksheet', 'generate-worksheet-stream', 'regenerate-worksheet',
+        'analyze-upload', 'chat', 'chat-add-questions', 'ki-action', 'generate-image', 'analyze-errors',
+        'analyze-exam-scan', 'tts', 'generate-dossier-stream', 'export/dossier/pdf',
+        'student/learning-coach', 'ai/gemini', 'studio/generate', 'studio/audio']) {
+        const denied = await fetch(`${baseUrl}/api/${route}`, {
+          method: 'POST', headers: { Cookie: ownerCookie, Origin: baseUrl, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ environment: 'staging', providerEnabled: true, runtimeApproval: true }),
+        })
+        assert.equal(denied.status, 403, route)
+        assert.equal((await denied.json()).code, 'PROVIDER_DISABLED', route)
+      }
+      for (const route of ['dossiers', 'dossiers/synthetic']) {
+        const denied = await fetch(`${baseUrl}/api/${route}`, { headers: { Cookie: ownerCookie } })
+        assert.equal(denied.status, 403, route)
+      }
+      await db.collection('worksheets').updateOne({ id: worksheetId }, { $set: {
+        'content.questions': [{ number: 1, type: 'open', question: 'Synthetic judgement', answer: 'Teacher judgement', points: 3 }],
+      } })
+      await db.collection('assignments').updateOne({ id: assignmentId }, { $set: {
+        max_attempts: 10, graded: true, feedback_mode: 'immediate',
+      } })
+        const studentBeforeReview = await db.collection('students').findOne({ id: studentId })
+        const classStatsRequest = () => fetch(`${baseUrl}/api/classes/${classId}/stats`, { headers: { Cookie: ownerCookie } })
+        const classBeforeReview = await (await classStatsRequest()).json()
+        const openSubmission = await fetch(`${baseUrl}/api/student/submit`, {
+        method: 'POST', headers: { Cookie: (studentLogin.headers.get('set-cookie') || '').split(';', 1)[0],
+          Origin: baseUrl, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignmentCode: 'CIASGN01', studentName: 'Synthetic student', answers: ['Synthetic open answer'], duration: 10 }),
+      })
+      assert.equal(openSubmission.status, 201)
+      const pending = await openSubmission.json()
+      assert.equal(pending.needsReview, true)
+      assert.equal(pending.earnedPoints, null)
+      assert.equal(pending.scorePercentage, null)
+      assert.equal(pending.swissGrade, null)
+      assert.equal(pending.questionResults[0].pointsAwarded, null)
+        assert.equal(pending.questionResults[0].aiGraded, false)
+        const studentPendingReview = await db.collection('students').findOne({ id: studentId })
+        assert.equal(studentPendingReview.total_points, studentBeforeReview.total_points)
+        assert.equal(studentPendingReview.xp, studentBeforeReview.xp)
+        const classPendingReview = await (await classStatsRequest()).json()
+        assert.equal(classPendingReview.classStats?.avgGrade, classBeforeReview.classStats?.avgGrade,
+          'pending judgement must not lower the class average to a fabricated grade')
+      const reviewRequest = (suffix, body, cookie = ownerCookie) => fetch(`${baseUrl}/api/submissions/${pending.submissionId}/${suffix}`, {
+        method: 'PUT', headers: { Cookie: cookie, Origin: baseUrl, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      })
+      assert.equal((await reviewRequest('finalize', {})).status, 409)
+      assert.equal((await reviewRequest('grade', { questionIndex: 0, feedback: 'Comment only' })).status, 409)
+      assert.equal((await reviewRequest('grade', { questionIndex: 0, pointsAwarded: 3 }, attackerCookie)).status, 403)
+      const teacherGrade = await reviewRequest('grade', { questionIndex: 0, pointsAwarded: 2 })
+      assert.equal(teacherGrade.status, 200)
+      assert.equal((await teacherGrade.json()).needsReview, false)
+      assert.equal((await reviewRequest('finalize', {})).status, 200)
+      await db.collection('submissions').deleteOne({ id: pending.submissionId })
 
       await db.collection('password_reset_tokens').insertOne({
         id: `${runId}-reset-record`,

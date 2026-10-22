@@ -1,3 +1,4 @@
+import { withHostingPolicy } from '@/lib/server/hosting-route-policy'
 import { NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
 import { findWorksheetAccess } from '@/lib/server/authorization'
@@ -11,6 +12,10 @@ import {
 } from '@/lib/server/schemas/collaboration'
 import { applyCorsHeaders, publicErrorMessage, verifyAuthToken } from '@/lib/server/security'
 import { parseJsonBody } from '@/lib/server/validation'
+import {
+  WORKSHEET_QUESTION_IDENTITY_VERSION,
+  reconcileWorksheetQuestionIds,
+} from '@/lib/server/worksheet-question-identity'
 
 export const runtime = 'nodejs'
 
@@ -139,7 +144,15 @@ async function restoreVersion(request, db, session) {
 
   const result = await db.collection('worksheets').updateOne(
     { id: worksheetId, user_id: session.userId },
-    { $set: { content: version.content, title: version.title, updated_at: new Date() } },
+    {
+      $set: {
+        content: reconcileWorksheetQuestionIds(version.content, worksheet.content),
+        title: version.title,
+        question_identity_version: WORKSHEET_QUESTION_IDENTITY_VERSION,
+        updated_at: new Date(),
+      },
+      $inc: { revision: 1 },
+    },
   )
   if (result.modifiedCount !== 1) {
     return jsonResponse({ error: 'Version konnte nicht wiederhergestellt werden.' }, { status: 409 }, request)
@@ -173,5 +186,5 @@ async function handleCollaborationRoute(request, { params }) {
   }
 }
 
-export const GET = handleCollaborationRoute
-export const POST = handleCollaborationRoute
+export const GET = withHostingPolicy(handleCollaborationRoute)
+export const POST = withHostingPolicy(handleCollaborationRoute)

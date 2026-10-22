@@ -1,4 +1,6 @@
 import { MongoClient } from 'mongodb'
+import { deletionFencedDatabase } from './deletion-write-fence.js'
+import { inspectHostingConfiguration } from './hosting-capabilities-v1.js'
 
 let client
 let database
@@ -51,9 +53,10 @@ export async function getDatabase() {
     try {
       await nextClient.connect()
       const nextDatabase = nextClient.db(databaseName)
-      await ensureOperationalIndexes(nextDatabase)
+      // Hosted runtime credentials never provision storage before binding verification.
+      if (inspectHostingConfiguration().environment === 'development') await ensureOperationalIndexes(nextDatabase)
       client = nextClient
-      database = nextDatabase
+      database = deletionFencedDatabase(nextDatabase)
       return database
     } catch (error) {
       await nextClient.close().catch(() => {})

@@ -73,6 +73,9 @@ export function buildLearningGoalProgress(assignments = [], submissions = []) {
   const goals = new Map()
   const chronologicalSubmissions = [...submissions].sort((a, b) => new Date(a.submitted_at || 0) - new Date(b.submitted_at || 0))
   for (const submission of chronologicalSubmissions) {
+    if (submission.needs_review || !Number.isFinite(submission.score_percentage)
+      || submission.question_results?.some((result) => result.needsManualReview
+        || (result.aiGraded && !result.teacherOverride))) continue
     const assignment = assignmentMap.get(submission.assignment_id) || submission
     for (const goal of normalizeLearningGoals(assignment.learning_goals || submission.learning_goals)) {
       const entry = goals.get(goal) || { goal, attempts: 0, scoreTotal: 0, bestScore: 0, latestScore: 0, subject: assignment.subject || '' }

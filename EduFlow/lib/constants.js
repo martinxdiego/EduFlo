@@ -19,25 +19,7 @@ export const RESOURCE_TYPES = [
 // ============================================================
 // SUBJECTS
 // ============================================================
-export const SUBJECTS_PRIMAR = [
-  'Deutsch', 'Mathematik', 'NMG', 'Englisch', 'Französisch',
-  'Bildnerisches Gestalten', 'Musik', 'Bewegung und Sport'
-]
-
-export const SUBJECTS_SEK = [
-  'Deutsch', 'Mathematik', 'Französisch', 'Englisch',
-  'RZG', 'Natur und Technik', 'Bildnerisches Gestalten',
-  'Musik', 'TTG', 'Bewegung und Sport', 'Medien und Informatik',
-  'Berufliche Orientierung', 'Projektunterricht'
-]
-
-export const SUBJECTS = [...new Set([...SUBJECTS_PRIMAR, ...SUBJECTS_SEK])]
-
-export const getSubjectsForGrade = (grade) => {
-  const g = parseInt(grade, 10)
-  if (g >= 7) return SUBJECTS_SEK
-  return SUBJECTS_PRIMAR
-}
+export { SUBJECTS_PRIMAR, SUBJECTS_SEK, SUBJECTS, getSubjectsForGrade } from './subjects.js'
 
 // ============================================================
 // GRADES & DIFFICULTY

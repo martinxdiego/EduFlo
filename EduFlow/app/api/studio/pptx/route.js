@@ -1,3 +1,4 @@
+import { withHostingPolicy } from '@/lib/server/hosting-route-policy'
 import { NextResponse } from 'next/server'
 import { applyCorsHeaders, verifyAuthToken } from '@/lib/server/security'
 import { buildStudioPresentation } from '@/lib/server/studio-presentation'
@@ -21,7 +22,7 @@ export async function OPTIONS() {
   return jsonResponse({}, { status: 200 })
 }
 
-export async function POST(request) {
+async function POSTHandler(request) {
   const context = requestContext(request, '/api/studio/pptx')
   const user = verifyAuthToken(request)
   if (!user?.userId || user.role === 'student') return jsonResponse({ error: 'Nicht authentifiziert.' }, { status: 401 })
@@ -44,3 +45,5 @@ export async function POST(request) {
     return jsonResponse({ error: 'PowerPoint-Export fehlgeschlagen.', details: process.env.NODE_ENV === 'development' ? error?.message : undefined }, { status: 500 })
   }
 }
+
+export const POST = withHostingPolicy(POSTHandler)

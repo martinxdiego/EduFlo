@@ -1,4 +1,5 @@
 'use client'
+import { normalizeQuestion } from '@/lib/worksheet-answers'
 import { useState, useCallback, useRef, useEffect } from 'react'
 
 export function useEditor(token) {
@@ -16,7 +17,7 @@ export function useEditor(token) {
 
   const startEditMode = useCallback((worksheet) => {
     if (worksheet?.content?.questions) {
-      setEditedQuestions(JSON.parse(JSON.stringify(worksheet.content.questions)))
+      setEditedQuestions(worksheet.content.questions.map(question => normalizeQuestion(question)))
       setEditMode(true)
       setSaveStatus('saved')
       setHasUnsavedChanges(false)

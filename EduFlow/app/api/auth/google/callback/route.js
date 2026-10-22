@@ -1,6 +1,7 @@
+import { withHostingPolicy } from '@/lib/server/hosting-route-policy'
 import { NextResponse } from 'next/server'
 
-export async function GET(request) {
+async function GETHandler(request) {
   const code = request.nextUrl.searchParams.get('code')
   const error = request.nextUrl.searchParams.get('error')
   const state = request.nextUrl.searchParams.get('state')
@@ -19,3 +20,5 @@ export async function GET(request) {
   // Redirect back to app with the authorization code
   return NextResponse.redirect(`${origin}/?google_code=${encodeURIComponent(code)}&google_state=${encodeURIComponent(state)}`)
 }
+
+export const GET = withHostingPolicy(GETHandler)

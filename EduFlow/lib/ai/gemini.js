@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai'
+import { requireProviderTransport } from '../server/provider-denial.js'
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash'
 export const DEFAULT_GEMINI_FALLBACK_MODEL = 'gemini-2.0-flash'
@@ -31,17 +31,7 @@ Die Antwort soll enthalten:
 }
 
 export function getGeminiClient() {
-  if (process.env.ENABLE_GEMINI === 'false') {
-    throw new Error('Gemini provider is disabled.')
-  }
-
-  const apiKey = process.env.GEMINI_API_KEY
-
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY is missing.')
-  }
-
-  return new GoogleGenAI({ apiKey })
+  requireProviderTransport()
 }
 
 function getAudioPart(response) {

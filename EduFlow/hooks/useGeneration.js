@@ -52,12 +52,13 @@ export function useGeneration(token) {
     setGenerationProgress([])
     setStreamingQuestions([])
     setShowGenerationTheater(true)
-    setGenerationJob(newJob('worksheet'))
+    const job = newJob('worksheet')
+    setGenerationJob(job)
 
     try {
       const response = await fetch('/api/generate-worksheet-stream', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, 'Idempotency-Key': job.id },
         body: JSON.stringify({
           ...form,
           aiProvider: 'openai',
@@ -118,11 +119,12 @@ export function useGeneration(token) {
   }, [token])
 
   const handleRegenerate = useCallback(async (worksheetId, newDifficulty, { onComplete, onError }) => {
+    const requestId = newJob('worksheet').id
     setGenerating(true)
     try {
       const response = await fetch('/api/regenerate-worksheet', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, 'Idempotency-Key': requestId },
         body: JSON.stringify({ worksheetId, newDifficulty })
       })
       const data = await response.json()

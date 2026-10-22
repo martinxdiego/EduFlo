@@ -1,3 +1,4 @@
+import { withHostingPolicy } from '@/lib/server/hosting-route-policy'
 import { NextResponse } from 'next/server'
 import { getAIMetrics } from '@/lib/server/ai-telemetry'
 import { applyCorsHeaders, verifyAuthToken } from '@/lib/server/security'
@@ -6,7 +7,7 @@ import { logComplete, logFailure, requestContext } from '@/lib/server/logger'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-export async function GET(request) {
+async function GETHandler(request) {
   const context = requestContext(request, '/api/ai/metrics')
   const user = verifyAuthToken(request)
   if (!user?.userId || user.role === 'student') {
@@ -22,3 +23,5 @@ export async function GET(request) {
     return applyCorsHeaders(NextResponse.json({ error: 'KI-Metriken konnten nicht geladen werden.' }, { status: 500 }), request)
   }
 }
+
+export const GET = withHostingPolicy(GETHandler)

@@ -1,3 +1,5 @@
+import { withHostingPolicy } from '@/lib/server/hosting-route-policy'
+import { submissionTotals, reviewableSubmission } from '@/lib/server/submission-grading'
 import { NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
 import { generateUniqueCode } from '@/lib/server/access-codes'
@@ -83,7 +85,7 @@ async function assignmentSubmissions(request, db, session, assignmentId) {
   const assignment = await ownedAssignment(db, assignmentId, session.userId)
   if (!assignment) return jsonResponse({ error: 'Aufgabe nicht gefunden.' }, { status: 404 }, request)
   const submissions = await db.collection('submissions').find({ assignment_id: assignmentId }).sort({ submitted_at: -1 }).toArray()
-  return jsonResponse({ assignment: { ...clean(assignment), ...assignmentSettings(assignment) }, submissions: submissions.map(clean) }, undefined, request)
+  return jsonResponse({ assignment: { ...clean(assignment), ...assignmentSettings(assignment) }, submissions: submissions.map((submission) => clean(reviewableSubmission(submission))) }, undefined, request)
 }
 
 async function updateAssignment(request, db, session, assignmentId) {
@@ -117,30 +119,30 @@ async function assignmentOverview(request, db, session, assignmentId) {
   const submissions = await db.collection('submissions').find({ assignment_id: assignmentId }).sort({ submitted_at: -1 }).toArray()
   if (!submissions.length) return jsonResponse({ students: [], submissions: [], stats: null, learningGoals: [], recommendations: [] }, undefined, request)
   const students = submissions.map((submission) => {
-    const totalPoints = submission.total_points || 1
-    const earnedPoints = submission.earned_points || 0
+    const calculated = submissionTotals(submission.question_results || [])
+    const { totalPoints, earnedPoints } = calculated
     return {
       name: submission.student_name, earnedPoints, totalPoints,
-      scorePercentage: submission.score_percentage || 0,
-      swissGrade: submission.swiss_grade || Math.round((earnedPoints / totalPoints * 5 + 1) * 2) / 2,
+      scorePercentage: calculated.scorePercentage,
+      swissGrade: calculated.swissGrade,
       duration: submission.duration, submittedAt: submission.submitted_at,
-      needsReview: submission.needs_review, teacherReviewed: submission.teacher_reviewed,
+      needsReview: calculated.needsReview, teacherReviewed: submission.teacher_reviewed,
     }
   })
-  const grades = students.map((student) => student.swissGrade)
+  const grades = students.map((student) => student.swissGrade).filter(Number.isFinite)
   const sortedGrades = [...grades].sort((a, b) => a - b)
-  const scores = students.map((student) => student.scorePercentage)
+  const scores = students.map((student) => student.scorePercentage).filter(Number.isFinite)
   const gradeDistribution = {}
   for (let grade = 1; grade <= 6; grade += 0.5) gradeDistribution[grade] = 0
   for (const grade of grades) if (gradeDistribution[grade] !== undefined) gradeDistribution[grade] += 1
   const passing = grades.filter((grade) => grade >= 4).length
   const stats = {
     count: students.length,
-    averageGrade: Math.round(grades.reduce((a, b) => a + b, 0) / grades.length * 10) / 10,
-    medianGrade: sortedGrades[Math.floor(sortedGrades.length / 2)],
-    bestGrade: Math.max(...grades), worstGrade: Math.min(...grades),
-    averageScore: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length),
-    passing, failing: grades.length - passing, passRate: Math.round(passing / grades.length * 100), gradeDistribution,
+    averageGrade: grades.length ? Math.round(grades.reduce((a, b) => a + b, 0) / grades.length * 10) / 10 : null,
+    medianGrade: sortedGrades[Math.floor(sortedGrades.length / 2)] ?? null,
+    bestGrade: grades.length ? Math.max(...grades) : null, worstGrade: grades.length ? Math.min(...grades) : null,
+    averageScore: scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null,
+    passing, failing: grades.length - passing, passRate: grades.length ? Math.round(passing / grades.length * 100) : null, gradeDistribution,
   }
   const learningGoals = buildLearningGoalProgress([assignment], submissions)
   const recommendations = buildSupportRecommendations(learningGoals)
@@ -171,7 +173,7 @@ async function handleAssignments(request, { params }) {
   }
 }
 
-export const GET = handleAssignments
-export const POST = handleAssignments
-export const PUT = handleAssignments
-export const DELETE = handleAssignments
+export const GET = withHostingPolicy(handleAssignments)
+export const POST = withHostingPolicy(handleAssignments)
+export const PUT = withHostingPolicy(handleAssignments)
+export const DELETE = withHostingPolicy(handleAssignments)

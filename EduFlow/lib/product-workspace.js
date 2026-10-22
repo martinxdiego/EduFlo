@@ -1,3 +1,4 @@
+import { normalizeQuestion } from './worksheet-answers.js'
 const asArray = value => Array.isArray(value) ? value : []
 const cleanText = value => String(value || '').replace(/\s+/g, ' ').trim()
 
@@ -17,14 +18,14 @@ export function normalizeMaterialMetadata(input = {}) {
 }
 
 export function materialQualityChecklist(material = {}) {
-  const questions = asArray(material?.content?.questions)
+  const questions = asArray(material?.content?.questions).filter(question => question?.type !== 'image_block').map(question => normalizeQuestion(question))
   const normalizedQuestions = questions.map(question => cleanText(question?.question).toLowerCase()).filter(Boolean)
   const checks = [
     { id: 'questions', label: 'Aufgaben sind vollständig formuliert', passed: questions.length > 0 && questions.every(question => cleanText(question?.question).length >= 8) },
     { id: 'solutions', label: 'Jede Aufgabe besitzt eine Musterlösung', passed: questions.length > 0 && questions.every(question => cleanText(question?.answer).length > 0) },
     { id: 'duplicates', label: 'Keine doppelten Aufgaben erkannt', passed: new Set(normalizedQuestions).size === normalizedQuestions.length },
     { id: 'level', label: 'Klassenstufe und Fach sind festgelegt', passed: Boolean(cleanText(material.grade) && cleanText(material.subject)) },
-    { id: 'quality', label: 'Automatische Qualitätsprüfung bestanden', passed: !material?.content?.quality || Number(material.content.quality.score || 0) >= 80 },
+    { id: 'quality', label: 'Automatische Qualitätsprüfung bestanden', passed: Boolean(material?.content?.quality) && Number(material.content.quality.score || 0) >= 80 },
   ]
   const passed = checks.filter(check => check.passed).length
   return { checks, passed, total: checks.length, score: Math.round((passed / checks.length) * 100), ready: passed === checks.length }

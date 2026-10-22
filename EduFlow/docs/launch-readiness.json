@@ -1,0 +1,70 @@
+{
+  "updated": "2026-10-21",
+  "checks": [
+    {
+      "id": "materials",
+      "status": "partial",
+      "evidence": "Fixture regression and browser checks; live provider remains disabled."
+    },
+    {
+      "id": "quota",
+      "status": "verified",
+      "evidence": "tests/worksheet-usage.mongo.integration.test.mjs: transactions, concurrency, replay, rollback, monthly reset and account deletion."
+    },
+    {
+      "id": "exports",
+      "status": "partial",
+      "evidence": "All eleven fixture types exported to PDF/DOCX in both versions; broader print QA remains open."
+    },
+    {
+      "id": "privacy",
+      "status": "blocked",
+      "evidence": "Actual service agreements, storage locations and retention schedules are unconfirmed."
+    },
+    {
+      "id": "operator",
+      "status": "blocked",
+      "evidence": "User selected EduFlow as provider name. Actual responsible person/legal entity, reachable business address and public contact remain unconfirmed. Fictional test contact exists only in PROJECT_BRIEF_2026-10-21.md and does not satisfy release requirements."
+    },
+    {
+      "id": "legal_review",
+      "status": "blocked",
+      "evidence": "Legal pages are clearly labelled drafts and have not received professional review."
+    },
+    {
+      "id": "hosting",
+      "status": "blocked",
+      "evidence": "Local H10 v40 passed 1225 checks in 14 profiles. GitHub and direct Vercel project/deployment/domain/env-key reads work for verified identities; explicit Vercel team reads remain limited. User reports Atlas reauthentication complete and plugin discovery confirms installed/ENABLED, but project/cluster calls now fail with MCP -32001 Unknown tool. Atlas access, separate synthetic staging DB, binding/deployment-ID provisioning and provider/production decisions remain unverified. See ATLAS_CONNECTION_HANDOFF.md and STAGING_CONFIG_AUDIT_2026-10-21.md."
+    },
+    {
+      "id": "dependencies",
+      "status": "partial",
+      "evidence": "Targeted exact-lock updates and final H10/browser regressions passed. Production audit has zero critical/high/low and three moderate package groups in the Mammoth dependency chain; development-tool advisories remain. See DEPENDENCY_SECURITY_2026-10-21.md; remaining advisory risk review is open."
+    },
+    {
+      "id": "billing",
+      "status": "blocked",
+      "evidence": "Premium purchasing remains unavailable; final pricing, entitlements and payment integration are open."
+    },
+    {
+      "id": "monitoring",
+      "status": "pending",
+      "evidence": "Server logging exists; client alert delivery and an operational recipient are not configured."
+    },
+    {
+      "id": "curriculum",
+      "status": "partial",
+      "evidence": "24 source-checked LP21 stages and tested context mappings remain a partial Swiss profile. User now targets worldwide use; additional languages, school systems, grading and source-checked curricula are not yet implemented or verified. See PROJECT_BRIEF_2026-10-21.md."
+    },
+    {
+      "id": "domain",
+      "status": "pending",
+      "evidence": "Provisional candidate eduflow.education; Vercel research returned availability and quotes on 2026-10-21. No purchase, ownership, DNS verification or trademark review. Existing Eduflow learning product documented in PROJECT_BRIEF_2026-10-21.md."
+    },
+    {
+      "id": "pilot",
+      "status": "pending",
+      "evidence": "No completed teacher pilot on the final release candidate."
+    }
+  ]
+}

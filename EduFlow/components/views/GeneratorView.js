@@ -1,4 +1,6 @@
 'use client'
+import { answerItems, joinAnswerItems, normalizeQuestion } from '@/lib/worksheet-answers'
+import { shuffledMatchingRight, shuffledOrderingItems } from '@/lib/student-material'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence, Reorder } from 'framer-motion'
 import { Button } from '@/ui/button'
@@ -26,7 +28,8 @@ import {
   Table2, ImagePlus, AlignLeft, AlignCenter, AlignRight
 } from 'lucide-react'
 import dynamic from 'next/dynamic'
-import { LEHRPLAN_CYCLES } from '@/data/lehrplan21'
+import { changeTeachingContext, suggestSubject, verifiedCompetencies, verifiedCompetency } from '@/lib/teaching-context'
+import { getSubjectsForGrade } from '@/lib/subjects'
 import { WORKSHEET_THEMES, getThemeById, getQuestionDecoration } from '@/data/worksheetThemes'
 import { useEduFlow } from '@/contexts/EduFlowContext'
 import QualityReviewPanel from '@/components/QualityReviewPanel'
@@ -44,26 +47,6 @@ const RESOURCE_TYPES = [
   { id: 'vocabulary', label: 'Wortschatz', icon: () => <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m5 8 6 6" /><path d="m4 14 6-6 2-3" /><path d="M2 5h12" /><path d="M7 2h1" /><path d="m22 22-5-10-5 10" /><path d="M14 18h6" /></svg>, description: 'Vokabellisten mit Übungen und Abfragen', color: 'purple' },
   { id: 'dossier', label: 'Arbeitsdossier', icon: BookOpen, description: 'Komplettes Lerndossier mit 15-20 Seiten: Theorie, Aufgaben, Lernziele und Lösungen', color: 'indigo' },
 ]
-
-const SUBJECTS_PRIMAR = [
-  'Deutsch', 'Mathematik', 'NMG', 'Englisch', 'Französisch',
-  'Bildnerisches Gestalten', 'Musik', 'Bewegung und Sport'
-]
-
-const SUBJECTS_SEK = [
-  'Deutsch', 'Mathematik', 'Französisch', 'Englisch',
-  'RZG', 'Natur und Technik', 'Bildnerisches Gestalten',
-  'Musik', 'TTG', 'Bewegung und Sport', 'Medien und Informatik',
-  'Berufliche Orientierung', 'Projektunterricht'
-]
-
-const SUBJECTS = [...new Set([...SUBJECTS_PRIMAR, ...SUBJECTS_SEK])]
-
-const getSubjectsForGrade = (grade) => {
-  const g = parseInt(grade, 10)
-  if (g >= 7) return SUBJECTS_SEK
-  return SUBJECTS_PRIMAR
-}
 
 const DIFFICULTY_LABELS = {
   easy: 'Einfach',
@@ -131,6 +114,14 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
     shareModalOpen, setShareModalOpen, shareForm, setShareForm,
     loadTeacherClasses, loadAssignments,
   } = ctx
+
+  useEffect(() => {
+    if (form.competencyCode && !verifiedCompetency(form.competencyCode, form.grade, form.subject)) {
+      setForm(previous => previous.competencyCode && !verifiedCompetency(previous.competencyCode, previous.grade, previous.subject)
+        ? { ...previous, competencyCode: '' }
+        : previous)
+    }
+  }, [form.competencyCode, form.grade, form.subject, setForm])
 
   // ============================================================
   // EDITING FUNCTIONS (create-view specific)
@@ -373,7 +364,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
 
       if (response.ok) {
         const data = await response.json()
-        const updatedQ = data.question
+        const updatedQ = normalizeQuestion(data.question)
         setEditedQuestions(prev => {
           const updated = [...prev]
           updated[questionIndex] = {
@@ -811,7 +802,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                                     {part}
                                     {pi < arr.length - 1 && (
                                       <span className="inline-block mx-1 px-3 py-0.5 bg-green-200 border-b-2 border-green-500 rounded text-green-800 font-semibold text-xs">
-                                        {(q.answer || '').split(',')[pi]?.trim() || `Lücke ${pi + 1}`}
+                                        {answerItems(q.answer)[pi]?.trim() || `Lücke ${pi + 1}`}
                                       </span>
                                     )}
                                   </span>
@@ -826,12 +817,12 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                                     <span className="text-[10px] font-bold text-green-600">{gi + 1}</span>
                                   </div>
                                   <Input
-                                    value={(q.answer || '').split(',')[gi]?.trim() || ''}
+                                    value={answerItems(q.answer)[gi]?.trim() || ''}
                                     onChange={(e) => {
-                                      const words = (q.answer || '').split(',').map(w => w.trim())
+                                      const words = answerItems(q.answer).map(w => w.trim())
                                       while (words.length <= gi) words.push('')
                                       words[gi] = e.target.value
-                                      updateEditedQuestion(index, 'answer', words.join(', '))
+                                      updateEditedQuestion(index, 'answer', joinAnswerItems(words))
                                     }}
                                     placeholder={`Lösung für Lücke ${gi + 1}...`}
                                     className="text-sm bg-green-50 border-green-200 focus:bg-white flex-1"
@@ -851,7 +842,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                             <Label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Zuordnungspaare</Label>
                             <p className="text-[10px] text-gray-500">Schreibe Paare in die Lösung: «links1→rechts1, links2→rechts2»</p>
                             <div className="space-y-2">
-                              {(q.answer || '').split(',').filter(Boolean).map((pair, pi) => {
+                              {answerItems(q.answer).filter(Boolean).map((pair, pi) => {
                                 const [left, right] = pair.split('→').map(s => s?.trim() || '')
                                 return (
                                   <div key={pi} className="flex items-center gap-2">
@@ -859,21 +850,21 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                                       <span className="text-[10px] font-bold text-blue-600">{pi + 1}</span>
                                     </div>
                                     <Input value={left} onChange={(e) => {
-                                      const pairs = (q.answer || '').split(',').map(p => p.trim())
+                                      const pairs = answerItems(q.answer).map(p => p.trim())
                                       const [, r] = (pairs[pi] || '').split('→').map(s => s?.trim() || '')
                                       pairs[pi] = `${e.target.value}→${r}`
-                                      updateEditedQuestion(index, 'answer', pairs.join(', '))
+                                      updateEditedQuestion(index, 'answer', joinAnswerItems(pairs))
                                     }} placeholder="Begriff links" className="text-sm bg-blue-50 flex-1" />
                                     <ArrowRight className="h-4 w-4 text-gray-400 flex-shrink-0" />
                                     <Input value={right} onChange={(e) => {
-                                      const pairs = (q.answer || '').split(',').map(p => p.trim())
+                                      const pairs = answerItems(q.answer).map(p => p.trim())
                                       const [l] = (pairs[pi] || '').split('→').map(s => s?.trim() || '')
                                       pairs[pi] = `${l}→${e.target.value}`
-                                      updateEditedQuestion(index, 'answer', pairs.join(', '))
+                                      updateEditedQuestion(index, 'answer', joinAnswerItems(pairs))
                                     }} placeholder="Begriff rechts" className="text-sm bg-green-50 flex-1" />
                                     <Button variant="ghost" size="sm" onClick={() => {
-                                      const pairs = (q.answer || '').split(',').map(p => p.trim()).filter((_, i) => i !== pi)
-                                      updateEditedQuestion(index, 'answer', pairs.join(', '))
+                                      const pairs = answerItems(q.answer).map(p => p.trim()).filter((_, i) => i !== pi)
+                                      updateEditedQuestion(index, 'answer', joinAnswerItems(pairs))
                                     }} className="h-7 w-7 p-0 text-gray-300 hover:text-red-500"><X className="h-3 w-3" /></Button>
                                   </div>
                                 )
@@ -894,29 +885,29 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                             <Label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Richtige Reihenfolge</Label>
                             <p className="text-[10px] text-gray-500">Elemente kommagetrennt in korrekter Reihenfolge eingeben</p>
                             <div className="space-y-1.5">
-                              {(q.answer || '').split(',').filter(Boolean).map((item, ii) => (
+                              {answerItems(q.answer).filter(Boolean).map((item, ii) => (
                                 <div key={ii} className="flex items-center gap-2">
                                   <div className="w-6 h-6 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
                                     <span className="text-xs font-bold text-indigo-600">{ii + 1}</span>
                                   </div>
                                   <Input value={item.trim()} onChange={(e) => {
-                                    const items = (q.answer || '').split(',').map(s => s.trim())
+                                    const items = answerItems(q.answer).map(s => s.trim())
                                     items[ii] = e.target.value
-                                    updateEditedQuestion(index, 'answer', items.join(', '))
+                                    updateEditedQuestion(index, 'answer', joinAnswerItems(items))
                                   }} className="text-sm bg-indigo-50 flex-1" />
                                   <Button variant="ghost" size="sm" onClick={() => {
-                                    const items = (q.answer || '').split(',').map(s => s.trim())
+                                    const items = answerItems(q.answer).map(s => s.trim())
                                     if (ii > 0) { [items[ii], items[ii-1]] = [items[ii-1], items[ii]] }
-                                    updateEditedQuestion(index, 'answer', items.join(', '))
+                                    updateEditedQuestion(index, 'answer', joinAnswerItems(items))
                                   }} disabled={ii === 0} className="h-6 w-6 p-0 text-gray-400"><ArrowUp className="h-3 w-3" /></Button>
                                   <Button variant="ghost" size="sm" onClick={() => {
-                                    const items = (q.answer || '').split(',').map(s => s.trim())
+                                    const items = answerItems(q.answer).map(s => s.trim())
                                     if (ii < items.length - 1) { [items[ii], items[ii+1]] = [items[ii+1], items[ii]] }
-                                    updateEditedQuestion(index, 'answer', items.join(', '))
-                                  }} disabled={ii === (q.answer || '').split(',').filter(Boolean).length - 1} className="h-6 w-6 p-0 text-gray-400"><ArrowDown className="h-3 w-3" /></Button>
+                                    updateEditedQuestion(index, 'answer', joinAnswerItems(items))
+                                  }} disabled={ii === answerItems(q.answer).filter(Boolean).length - 1} className="h-6 w-6 p-0 text-gray-400"><ArrowDown className="h-3 w-3" /></Button>
                                   <Button variant="ghost" size="sm" onClick={() => {
-                                    const items = (q.answer || '').split(',').map(s => s.trim()).filter((_, i) => i !== ii)
-                                    updateEditedQuestion(index, 'answer', items.join(', '))
+                                    const items = answerItems(q.answer).map(s => s.trim()).filter((_, i) => i !== ii)
+                                    updateEditedQuestion(index, 'answer', joinAnswerItems(items))
                                   }} className="h-6 w-6 p-0 text-gray-300 hover:text-red-500"><X className="h-3 w-3" /></Button>
                                 </div>
                               ))}
@@ -1342,12 +1333,12 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                       }}>
                       {q.type !== 'image_block' ? (
                       <div className="flex items-start justify-between gap-2 mb-2">
-                        <p className={`font-semibold text-base text-gray-900 flex-1 ${wsTheme.styles.fontFamily}`}>
+                        <div className={`font-semibold text-base text-gray-900 flex-1 ${wsTheme.styles.fontFamily}`}>
                           {qDecoration && <span className="mr-1.5">{qDecoration}</span>}
                           {q.number}. {q.question}
                           {showPts && <Badge className="ml-2 text-xs" style={{ backgroundColor: wsTheme.colors.badgeBg, color: wsTheme.colors.badgeText }}>{q.points || 1}P</Badge>}
                           {q.type && <Badge variant="outline" className="ml-2 text-[10px] text-gray-400">{QUESTION_TYPES.find(t => t.id === q.type)?.label || q.type}</Badge>}
-                        </p>
+                        </div>
                         <button onClick={() => speakText(q.question)} className="flex-shrink-0 p-1.5 rounded-lg hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors" title="Frage vorlesen">
                           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /></svg>
                         </button>
@@ -1400,10 +1391,8 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
 
                       {/* Matching preview */}
                       {q.type === 'matching' && q.answer && (() => {
-                        const pairs = (q.answer || '').split(',').filter(Boolean)
-                        const rightSide = pairs.map((p, i) => ({ text: p.split('→')[1]?.trim(), origIdx: i }))
-                        const seed = (q.number || index) * 7 + pairs.length
-                        const shuffled = [...rightSide].sort((a, b) => ((a.origIdx * 31 + seed) % 97) - ((b.origIdx * 31 + seed) % 97))
+                        const pairs = answerItems(q.answer).filter(Boolean)
+                        const shuffled = shuffledMatchingRight(q)
                         return (
                         <div className="mt-3 ml-1 grid grid-cols-2 gap-2">
                           <div className="space-y-1.5">
@@ -1426,15 +1415,13 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
 
                       {/* Ordering preview */}
                       {q.type === 'ordering' && q.answer && (() => {
-                        const items = (q.answer || '').split(',').filter(Boolean).map((s, i) => ({ text: s.trim(), origIdx: i }))
-                        const seed = (q.number || index) * 13 + items.length
-                        const shuffled = [...items].sort((a, b) => ((a.origIdx * 37 + seed) % 89) - ((b.origIdx * 37 + seed) % 89))
+                        const shuffled = shuffledOrderingItems(q)
                         return (
                         <div className="mt-3 ml-1 space-y-1.5">
                           {shuffled.map((item, ii) => (
                             <div key={ii} className="flex items-center gap-2 border rounded-lg px-3 py-1.5" style={{ backgroundColor: wsTheme.colors.primaryLight + '40', borderColor: wsTheme.colors.accent + '30' }}>
                               <span className="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold flex-shrink-0" style={{ backgroundColor: wsTheme.colors.accent + '30', color: wsTheme.colors.primary }}>?</span>
-                              <span className="text-sm text-gray-700">{item.text}</span>
+                              <span className="text-sm text-gray-700">{item}</span>
                             </div>
                           ))}
                         </div>
@@ -1593,7 +1580,7 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                   {/* Difficulty */}
                   <div className="space-y-2">
                     <Label className="text-sm font-medium flex items-center gap-2"><RefreshCw className="h-4 w-4" /> Schwierigkeit anpassen</Label>
-                    <p className="text-xs text-gray-500">Generiert das Material mit anderem Niveau neu.</p>
+                    <p className="text-xs text-gray-500">Erstellt ein neues Material mit anderem Niveau und zählt zum Monatskontingent.</p>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                       {['easy', 'medium', 'hard'].map((level) => (
                         <motion.div
@@ -1876,9 +1863,11 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                   <div>
                     <Label className="text-sm font-medium">Klasse</Label>
                     <Select value={form.grade} onValueChange={(value) => {
-                      const newSubjects = getSubjectsForGrade(value)
-                      const subjectStillValid = newSubjects.includes(form.subject)
-                      setForm({ ...form, grade: value, subject: subjectStillValid ? form.subject : newSubjects[0] })
+                      setForm(previous => {
+                        const next = changeTeachingContext(previous, { grade: value })
+                        const allowed = getSubjectsForGrade(value)
+                        return allowed.includes(next.subject) ? next : changeTeachingContext(next, { subject: allowed[0] })
+                      })
                     }}>
                       <SelectTrigger className="mt-2"><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -1891,7 +1880,12 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                   </div>
                   <div>
                     <Label className="text-sm font-medium">Fach</Label>
-                    <Select value={form.subject} onValueChange={(value) => setForm({ ...form, subject: value })}>
+                    {suggestSubject(form.topic, form.grade) && suggestSubject(form.topic, form.grade) !== form.subject ? (
+                      <button type="button" className="mt-2 block text-sm text-blue-700 underline" onClick={() => setForm(previous => changeTeachingContext(previous, { subject: suggestSubject(previous.topic, previous.grade) }))}>
+                        Fachvorschlag übernehmen: {suggestSubject(form.topic, form.grade)}
+                      </button>
+                    ) : null}
+                    <Select value={form.subject} onValueChange={(value) => setForm(previous => changeTeachingContext(previous, { subject: value }))}>
                       <SelectTrigger className="mt-2"><SelectValue /></SelectTrigger>
                       <SelectContent>{getSubjectsForGrade(form.grade).map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
                     </Select>
@@ -1915,12 +1909,9 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
 
                 {/* LP21 Competency Quick-Select */}
                 {(() => {
-                  const gradeInt = parseInt(form.grade, 10)
-                  const cycleId = gradeInt >= 7 ? 'z3' : gradeInt >= 3 ? 'z2' : 'z1'
-                  const cycleAreas = LEHRPLAN_CYCLES.find(c => c.id === cycleId)?.areas || []
-                  const matchingArea = cycleAreas.find(a => a.name === form.subject) || cycleAreas.find(a => form.subject.includes(a.name) || a.name.includes(form.subject))
-                  const comps = matchingArea?.competencies || []
-                  if (comps.length === 0) return null
+                  const checked = verifiedCompetencies(form.grade, form.subject)
+                  const comps = checked
+                  if (comps.length === 0) return <p className="text-xs text-gray-500">Für dieses Fach und diesen Zyklus ist noch keine quellengeprüfte Kompetenzstufe hinterlegt. Material lässt sich ohne Kompetenzcode erstellen.</p>
                   return (
                     <div>
                       <Label className="text-sm font-medium mb-2 block">LP21-Kompetenz <span className="text-gray-400 font-normal">(optional)</span></Label>
@@ -1928,13 +1919,15 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
                         <SelectTrigger className="mt-1"><SelectValue placeholder="Kompetenz wählen..." /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="_none">Keine spezifische Kompetenz</SelectItem>
-                          {comps.slice(0, 15).map(c => (
+                          {comps.map(c => (
                             <SelectItem key={c.code} value={c.code}>
                               <span className="font-mono text-xs mr-1.5">{c.code}</span> {c.name}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
+                      <p className="mt-2 text-xs text-gray-500">Quellengeprüfte Auswahl für diesen Zyklus; Zusammenfassungen von EduFlow. Die Auswahl deckt noch nicht den gesamten Lehrplan ab.</p>
+                      {comps.find(c => c.code === form.competencyCode)?.sourceUrl ? <a className="mt-1 block text-xs text-blue-700 underline" href={comps.find(c => c.code === form.competencyCode).sourceUrl} target="_blank" rel="noreferrer">Originalquelle im Lehrplan 21</a> : null}
                       {form.competencyCode && comps.find(c => c.code === form.competencyCode) && (
                         <p className="text-xs text-blue-600 mt-1.5">{comps.find(c => c.code === form.competencyCode)?.description}</p>
                       )}
@@ -2078,16 +2071,16 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
           {user?.subscription_tier === 'free' && (
             <Card className="glass-card border-0 max-w-2xl mx-auto mt-8 bg-gradient-to-br from-blue-50 to-purple-50">
               <CardHeader>
-                <CardTitle className="text-xl flex items-center gap-3"><Crown className="h-6 w-6 text-yellow-500" /> Upgrade auf Premium</CardTitle>
-                <CardDescription>Unbegrenzte Materialien für nur CHF 19.90/Monat</CardDescription>
+                <CardTitle className="text-xl flex items-center gap-3"><Crown className="h-6 w-6 text-yellow-500" /> Premium wird vorbereitet</CardTitle>
+                <CardDescription>Premium ist derzeit nicht buchbar. Preis, Kontingent und Zusatzleistungen werden vor dem Start veröffentlicht.</CardDescription>
               </CardHeader>
               <CardContent>
                 <ul className="space-y-2 mb-6">
-                  {['Unbegrenzte Materialerstellung', 'Alle Fächer und Klassenstufen', 'PDF-Export mit Lösungen und Lehrernotizen', 'Prioritäts-Support'].map((b, i) => (
+                  {['Gratis: 5 erfolgreiche Materialerstellungen pro Monat', 'Fächer und Klassenstufen sind bereits im Gratistarif verfügbar', 'PDF- und Word-Export sind bereits im Gratistarif verfügbar'].map((b, i) => (
                     <li key={i} className="flex items-center text-sm"><CheckCircle2 className="h-4 w-4 text-green-600 mr-2 flex-shrink-0" /><span className="text-gray-700">{b}</span></li>
                   ))}
                 </ul>
-                <Button onClick={handleUpgrade} className="w-full btn-premium bg-gradient-to-r from-blue-600 to-purple-600"><Crown className="h-4 w-4 mr-2" /> Jetzt upgraden</Button>
+                <Button disabled className="w-full"><Crown className="h-4 w-4 mr-2" /> Noch nicht verfügbar</Button>
               </CardContent>
             </Card>
           )}

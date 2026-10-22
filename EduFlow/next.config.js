@@ -6,13 +6,16 @@ const selfHostingConfig = process.env.VERCEL
       output: 'standalone',
     };
 
+const releaseDistDir = process.env.EDUFLOW_RELEASE_NEXT_DIST_DIR || '';
+if (releaseDistDir && !/^\.eduflow-release-next\/next-[a-f0-9]{24}$/.test(releaseDistDir)) {
+  throw new Error('Invalid EDUFLOW_RELEASE_NEXT_DIST_DIR');
+}
+
 const nextConfig = {
   ...selfHostingConfig,
-  // npm hoists workspace dependencies to the repository root. Vercel must be
-  // allowed to trace those files when packaging each serverless function.
-  outputFileTracingRoot: process.env.VERCEL
-    ? path.join(__dirname, '..')
-    : __dirname,
+  distDir: releaseDistDir || '.next',
+  // Both standalone and Vercel output need the workspace's hoisted dependencies.
+  outputFileTracingRoot: path.join(__dirname, '..'),
   outputFileTracingIncludes: {
     '/*': ['../node_modules/@swc/helpers/**/*'],
   },

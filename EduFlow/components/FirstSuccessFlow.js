@@ -1,4 +1,6 @@
 'use client'
+import { changeTeachingContext } from '@/lib/teaching-context'
+import { getSubjectsForGrade } from '@/lib/subjects'
 import { useState } from 'react'
 import { ArrowRight, BookOpen, FileText, Sparkles, UploadCloud } from 'lucide-react'
 import { Button } from '@/ui/button'
@@ -70,8 +72,8 @@ export default function FirstSuccessFlow() {
               <div className="space-y-4">
                 <div><Label htmlFor="quick-topic">Thema oder Lernziel</Label><Input id="quick-topic" className="mt-1.5" value={form.topic} onChange={event => setForm(previous => ({ ...previous, topic: event.target.value }))} placeholder="z.B. Wasserkreislauf verstehen" disabled={source === 'upload'} /></div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div><Label>Klasse</Label><Select value={String(form.grade)} onValueChange={grade => setForm(previous => ({ ...previous, grade }))}><SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger><SelectContent>{Array.from({ length: 9 }, (_, index) => String(index + 1)).map(grade => <SelectItem key={grade} value={grade}>{grade}. Klasse</SelectItem>)}</SelectContent></Select></div>
-                  <div><Label htmlFor="quick-subject">Fach</Label><Input id="quick-subject" className="mt-1.5" value={form.subject} onChange={event => setForm(previous => ({ ...previous, subject: event.target.value }))} /></div>
+                  <div><Label>Klasse</Label><Select value={String(form.grade)} onValueChange={grade => setForm(previous => changeTeachingContext(previous, { grade }))}><SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger><SelectContent>{Array.from({ length: 9 }, (_, index) => String(index + 1)).map(grade => <SelectItem key={grade} value={grade}>{grade}. Klasse</SelectItem>)}</SelectContent></Select></div>
+                  <div><Label htmlFor="quick-subject">Fach</Label><Select value={form.subject} onValueChange={subject => setForm(previous => changeTeachingContext(previous, { subject }))}><SelectTrigger id="quick-subject" className="mt-1.5"><SelectValue /></SelectTrigger><SelectContent>{getSubjectsForGrade(form.grade).map(subject => <SelectItem key={subject} value={subject}>{subject}</SelectItem>)}</SelectContent></Select></div>
                 </div>
               </div>
             )}

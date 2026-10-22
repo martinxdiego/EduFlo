@@ -1,3 +1,4 @@
+import { estimateTokenCost } from '../ai-cost.js'
 import { createHash, randomUUID } from 'crypto'
 import { getDatabase } from '@/lib/server/database'
 import { logEvent } from '@/lib/server/logger'
@@ -8,7 +9,6 @@ const DEFAULT_PRICES_USD_PER_MILLION = {
   'gpt-4.1': { input: 2, output: 8 },
   'gpt-4.1-mini': { input: 0.4, output: 1.6 },
   'gpt-4o-mini-tts': { input: 0.6, output: 12 },
-  'gpt-image-2': { input: 0, output: 0 },
 }
 
 function prices() {
@@ -20,11 +20,7 @@ function prices() {
 }
 
 export function estimateCostUsd(model, usage = {}, explicitCostUsd) {
-  if (Number.isFinite(explicitCostUsd)) return explicitCostUsd
-  const price = prices()[model] || { input: 0, output: 0 }
-  const input = usage.prompt_tokens ?? usage.input_tokens ?? 0
-  const output = usage.completion_tokens ?? usage.output_tokens ?? 0
-  return Number(((input * price.input + output * price.output) / 1_000_000).toFixed(6))
+  return estimateTokenCost(model, usage, prices(), explicitCostUsd)
 }
 
 function promptFingerprint(prompt) {
@@ -66,6 +62,7 @@ export async function completeGeneration(id, { result, usage, model, quality, me
         result,
         usage: usage || {},
         estimated_cost_usd: costUsd,
+        cost_estimate_status: costUsd == null ? 'unknown' : 'estimated',
         quality: quality || null,
         metadata,
         updated_at: new Date(),
@@ -106,6 +103,7 @@ export async function getAIMetrics(userId, days = 30) {
       completed: { $sum: { $cond: [{ $eq: ['$status', 'complete'] }, 1, 0] } },
       failed: { $sum: { $cond: [{ $eq: ['$status', 'error'] }, 1, 0] } },
       costUsd: { $sum: { $ifNull: ['$estimated_cost_usd', 0] } },
+      knownCostRequests: { $sum: { $cond: [{ $eq: ['$cost_estimate_status', 'estimated'] }, 1, 0] } },
       inputTokens: { $sum: { $ifNull: ['$usage.prompt_tokens', { $ifNull: ['$usage.input_tokens', 0] }] } },
       outputTokens: { $sum: { $ifNull: ['$usage.completion_tokens', { $ifNull: ['$usage.output_tokens', 0] }] } },
       averageQuality: { $avg: '$quality.score' },
@@ -113,7 +111,7 @@ export async function getAIMetrics(userId, days = 30) {
     { $sort: { requests: -1 } },
   ]).toArray()
 
-  const features = rows.map(({ _id, ...row }) => ({ feature: _id, ...row, costUsd: Number(row.costUsd.toFixed(4)) }))
+  const features = rows.map(({ _id, ...row }) => ({ feature: _id, ...row, unknownCostRequests: row.requests - row.knownCostRequests, costUsd: Number(row.costUsd.toFixed(4)) }))
   return {
     periodDays: Math.min(Math.max(days, 1), 365),
     totals: features.reduce((acc, row) => ({
@@ -121,9 +119,10 @@ export async function getAIMetrics(userId, days = 30) {
       completed: acc.completed + row.completed,
       failed: acc.failed + row.failed,
       costUsd: Number((acc.costUsd + row.costUsd).toFixed(4)),
+      unknownCostRequests: acc.unknownCostRequests + row.unknownCostRequests,
       inputTokens: acc.inputTokens + row.inputTokens,
       outputTokens: acc.outputTokens + row.outputTokens,
-    }), { requests: 0, completed: 0, failed: 0, costUsd: 0, inputTokens: 0, outputTokens: 0 }),
+    }), { requests: 0, completed: 0, failed: 0, costUsd: 0, unknownCostRequests: 0, inputTokens: 0, outputTokens: 0 }),
     features,
   }
 }

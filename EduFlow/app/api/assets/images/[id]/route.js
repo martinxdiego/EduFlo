@@ -1,3 +1,4 @@
+import { withHostingPolicy } from '@/lib/server/hosting-route-policy'
 import { NextResponse } from 'next/server'
 import { getDatabase } from '@/lib/server/database'
 import { verifyAuthToken } from '@/lib/server/security'
@@ -5,7 +6,7 @@ import { verifyAuthToken } from '@/lib/server/security'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-export async function GET(request, { params }) {
+async function GETHandler(request, { params }) {
   const user = verifyAuthToken(request)
   if (!user?.userId) return NextResponse.json({ error: 'Nicht authentifiziert.' }, { status: 401 })
   const { id } = await params
@@ -21,3 +22,5 @@ export async function GET(request, { params }) {
     },
   })
 }
+
+export const GET = withHostingPolicy(GETHandler)

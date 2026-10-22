@@ -1,0 +1,20 @@
+{
+  "purpose": "RESEARCH_ONLY_STAGE1_PREFLIGHT",
+  "target_state": "NOT_PROVISIONED",
+  "os_edition_build_architecture": null,
+  "guest_host_boot_identities": null,
+  "hypervisor_version_vm_identity_and_isolation": null,
+  "virtual_controller_disk_backing_storage_cache_chain": null,
+  "local_ntfs_volume_device_identity_and_features": null,
+  "existing_usn_journal_id_range_version_access": null,
+  "filter_stack_images_versions_altitudes_instances": null,
+  "existing_lab_role_process_and_effective_token_bindings": null,
+  "sealed_binaries_runtime_dependencies_environment": null,
+  "subject_root_and_ancestors_object_binding": null,
+  "independent_evidence_sink_object_binding": null,
+  "external_fresh_fixture_consumption_binding": null,
+  "absence_of_provider_credentials_and_network_capability_evidence": null,
+  "absence_of_real_v9_identity_and_production_data_evidence": null,
+  "synthetic_only_fixture_inventory": null,
+  "execution_authorization": null
+}

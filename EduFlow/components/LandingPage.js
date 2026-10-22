@@ -154,7 +154,7 @@ function MaterialPreview({ style }) {
       </div>
       <motion.div className="material-note" whileHover={reveal.visible}>
         <Sparkles aria-hidden="true" />
-        <div><strong>Lehrplan 21</strong><span>NMG.4.2 · passend zugeordnet</span></div>
+        <div><strong>Lehrplan 21</strong><span>NMG.2.2.f · Beispielbezug</span></div>
       </motion.div>
     </motion.div>
   )

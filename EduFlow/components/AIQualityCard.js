@@ -43,11 +43,12 @@ export default function AIQualityCard({ token }) {
             <div className="grid grid-cols-3 gap-3">
               <div className="rounded-xl bg-blue-50 p-3"><Gauge className="h-4 w-4 text-blue-600 mb-2" /><p className="text-xl font-bold">{data.totals.requests}</p><p className="text-xs text-gray-500">Aufrufe</p></div>
               <div className="rounded-xl bg-emerald-50 p-3"><Activity className="h-4 w-4 text-emerald-600 mb-2" /><p className="text-xl font-bold">{data.totals.requests ? Math.round(data.totals.completed / data.totals.requests * 100) : 100}%</p><p className="text-xs text-gray-500">Erfolgreich</p></div>
-              <div className="rounded-xl bg-amber-50 p-3"><CircleDollarSign className="h-4 w-4 text-amber-600 mb-2" /><p className="text-xl font-bold">${data.totals.costUsd.toFixed(2)}</p><p className="text-xs text-gray-500">Geschaetzt</p></div>
+              <div className="rounded-xl bg-amber-50 p-3"><CircleDollarSign className="h-4 w-4 text-amber-600 mb-2" /><p className="text-xl font-bold">{data.totals.unknownCostRequests === data.totals.requests && data.totals.requests > 0 ? 'Unbekannt' : `$${data.totals.costUsd.toFixed(2)}${data.totals.unknownCostRequests ? '+' : ''}`}</p><p className="text-xs text-gray-500">Erfasste Schätzung</p></div>
             </div>
             {data.features.length > 0 && <div className="divide-y divide-gray-100 rounded-xl border border-gray-100">
-              {data.features.slice(0, 8).map(row => <div key={row.feature} className="flex items-center justify-between px-3 py-2 text-sm"><span className="font-medium text-gray-700">{row.feature}</span><span className="text-gray-500">{row.completed}/{row.requests} · ${row.costUsd.toFixed(3)}</span></div>)}
+              {data.features.slice(0, 8).map(row => <div key={row.feature} className="flex items-center justify-between px-3 py-2 text-sm"><span className="font-medium text-gray-700">{row.feature}</span><span className="text-gray-500">{row.completed}/{row.requests} · {row.unknownCostRequests === row.requests ? 'Kosten unbekannt' : `$${row.costUsd.toFixed(3)}${row.unknownCostRequests ? '+' : ''}`}</span></div>)}
             </div>}
+            {data.totals.unknownCostRequests > 0 ? <p className="text-xs text-amber-700">Für {data.totals.unknownCostRequests} Aufrufe fehlen vollständige Kostenangaben. Die Summe ist keine vollständige Abrechnung.</p> : null}
             <p className="text-xs text-gray-400">Kostensaetze sind konfigurierbare Schaetzwerte; die Anbieterabrechnung bleibt massgebend.</p>
           </div>
         )}

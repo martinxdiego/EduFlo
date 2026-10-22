@@ -77,3 +77,8 @@ dump.rdb
 .vercel
 .chainlit
 chainlit.md
+
+# Local launch verification artifacts
+**/.eduflow-release-next/
+**/.eduflow-release-temp/
+**/.tmp/

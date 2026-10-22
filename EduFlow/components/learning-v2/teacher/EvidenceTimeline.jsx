@@ -1,0 +1,12 @@
+'use client'
+
+import { useRef } from 'react'
+
+export default function EvidenceTimeline({ evidence, filter, onFilter, onLoadMore, hasMore, onInspect, onInvalidate, onCorrect }) {
+  const loadMoreRef = useRef(null)
+  const loadMore = async () => { await onLoadMore(); requestAnimationFrame(() => loadMoreRef.current?.focus()) }
+  return <section aria-labelledby="evidence-title"><div className="flex flex-wrap items-center justify-between gap-2"><h3 id="evidence-title" className="font-semibold">Evidence timeline</h3><label className="text-sm">Filter <select value={filter} onChange={(e) => onFilter(e.target.value)} className="ml-1 h-9 rounded-md border px-2"><option value="all">All</option><option value="independent">Independent</option><option value="assisted">Assisted</option><option value="teacher">Teacher</option><option value="invalidated">Invalidated</option></select></label></div>
+    <ol className="mt-3 space-y-3">{evidence.map((item) => <li key={item.evidence_id} className="rounded-lg border p-3"><div className="flex flex-wrap justify-between gap-2"><div><p className="font-medium">{item.type.replaceAll('_', ' ')}{item.hint_level ? ` · Level ${item.hint_level}` : ''} · {item.claim.replaceAll('_', ' ')}</p><p className="text-xs text-slate-600">{item.objective?.title || 'Objective'}{item.task ? ` · Task v${item.task.version}` : ''}</p><p className="text-xs text-slate-600"><time>{new Date(item.occurred_at).toLocaleString('de-CH')}</time> · Status: {item.status} · Independence: {item.independence.replaceAll('_', ' ')} · Contribution: {item.contribution.replaceAll('_', ' ')}</p>{item.type === 'support_required' && <p className="mt-1 text-xs font-medium">Neutral for Mastery.</p>}</div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => onInspect(item)} className="rounded border px-2 py-1 text-xs">Details</button>{item.status === 'active' && <button type="button" onClick={() => onInvalidate(item)} className="rounded border px-2 py-1 text-xs">Invalidieren</button>}{item.status === 'active' && item.type === 'teacher_assessment' && <button type="button" onClick={() => onCorrect(item)} className="rounded border px-2 py-1 text-xs">Korrigieren</button>}</div></div></li>)}</ol>
+    {evidence.length === 0 && <p className="mt-3 rounded-lg bg-slate-50 p-4 text-sm">Keine Evidence in diesem Filter.</p>}{hasMore && <button ref={loadMoreRef} type="button" onClick={loadMore} className="mt-3 rounded-md border px-4 py-2 text-sm font-medium">Mehr laden</button>}
+  </section>
+}

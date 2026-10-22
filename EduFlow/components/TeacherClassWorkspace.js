@@ -14,14 +14,14 @@ const TABS = [
 const EMPTY_LIST = []
 
 function masteryStyle(mastery) {
-  if (mastery === 'secure') return { label: 'Sicher', color: 'bg-emerald-500', text: 'text-emerald-700', surface: 'bg-emerald-50' }
+  if (mastery === 'secure') return { label: 'Hoher bisheriger Aufgabenscore', color: 'bg-emerald-500', text: 'text-emerald-700', surface: 'bg-emerald-50' }
   if (mastery === 'developing') return { label: 'Im Aufbau', color: 'bg-amber-500', text: 'text-amber-700', surface: 'bg-amber-50' }
   return { label: 'Förderbedarf', color: 'bg-red-500', text: 'text-red-700', surface: 'bg-red-50' }
 }
 
 export default function TeacherClassWorkspace({
   classData, stats, insights, insightsLoading, onAnalyze, onCreateAssignment, onOpenAssignment,
-  onUpdateNiveau, onRemoveStudent, onDeleteClass,
+  onUpdateNiveau, onRemoveStudent, onOpenLearning, onDeleteClass,
 }) {
   const [tab, setTab] = useState('overview')
   const [search, setSearch] = useState('')
@@ -88,7 +88,7 @@ export default function TeacherClassWorkspace({
               {[
                 ['Aktive Aufträge', assignments.filter((item) => item.status === 'active').length, 'text-blue-700 bg-blue-50'],
                 ['Abgaben', stats?.classStats?.totalSubmissions || 0, 'text-violet-700 bg-violet-50'],
-                ['Lernziele sicher', goals.filter((goal) => goal.mastery === 'secure').length, 'text-emerald-700 bg-emerald-50'],
+                ['Hoher Aufgabenscore', goals.filter((goal) => goal.mastery === 'secure').length, 'text-emerald-700 bg-emerald-50'],
                 ['Förderhinweise', goals.filter((goal) => goal.mastery === 'support').length, 'text-red-700 bg-red-50'],
               ].map(([label, value, style]) => <div key={label} className={`rounded-2xl p-4 ${style}`}><p className="text-2xl font-bold">{value}</p><p className="mt-1 text-[11px] font-medium">{label}</p></div>)}
             </div>
@@ -133,7 +133,7 @@ export default function TeacherClassWorkspace({
         {tab === 'goals' ? (
           <div className="grid gap-4 lg:grid-cols-[1fr_0.9fr]">
             <div className="space-y-3">
-              {goals.map((goal) => { const style = masteryStyle(goal.mastery); return <div key={goal.goal} className="rounded-2xl border border-slate-200 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-slate-900">{goal.goal}</p><p className="mt-1 text-xs text-slate-500">{goal.attempts} Versuche · Ø {goal.averageScore}% · bestes Ergebnis {goal.bestScore}%</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${style.surface} ${style.text}`}>{style.label}</span></div><div className="mt-3 h-2 rounded-full bg-slate-100"><div className={`h-full rounded-full ${style.color}`} style={{ width: `${goal.bestScore}%` }} /></div></div> })}
+              {goals.map((goal) => { const style = masteryStyle(goal.mastery); return <div key={goal.goal} className="rounded-2xl border border-slate-200 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-slate-900">{goal.goal}</p><p className="mt-1 text-xs text-slate-500">Legacy-Aufgabenscores (keine V2 Mastery/Confidence) · {goal.attempts} Versuche · Ø {goal.averageScore}% · bestes Ergebnis {goal.bestScore}%</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${style.surface} ${style.text}`}>{style.label}</span></div><div className="mt-3 h-2 rounded-full bg-slate-100"><div className={`h-full rounded-full ${style.color}`} style={{ width: `${goal.bestScore}%` }} /></div></div> })}
               {!goals.length ? <div className="rounded-2xl bg-slate-50 py-12 text-center"><Target className="mx-auto h-8 w-8 text-slate-300" /><p className="mt-2 text-sm text-slate-500">Lernziele werden sichtbar, sobald Aufträge mit Lernzielen bearbeitet wurden.</p></div> : null}
             </div>
                 <div className="rounded-2xl bg-gradient-to-br from-indigo-50 to-blue-50 p-4"><h4 className="flex items-center gap-2 font-semibold text-slate-900"><Sparkles className="h-4 w-4 text-indigo-600" /> Empfohlene nächste Schritte</h4><div className="mt-3 space-y-2">{recommendations.map((item) => <div key={item.goal} className="rounded-xl bg-white/80 p-3"><p className="text-xs font-semibold text-slate-900">{item.title}</p><p className="mt-1 text-[11px] text-slate-600">{item.reason}</p><button onClick={() => onCreateAssignment({ activityType: item.suggestedMode, learningGoals: item.goal })} className="mt-2 text-[11px] font-semibold text-indigo-700">{ACTIVITY_MODES[item.suggestedMode]?.label} erstellen →</button></div>)}</div></div>
@@ -143,7 +143,7 @@ export default function TeacherClassWorkspace({
         {tab === 'students' ? (
           <div>
             <div className="mb-4 grid gap-2 sm:grid-cols-[1fr_auto]"><label className="relative"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Schüler:in suchen" className="h-9 w-full rounded-xl border border-slate-200 pl-9 pr-3 text-sm" /></label><select value={studentSort} onChange={(event) => setStudentSort(event.target.value)} className="h-9 rounded-xl border border-slate-200 px-3 text-sm"><option value="name">Nach Name</option><option value="support">Förderbedarf zuerst</option><option value="level">Nach Niveau</option></select></div>
-            <div className="overflow-x-auto"><table className="w-full min-w-[620px]"><thead><tr className="border-b border-slate-200 text-left text-[11px] font-semibold text-slate-500"><th className="p-3">Name</th><th className="p-3 text-center">Niveau</th><th className="p-3 text-center">Ø Note</th><th className="p-3 text-center">Aktivitäten</th><th className="p-3 text-right">Aktion</th></tr></thead><tbody>{visibleStudents.map((student) => <tr key={student.student_id} className="border-b border-slate-100"><td className="p-3 text-sm font-medium text-slate-900">{student.display_name}</td><td className="p-3"><div className="flex justify-center gap-1">{['A','B','C'].map((level) => <button key={level} onClick={() => onUpdateNiveau(classData.id, student.student_id, level)} className={`h-7 w-7 rounded-lg text-xs font-bold ${student.niveau === level ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>{level}</button>)}</div></td><td className="p-3 text-center text-sm font-semibold">{student.avg_grade || '–'}</td><td className="p-3 text-center text-sm text-slate-600">{student.total_quizzes || 0}</td><td className="p-3 text-right"><button onClick={() => onRemoveStudent(classData.id, student.student_id)} className="rounded-lg p-2 text-slate-300 hover:bg-red-50 hover:text-red-500" aria-label={`${student.display_name} aus Klasse entfernen`}><UserMinus className="h-4 w-4" /></button></td></tr>)}</tbody></table></div>
+            <div className="overflow-x-auto"><table className="w-full min-w-[620px]"><thead><tr className="border-b border-slate-200 text-left text-[11px] font-semibold text-slate-500"><th className="p-3">Name</th><th className="p-3 text-center">Niveau</th><th className="p-3 text-center">Ø Note</th><th className="p-3 text-center">Aktivitäten</th><th className="p-3 text-right">Aktion</th></tr></thead><tbody>{visibleStudents.map((student) => <tr key={student.student_id} className="border-b border-slate-100"><td className="p-3 text-sm font-medium text-slate-900">{student.display_name}</td><td className="p-3"><div className="flex justify-center gap-1">{['A','B','C'].map((level) => <button key={level} onClick={() => onUpdateNiveau(classData.id, student.student_id, level)} className={`h-7 w-7 rounded-lg text-xs font-bold ${student.niveau === level ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>{level}</button>)}</div></td><td className="p-3 text-center text-sm font-semibold">{student.avg_grade || '–'}</td><td className="p-3 text-center text-sm text-slate-600">{student.total_quizzes || 0}</td><td className="p-3 text-right"><div className="flex items-center justify-end gap-1"><button onClick={(event) => onOpenLearning(student, event.currentTarget)} className="rounded-lg px-2 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500">Lernstand</button><button onClick={() => onRemoveStudent(classData.id, student.student_id)} className="rounded-lg p-2 text-slate-300 hover:bg-red-50 hover:text-red-500" aria-label={`${student.display_name} aus Klasse entfernen`}><UserMinus className="h-4 w-4" /></button></div></td></tr>)}</tbody></table></div>
             {!visibleStudents.length ? <p className="py-12 text-center text-sm text-slate-400">Keine Schüler:innen gefunden.</p> : null}
           </div>
         ) : null}

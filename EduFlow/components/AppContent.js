@@ -1,5 +1,7 @@
 'use client'
 
+import { answerItems, joinAnswerItems, normalizeQuestion, normalizeWorksheet } from '@/lib/worksheet-answers'
+import { shuffledMatchingRight, shuffledOrderingItems } from '@/lib/student-material'
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Button } from '@/ui/button'
@@ -29,6 +31,7 @@ import {
   Users, UserMinus, LayoutDashboard,
   Table2, School, Check, ImagePlus
 } from 'lucide-react'
+import MaterialErrorBoundary from '@/components/MaterialErrorBoundary'
 import dynamic from 'next/dynamic'
 import jsPDF from 'jspdf'
 
@@ -36,7 +39,9 @@ const DossierEditor = dynamic(() => import('@/components/dossier/DossierEditor')
 import { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle, HeadingLevel, UnderlineType } from 'docx'
 import { saveAs } from 'file-saver'
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/ui/command'
-import { LEHRPLAN_CYCLES, searchCompetencies, getAllSubjects, getSubjectsForCycle, getCompetenciesForSubject, getTotalCompetencyCount } from '@/data/lehrplan21'
+import { curriculumCycles } from '@/lib/curriculum-browser'
+import { formForCompetency } from '@/lib/teaching-context'
+import { SUBJECTS } from '@/lib/subjects'
 import { getThemeById } from '@/data/worksheetThemes'
 import { DashboardView, GeneratorView, LibraryView, UploadView, StudioView, SettingsView, AnalyticsView } from '@/components/views'
 import { useEduFlow } from '@/contexts/EduFlowContext'
@@ -48,6 +53,7 @@ import AuthTransition from '@/components/AuthTransition'
 import CreationWorkspaceHeader from '@/components/CreationWorkspaceHeader'
 import GenerationDock from '@/components/GenerationDock'
 import TeacherClassWorkspace from '@/components/TeacherClassWorkspace'
+import StudentLearningDetail from '@/components/learning-v2/teacher/StudentLearningDetail'
 import { ACTIVITY_MODES, normalizeAssignmentSettings } from '@/lib/learning-workflow'
 
 // ============================================================
@@ -62,29 +68,7 @@ const RESOURCE_TYPES = [
   { id: 'dossier', label: 'Arbeitsdossier', icon: BookOpen, description: 'Komplettes Lerndossier mit 15-20 Seiten: Theorie, Aufgaben, Lernziele und Lösungen', color: 'indigo' },
 ]
 
-const SUBJECTS_PRIMAR = [
-  'Deutsch', 'Mathematik', 'NMG', 'Englisch', 'Französisch',
-  'Bildnerisches Gestalten', 'Musik', 'Bewegung und Sport'
-]
-
-const SUBJECTS_SEK = [
-  'Deutsch', 'Mathematik', 'Französisch', 'Englisch',
-  'RZG', 'Natur und Technik', 'Bildnerisches Gestalten',
-  'Musik', 'TTG', 'Bewegung und Sport', 'Medien und Informatik',
-  'Berufliche Orientierung', 'Projektunterricht'
-]
-
-// Legacy reference – used where no grade context is available
-const SUBJECTS = [...new Set([...SUBJECTS_PRIMAR, ...SUBJECTS_SEK])]
-
 const GRADES = [1, 2, 3, 4, 5, 6, 7, 8, 9]
-
-// Helper: subjects for a given grade
-const getSubjectsForGrade = (grade) => {
-  const g = parseInt(grade, 10)
-  if (g >= 7) return SUBJECTS_SEK
-  return SUBJECTS_PRIMAR
-}
 
 const DIFFICULTY_LABELS = {
   easy: 'Einfach',
@@ -238,7 +222,7 @@ const STARTER_TEMPLATES = [
   { id: 't82', name: 'Daten & Diagramme', topic: 'Daten und Diagramme: Sammeln, ordnen und darstellen', subject: 'Medien und Informatik', grade: '5', type: 'worksheet', category: 'digital', difficulty: 'easy', questionCount: 8, description: 'Daten sammeln, ordnen und in Diagrammen darstellen', tags: ['Daten', 'Diagramme'] },
 ]
 
-// LEHRPLAN_CYCLES imported from @/data/lehrplan21
+// Source-checked stages and historical planning ideas are selected separately.
 
 // ============================================================
 // MAIN COMPONENT
@@ -326,6 +310,10 @@ const AppContent = () => {
   } = useEduFlow()
 
   const [classSearch, setClassSearch] = useState('')
+  const [showCurriculumDrafts, setShowCurriculumDrafts] = useState(false)
+  const curriculumCatalog = useMemo(() => curriculumCycles({ drafts: showCurriculumDrafts }), [showCurriculumDrafts])
+  const [learningStudent, setLearningStudent] = useState(null)
+  const learningLauncherRef = useRef(null)
   const [classSort, setClassSort] = useState('name')
   const [assignmentSearch, setAssignmentSearch] = useState('')
   const [assignmentClassFilter, setAssignmentClassFilter] = useState('all')
@@ -487,6 +475,7 @@ const AppContent = () => {
   }
 
   const generatePDF = (worksheet, version = 'student') => {
+    worksheet = normalizeWorksheet(worksheet)
     const doc = new jsPDF()
     const pageWidth = doc.internal.pageSize.getWidth()
     const pageHeight = doc.internal.pageSize.getHeight()
@@ -832,7 +821,7 @@ const AppContent = () => {
         doc.setFont('helvetica', 'normal')
         doc.setFontSize(10)
         doc.setTextColor(50, 50, 50)
-        const pairs = (q.answer || '').split(',').filter(Boolean)
+        const pairs = answerItems(q.answer).filter(Boolean)
         const colLeft = 25
         const colRight = pageWidth / 2 + 10
         doc.setFont('helvetica', 'bold')
@@ -849,12 +838,13 @@ const AppContent = () => {
         doc.setFont('helvetica', 'normal')
         doc.setFontSize(10)
         doc.setTextColor(50, 50, 50)
-        const shuffledRight = version === 'student' ? [...pairs].sort(() => 0.5 - Math.random()) : pairs
+        const rightItems = version === 'student'
+          ? shuffledMatchingRight(q).map(item => item.text)
+          : pairs.map(pair => pair.split('→')[1]?.trim())
         pairs.forEach((pair, pi) => {
           checkPage(10)
           const [left] = pair.split('→').map(s => s?.trim())
-          const rightPair = shuffledRight[pi] || pair
-          const [, right] = rightPair.split('→').map(s => s?.trim())
+          const right = rightItems[pi]
           doc.text(sanitizePdfText(`${pi + 1}. ${left || ''}`), colLeft, yPosition)
           if (version === 'student') {
             doc.text(sanitizePdfText(`___  ${right || ''}`), colRight, yPosition)
@@ -872,10 +862,9 @@ const AppContent = () => {
         doc.setFont('helvetica', 'normal')
         doc.setFontSize(10)
         doc.setTextColor(50, 50, 50)
-        const items = (q.answer || '').split(',').filter(Boolean).map((s, i) => ({ text: s.trim(), origIdx: i }))
-        const seed = (q.number || 1) * 13 + items.length
+        const items = answerItems(q.answer).filter(Boolean)
         const displayItems = version === 'student'
-          ? [...items].sort((a, b) => ((a.origIdx * 37 + seed) % 89) - ((b.origIdx * 37 + seed) % 89))
+          ? shuffledOrderingItems(q)
           : items
         displayItems.forEach((item, ii) => {
           checkPage(12)
@@ -886,14 +875,14 @@ const AppContent = () => {
             doc.roundedRect(28, yPosition - 4, 8, 5, 1, 1, 'FD')
             doc.setLineWidth(0.2)
             doc.setTextColor(50, 50, 50)
-            doc.text(sanitizePdfText(item.text), 40, yPosition)
+            doc.text(sanitizePdfText(item), 40, yPosition)
           } else {
             doc.setFont('helvetica', 'bold')
             setColor(tc.primary)
             doc.text(`${ii + 1}.`, 28, yPosition)
             doc.setFont('helvetica', 'normal')
             doc.setTextColor(50, 50, 50)
-            doc.text(sanitizePdfText(item.text), 36, yPosition)
+            doc.text(sanitizePdfText(item), 36, yPosition)
           }
           yPosition += 8
         })
@@ -1157,6 +1146,7 @@ const AppContent = () => {
   // ============================================================
 
   const generateDOCX = (worksheet, version = 'student') => {
+    worksheet = normalizeWorksheet(worksheet)
     const isExam = worksheet.resourceType === 'exam' || worksheet.content?.resourceType === 'exam'
     const showPoints = isExam
     const questions = worksheet.content?.questions || []
@@ -1405,8 +1395,10 @@ const AppContent = () => {
 
       // === Matching ===
       if (qType === 'matching' && q.answer) {
-        const pairs = (q.answer || '').split(',').filter(Boolean)
-        const shuffledRight = version === 'student' ? [...pairs].sort(() => 0.5 - Math.random()) : pairs
+        const pairs = answerItems(q.answer).filter(Boolean)
+        const rightItems = version === 'student'
+          ? shuffledMatchingRight(q).map(item => item.text)
+          : pairs.map(pair => pair.split('→')[1]?.trim())
 
         const tableRows = [
           new TableRow({
@@ -1427,8 +1419,7 @@ const AppContent = () => {
 
         pairs.forEach((pair, pi) => {
           const [left] = pair.split('\u2192').map(s => s?.trim())
-          const rightPair = shuffledRight[pi] || pair
-          const [, right] = rightPair.split('\u2192').map(s => s?.trim())
+          const right = rightItems[pi]
           tableRows.push(
             new TableRow({
               children: [
@@ -1455,8 +1446,8 @@ const AppContent = () => {
 
       // === Ordering ===
       if (qType === 'ordering' && q.answer) {
-        const items = (q.answer || '').split(',').filter(Boolean).map(s => s.trim())
-        const displayItems = version === 'student' ? [...items].sort(() => 0.5 - Math.random()) : items
+        const items = answerItems(q.answer).filter(Boolean).map(s => s.trim())
+        const displayItems = version === 'student' ? shuffledOrderingItems(q) : items
         displayItems.forEach((item, ii) => {
           children.push(
             new Paragraph({
@@ -1684,11 +1675,8 @@ const AppContent = () => {
     }
   }
 
-  const handleUpgrade = async () => {
-    try {
-      const response = await fetch('/api/subscribe/premium', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } })
-      if (response.ok) { fetchCurrentUser(token); setSuccessMessage('Erfolgreich auf Premium aktualisiert!') }
-    } catch (error) { setError('Fehler beim Upgrade.') }
+  const handleUpgrade = () => {
+    setError('Premium ist noch nicht buchbar. Preis und Leistungsumfang werden vor dem Start veröffentlicht.')
   }
 
   // ============================================================
@@ -2142,7 +2130,7 @@ const AppContent = () => {
 
       if (response.ok) {
         const data = await response.json()
-        const updatedQ = data.question
+        const updatedQ = normalizeQuestion(data.question)
         setEditedQuestions(prev => {
           const updated = [...prev]
           updated[questionIndex] = {
@@ -2412,6 +2400,7 @@ const AppContent = () => {
 
   // Teacher grade override
   const saveTeacherGrade = async (submissionId, questionIndex, pointsAwarded, feedback, teacherComment) => {
+    if (!Number.isFinite(pointsAwarded)) { setError('Bitte Punkte explizit auswählen.'); return }
     try {
       const res = await fetch(`/api/submissions/${submissionId}/grade`, {
         method: 'PUT',
@@ -2568,11 +2557,13 @@ const AppContent = () => {
 
   // Swiss grade calculation helper
   const calcSwissGrade = (earned, total) => {
+    if (!Number.isFinite(earned) || !Number.isFinite(total)) return 'Prüfung ausstehend'
     if (!total || total === 0) return 1
     return Math.round((earned / total * 5 + 1) * 2) / 2
   }
 
   const gradeColor = (grade) => {
+    if (!Number.isFinite(grade)) return 'text-gray-500'
     if (grade >= 5.5) return 'text-green-600'
     if (grade >= 4.5) return 'text-green-500'
     if (grade >= 4) return 'text-amber-600'
@@ -2602,10 +2593,10 @@ const AppContent = () => {
     doc.setFontSize(10)
     doc.setFont('helvetica', 'normal')
     doc.text(`Schüler/in: ${sub.student_name}`, 20, y)
-    const swissGrade = sub.swiss_grade || calcSwissGrade(sub.earned_points, sub.total_points)
+    const swissGrade = sub.needs_review ? 'Prüfung ausstehend' : (sub.swiss_grade ?? calcSwissGrade(sub.earned_points, sub.total_points))
     doc.text(`Note: ${swissGrade}`, pw - 50, y)
     y += 7
-    doc.text(`Punkte: ${sub.earned_points ?? 0} / ${sub.total_points ?? 0} (${sub.score_percentage}%)`, 20, y)
+    doc.text(`Punkte: ${sub.earned_points ?? '–'} / ${sub.total_points ?? 0} (${Number.isFinite(sub.score_percentage) ? `${sub.score_percentage}%` : 'Prüfung ausstehend'})`, 20, y)
     doc.text(`Datum: ${new Date(sub.submitted_at).toLocaleDateString('de-CH')}`, pw - 70, y)
     y += 7
     if (sub.duration) {
@@ -2637,7 +2628,7 @@ const AppContent = () => {
 
       // Points on right
       doc.setTextColor(...statusColor)
-      doc.text(`${qr.pointsAwarded ?? 0}/${qr.maxPoints ?? 1}P`, pw - 25, y, { align: 'right' })
+      doc.text(`${qr.pointsAwarded ?? '–'}/${qr.maxPoints ?? 1}P`, pw - 25, y, { align: 'right' })
       y += qLines.length * 5 + 3
 
       // Student answer
@@ -2687,7 +2678,7 @@ const AppContent = () => {
     y += 7
     doc.setFontSize(10)
     doc.setFont('helvetica', 'normal')
-    doc.text(`${sub.earned_points ?? 0} von ${sub.total_points ?? 0} Punkten (${sub.score_percentage}%)`, pw / 2, y, { align: 'center' })
+    doc.text(`${sub.earned_points ?? '–'} von ${sub.total_points ?? 0} Punkten (${Number.isFinite(sub.score_percentage) ? `${sub.score_percentage}%` : 'Prüfung ausstehend'})`, pw / 2, y, { align: 'center' })
 
     doc.save(`Pruefung_${sub.student_name.replace(/\s/g, '_')}_korrigiert.pdf`)
     setSuccessMessage(`PDF für ${sub.student_name} exportiert.`)
@@ -2794,26 +2785,30 @@ const AppContent = () => {
   }
 
   const generateFromCompetency = (comp, areaName, cycleName) => {
-    setForm(prev => ({ ...prev, topic: `${comp.name}: ${comp.description} (${areaName}, ${cycleName}) – Lernziele: ${(comp.goals || []).slice(0, 3).join(', ')}`, subject: areaName, competencyCode: comp.code }))
+    setForm(prev => formForCompetency(prev, comp))
     setActiveView('create')
     setSelectedWorksheet(null)
     setShowEditorPanel(false)
-    setSuccessMessage(`Kompetenz ${comp.code} "${comp.name}" übernommen.`)
+    setSuccessMessage(comp.sourceVerified ? `Kompetenzstufe ${comp.code} übernommen.` : `Planungsentwurf «${comp.name}» als Thema übernommen.`)
   }
 
   const generateSequence = (comp, areaName, cycleName) => {
     // Generate first material in the sequence
     const firstItem = (comp.sequence || [])[0] || 'Arbeitsblatt'
     const type = firstItem.toLowerCase().includes('quiz') ? 'quiz' : firstItem.toLowerCase().includes('prüfung') ? 'exam' : 'worksheet'
-    setForm(prev => ({ ...prev, topic: `${comp.name}: ${comp.description} (${areaName}, ${cycleName})`, subject: areaName, resourceType: type }))
+    setForm(prev => ({ ...formForCompetency(prev, comp), resourceType: type }))
     setActiveView('create')
     setSelectedWorksheet(null)
     setShowEditorPanel(false)
     setSuccessMessage(`Lernsequenz für ${comp.code} gestartet. Erstellen Sie zuerst: "${firstItem}"`)
   }
 
-  // Flatten all competencies for search
-  const allCompetencies = LEHRPLAN_CYCLES.flatMap(cycle =>
+  const visibleCurriculumCycles = curriculumCatalog
+    .filter(cycle => curriculumFilterCycle === 'all' || cycle.id === curriculumFilterCycle)
+    .map(cycle => ({ ...cycle, areas: cycle.areas.filter(area => curriculumFilterSubject === 'all' || area.name === curriculumFilterSubject) }))
+    .filter(cycle => cycle.areas.length)
+  // Search and cycle cards use the same source and filter boundaries.
+  const allCompetencies = visibleCurriculumCycles.flatMap(cycle =>
     cycle.areas.flatMap(area =>
       (area.competencies || []).map(comp => ({
         ...comp,
@@ -3093,7 +3088,7 @@ const AppContent = () => {
       {/* SUCCESS TOAST */}
       <AnimatePresence>
         {successMessage && (
-          <motion.div initial={{ opacity: 0, y: -50 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -50 }} className="fixed top-16 left-1/2 -translate-x-1/2 z-[60] max-w-md w-full px-4">
+          <motion.div initial={{ opacity: 0, y: -50 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -50 }} className="fixed top-16 inset-x-0 mx-auto z-[60] max-w-md w-full px-4">
             <Alert className="bg-green-50 border-green-200 shadow-lg"><CheckCircle2 className="h-4 w-4 text-green-600" /><AlertDescription className="text-green-800">{successMessage}</AlertDescription></Alert>
           </motion.div>
         )}
@@ -3110,7 +3105,7 @@ const AppContent = () => {
 
           {/* ============ CREATE VIEW ============ */}
           {activeView === 'create' && (
-            <div><CreationWorkspaceHeader current="create" /><GeneratorView handleExportPDF={handleExportPDF} handleExportDOCX={handleExportDOCX} handleRegenerate={handleRegenerate} handleUpgrade={handleUpgrade} /></div>
+            <div><CreationWorkspaceHeader current="create" /><MaterialErrorBoundary resetKey={selectedWorksheet?.id || "create"} onBack={() => { setSelectedWorksheet(null); setActiveView("library") }}><GeneratorView handleExportPDF={handleExportPDF} handleExportDOCX={handleExportDOCX} handleRegenerate={handleRegenerate} handleUpgrade={handleUpgrade} /></MaterialErrorBoundary></div>
           )}
 
           {/* ============ LIBRARY VIEW ============ */}
@@ -3284,6 +3279,16 @@ const AppContent = () => {
                   Lehrplan 21
                 </motion.h2>
                 <p className="text-gray-600">Kompetenzen durchsuchen, Jahresplanung verwalten und gezielt Material erstellen.</p>
+                <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900">
+                  <p className="font-medium">{showCurriculumDrafts ? 'Ungeprüfte Planungsentwürfe' : 'Quellengeprüfte Kompetenzstufen'}</p>
+                  <p className="mt-1 text-xs">{showCurriculumDrafts ? 'Diese historischen Unterrichtsideen können falsche Codes und Zuordnungen enthalten. Sie können als Thema übernommen werden; ein offizieller Kompetenzbezug wird daraus nicht abgeleitet.' : 'Auswahl aus der Lehrplanvorlage, nach Fach und Zyklus geprüft. EduFlow fasst die Inhalte zusammen; der gesamte Lehrplan und kantonale Fassungen sind damit noch nicht abgedeckt.'}</p>
+                  <Button variant="outline" size="sm" className="mt-3" onClick={() => {
+                    setShowCurriculumDrafts(value => !value)
+                    setCurriculumSearch('')
+                    setCurriculumFilterSubject('all')
+                    setExpandedArea(null)
+                  }}>{showCurriculumDrafts ? 'Quellengeprüfte Auswahl anzeigen' : 'Ungeprüfte Entwürfe anzeigen'}</Button>
+                </div>
               </div>
 
               {/* Search + Stats Bar */}
@@ -3297,7 +3302,14 @@ const AppContent = () => {
                     <SelectTrigger className="w-full sm:w-[180px]"><Filter className="h-4 w-4 mr-2 text-gray-400" /><SelectValue placeholder="Fach" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">Alle Fächer</SelectItem>
-                      {[...new Set(allCompetencies.map(c => c.areaName))].map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                      {[...new Set(curriculumCatalog.flatMap(cycle => cycle.areas.map(area => area.name)))].map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Select value={curriculumFilterCycle} onValueChange={setCurriculumFilterCycle}>
+                    <SelectTrigger className="w-full sm:w-[160px]"><SelectValue placeholder="Zyklus" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Alle Zyklen</SelectItem>
+                      {curriculumCatalog.map(cycle => <SelectItem key={cycle.id} value={cycle.id}>{cycle.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -3328,11 +3340,11 @@ const AppContent = () => {
                     <p className="text-sm text-gray-500 mb-3">{filteredCompetencies.length} Treffer für «{curriculumSearch}»</p>
                     {filteredCompetencies.length > 0 ? (
                       <div className="grid sm:grid-cols-2 gap-3">
-                        {filteredCompetencies.filter(c => curriculumFilterSubject === 'all' || c.areaName === curriculumFilterSubject).slice(0, 12).map((comp, i) => {
+                        {filteredCompetencies.map((comp, i) => {
                           const status = competencyTracker[comp.code]
                           const statusInfo = getCompetencyStatusInfo(status)
                           return (
-                            <motion.div key={comp.code} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
+                            <motion.div key={`${comp.cycleId}:${comp.areaId}:${comp.code}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
                               <Card className="glass-card border-0 hover-lift h-full">
                                 <CardContent className="p-4">
                                   <div className="flex items-start justify-between mb-2">
@@ -3346,7 +3358,8 @@ const AppContent = () => {
                                   </div>
                                   <h4 className="font-semibold text-sm text-gray-900 mb-1">{comp.name}</h4>
                                   <p className="text-xs text-gray-500 mb-2">{comp.description}</p>
-                                  <div className="flex items-center gap-1 text-[10px] text-gray-400 mb-3">
+                                  {comp.sourceUrl && <a className="mb-2 inline-block text-xs text-blue-700 underline" href={comp.sourceUrl} target="_blank" rel="noreferrer">Offizielle Quelle</a>}
+                                  <div className="flex flex-wrap items-center gap-1 text-[10px] text-gray-400 mb-3">
                                     <span>{comp.cycleName}</span> • <span>{comp.areaName}</span> • <Badge variant="secondary" className="text-[10px]">{comp.level}</Badge>
                                   </div>
                                   <div className="flex gap-2">
@@ -3387,7 +3400,7 @@ const AppContent = () => {
                                               <span className="text-xs text-gray-700 flex-1">{item}</span>
                                               <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-blue-600" onClick={() => {
                                                 const type = item.toLowerCase().includes('quiz') ? 'quiz' : item.toLowerCase().includes('prüfung') ? 'exam' : 'worksheet'
-                                                setForm(prev => ({ ...prev, topic: `${comp.name}: ${comp.description}`, subject: comp.areaName, resourceType: type }))
+                                                setForm(prev => ({ ...formForCompetency(prev, comp), resourceType: type }))
                                                 setActiveView('create'); setSelectedWorksheet(null); setShowEditorPanel(false)
                                               }}>
                                                 <Sparkles className="h-2.5 w-2.5 mr-0.5" /> Erstellen
@@ -3415,6 +3428,7 @@ const AppContent = () => {
               </AnimatePresence>
 
               {/* Cycle Cards */}
+              {!curriculumSearch.trim() && visibleCurriculumCycles.length === 0 && <p role="status" className="py-6 text-sm text-gray-600">Für diese Filter ist noch keine Auswahl hinterlegt. Wählen Sie ein anderes Fach oder einen anderen Zyklus.</p>}
               {!curriculumSearch.trim() && (
                 <motion.div
                   className="space-y-4"
@@ -3422,7 +3436,7 @@ const AppContent = () => {
                   initial="hidden"
                   animate="show"
                 >
-                  {[...LEHRPLAN_CYCLES].sort((a, b) => {
+                  {[...visibleCurriculumCycles].sort((a, b) => {
                     if (!user?.teacher_type) return 0
                     const relevant = user.teacher_type === 'sekundar' ? ['z3'] : ['z1', 'z2']
                     return (relevant.includes(a.id) ? 0 : 1) - (relevant.includes(b.id) ? 0 : 1)
@@ -3452,7 +3466,7 @@ const AppContent = () => {
                           </motion.div>
                           <div>
                             <h3 className="text-lg font-semibold text-gray-900">{cycle.name}</h3>
-                            <p className="text-sm text-gray-500">{cycle.grades} • {cycle.areas.length} Fächer • {totalComps} Kompetenzen</p>
+                            <p className="text-sm text-gray-500">{cycle.grades} • {cycle.areas.length} {cycle.areas.length === 1 ? 'Fach' : 'Fächer'} • {totalComps} {showCurriculumDrafts ? 'Entwürfe' : 'Kompetenzstufen'}</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-3">
@@ -3489,7 +3503,7 @@ const AppContent = () => {
                                       <span className="font-medium text-gray-800">{area.name}</span>
                                     </div>
                                     <div className="flex items-center gap-2">
-                                      <Badge variant="secondary" className="text-xs">{(area.competencies || []).length} Kompetenzen</Badge>
+                                      <Badge variant="secondary" className="text-xs">{(area.competencies || []).length} {showCurriculumDrafts ? 'Entwürfe' : 'Stufen'}</Badge>
                                       {(area.competencies || []).some(c => competencyTracker[c.code]) && (
                                         <div className="flex -space-x-0.5">
                                           {(area.competencies || []).map(c => competencyTracker[c.code]).filter(Boolean).slice(0, 8).map((status, si) => (
@@ -3519,13 +3533,14 @@ const AppContent = () => {
                                                 className="bg-white border rounded-xl p-4 hover:shadow-md transition-all">
                                                 {/* Competency Header */}
                                                 <div className="flex items-start justify-between mb-2">
-                                                  <div className="flex-1">
-                                                    <div className="flex items-center gap-2 mb-1">
+                                                  <div className="min-w-0 flex-1">
+                                                    <div className="flex flex-wrap items-center gap-2 mb-1">
                                                       <Badge variant="outline" className="text-[10px] font-mono px-1.5">{comp.code}</Badge>
                                                       <Badge variant="secondary" className="text-[10px]">{comp.level}</Badge>
                                                     </div>
                                                     <h4 className="font-semibold text-sm text-gray-900">{comp.name}</h4>
                                                     <p className="text-xs text-gray-500 mt-0.5">{comp.description}</p>
+                                                    {comp.sourceUrl && <a className="mt-1 inline-block text-xs text-blue-700 underline" href={comp.sourceUrl} target="_blank" rel="noreferrer">Offizielle Quelle</a>}
                                                   </div>
                                                   <button onClick={() => toggleCompetencyStatus(comp.code)}
                                                     className={`ml-3 px-2.5 py-1 rounded-full text-[10px] font-medium border transition-smooth flex-shrink-0 ${statusInfo.color}`}
@@ -3580,7 +3595,7 @@ const AppContent = () => {
                                                             </div>
                                                             <Button size="sm" variant="outline" className="h-7 text-[10px] px-2" onClick={() => {
                                                               const type = item.toLowerCase().includes('quiz') ? 'quiz' : item.toLowerCase().includes('prüfung') ? 'exam' : 'worksheet'
-                                                              setForm(prev => ({ ...prev, topic: `${comp.name}: ${comp.description}`, subject: area.name, resourceType: type }))
+                                                              setForm(prev => ({ ...formForCompetency(prev, comp), resourceType: type }))
                                                               setActiveView('create'); setSelectedWorksheet(null); setShowEditorPanel(false)
                                                               setSuccessMessage(`"${item}" für ${comp.code} vorbereitet.`)
                                                             }}>
@@ -4329,20 +4344,20 @@ const AppContent = () => {
                         </tr></thead>
                         <tbody>
                           {assignmentSubmissions.map(sub => {
-                            const grade = sub.swiss_grade || calcSwissGrade(sub.earned_points, sub.total_points)
+                            const grade = sub.needs_review ? 'Prüfung ausstehend' : (sub.swiss_grade ?? calcSwissGrade(sub.earned_points, sub.total_points))
                             return (
                             <tr key={sub.id} className="border-b last:border-0 hover:bg-gray-50/50 cursor-pointer"
                               onClick={() => setExpandedSubmission(expandedSubmission === sub.id ? null : sub.id)}>
                               <td className="px-4 py-3 text-sm font-medium text-gray-900">{sub.student_name}</td>
                               <td className="px-4 py-3 text-center text-sm text-gray-600">
-                                {sub.earned_points ?? sub.correct_count ?? '–'}/{sub.total_points ?? sub.total_questions}
+                                {sub.earned_points ?? '–'}/{sub.total_points ?? sub.total_questions}
                               </td>
                               <td className="px-4 py-3 text-center">
                                 <span className={`text-lg font-bold ${gradeColor(grade)}`}>{grade}</span>
                               </td>
                               <td className="px-4 py-3 text-center">
                                 <span className={`text-sm font-bold ${sub.score_percentage >= 80 ? 'text-green-600' : sub.score_percentage >= 50 ? 'text-amber-600' : 'text-red-600'}`}>
-                                  {sub.score_percentage}%
+                                  {Number.isFinite(sub.score_percentage) ? `${sub.score_percentage}%` : 'Prüfung ausstehend'}
                                 </span>
                               </td>
                               <td className="px-4 py-3 text-center">
@@ -4376,7 +4391,7 @@ const AppContent = () => {
                       {expandedSubmission && (() => {
                         const sub = assignmentSubmissions.find(s => s.id === expandedSubmission)
                         if (!sub || !sub.question_results) return null
-                        const subGrade = sub.swiss_grade || calcSwissGrade(sub.earned_points, sub.total_points)
+                        const subGrade = sub.needs_review ? 'Prüfung ausstehend' : (sub.swiss_grade ?? calcSwissGrade(sub.earned_points, sub.total_points))
                         return (
                           <div className="border-t bg-gray-50/50 p-4">
                             <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -4424,7 +4439,7 @@ const AppContent = () => {
                                           e.stopPropagation()
                                           setEditingQuestion(editingQuestion?.subId === sub.id && editingQuestion?.qIndex === qi ? null : {
                                             subId: sub.id, qIndex: qi,
-                                            points: qr.pointsAwarded ?? 0,
+                                            points: qr.aiGraded && !qr.teacherOverride ? null : (qr.pointsAwarded ?? null),
                                             feedback: qr.feedback || '',
                                             comment: qr.teacherComment || ''
                                           })
@@ -4803,7 +4818,7 @@ const AppContent = () => {
                 </motion.div>
 
                 {/* Class detail / Roster */}
-                <div className="lg:col-span-2">
+                <div className="min-w-0 lg:col-span-2">
                   {classDetailData ? (
                     <>
                     <TeacherClassWorkspace
@@ -4824,7 +4839,15 @@ const AppContent = () => {
                       onOpenAssignment={async (assignmentId) => { await loadSubmissions(assignmentId); setActiveView('students') }}
                       onUpdateNiveau={updateStudentNiveau}
                       onRemoveStudent={removeStudentFromClass}
+                      onOpenLearning={(student, launcher) => { learningLauncherRef.current = launcher; setLearningStudent(student) }}
                       onDeleteClass={(classId) => { if (confirm(`Klasse "${classDetailData.name}" wirklich löschen?`)) deleteClass(classId) }}
+                    />
+                    <StudentLearningDetail
+                      open={Boolean(learningStudent)}
+                      onOpenChange={(open) => { if (!open) setLearningStudent(null) }}
+                      student={learningStudent}
+                      token={token}
+                      returnFocusRef={learningLauncherRef}
                     />
                     <div className="hidden">
                     <Card className="glass-card border-0">

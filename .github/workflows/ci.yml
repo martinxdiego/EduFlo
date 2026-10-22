@@ -8,72 +8,118 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    services:
-      mongodb:
-        image: mongo:7
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
     env:
-      MONGO_URL: mongodb://127.0.0.1:27017
-      DB_NAME: eduflow_ci
-      JWT_SECRET: ci-only-secret-with-at-least-32-characters
-      NEXT_PUBLIC_BASE_URL: http://127.0.0.1:3000
-      CORS_ORIGINS: http://127.0.0.1:3000
-      OPENAI_API_KEY: ci-placeholder-key
-      RUN_INTEGRATION_TESTS: '1'
-      TEST_BASE_URL: http://127.0.0.1:3000
+      NEXT_TELEMETRY_DISABLED: '1'
+      EDUFLOW_PUBLIC_LAUNCH: 'false'
+      EDUFLOW_ANALYTICS_ENABLED: 'false'
+      OPENAI_API_KEY: ''
+      GOOGLE_API_KEY: ''
+      GEMINI_API_KEY: ''
+      MONGOMS_VERSION: '8.2.6'
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: '24.19.0'
           cache: npm
           cache-dependency-path: package-lock.json
+
+      - name: Use the repository's npm version
+        run: npm install --global npm@10.8.2
 
       - name: Install locked dependencies
         run: npm ci
 
-      - name: Run security unit tests
+      - name: Run material, quota and security unit tests
         run: npm --workspace EduFlow run test:security
+
+      # These checks explicitly bootstrap the existing local-synthetic hosting
+      # profile. A production server is deliberately denied by the current policy.
+      - name: Run hosting policy and learning regression tests
+        working-directory: EduFlow
+        run: >-
+          node --import ./tests/helpers/setup-unit-hosting.mjs --test
+          tests/hosting-capabilities.test.mjs
+          tests/hosting-provider-foundations.test.mjs
+          tests/learning-v2-phase0.test.mjs
+          tests/learning-v2-phase1.test.mjs
+          tests/learning-v2-phase2.test.mjs
+          tests/learning-v2-h12a.test.mjs
+
+      - name: Verify atomic quota and save transactions in a disposable replica set
+        working-directory: EduFlow
+        env:
+          RUN_WORKSHEET_USAGE_MONGO: '1'
+        run: node --test tests/worksheet-usage.mongo.integration.test.mjs
 
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 
-      - name: Build production application
-        run: npm --workspace EduFlow run build
+      # npm runs prebuild, build and postbuild. This compiles production output;
+      # it does not grant a hosting capability or publish a deployment.
+      - name: Build production application with lifecycle checks
+        run: npm --workspace EduFlow run build 2>&1 | tee "$RUNNER_TEMP/eduflow-build.log"
 
-      - name: Run API authorization integration tests
+      # A successful compilation does not prove the traced standalone package
+      # can boot. The existing runner also verifies production stays denied.
+      - name: Verify standalone boot and production capability boundaries
+        working-directory: EduFlow
+        run: >-
+          node scripts/learning-v2-release/runner.mjs
+          production-all-off production-all-requested-on
+          2>&1 | tee "$RUNNER_TEMP/eduflow-standalone.log"
+
+      # The browser dependency is isolated from the application and its lockfile.
+      # The exact Playwright version selects its matching Chromium binary.
+      - name: Install browser test runtime
         run: |
-          npm --workspace EduFlow run start > "$RUNNER_TEMP/eduflow-server.log" 2>&1 &
-          server_pid=$!
-          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
-          for attempt in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:3000/ > /dev/null; then
-              npm --workspace EduFlow run test:integration
-              exit $?
-            fi
-            sleep 1
-          done
-          cat "$RUNNER_TEMP/eduflow-server.log"
-          exit 1
+          npm install --prefix "$RUNNER_TEMP/eduflow-browser" --no-package-lock --no-save --ignore-scripts playwright@1.62.1
+          node "$RUNNER_TEMP/eduflow-browser/node_modules/playwright/cli.js" install --with-deps --no-shell chromium
+          python3 -m venv "$RUNNER_TEMP/eduflow-pdf"
+          "$RUNNER_TEMP/eduflow-pdf/bin/python" -m pip install pypdf==6.10.0
 
-      - name: Upload server log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
+      - name: Verify eleven question types, exports, student flow and API authorization
+        working-directory: EduFlow
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/eduflow-browser/node_modules/playwright
+          PLAYWRIGHT_CHANNEL: chromium
+          PDF_REVIEW_PYTHON: ${{ runner.temp }}/eduflow-pdf/bin/python
+          RUN_API_AUTHZ_SMOKE: '1'
+        run: node tests/browser/worksheet-launch-smoke.cjs 2>&1 | tee "$RUNNER_TEMP/eduflow-browser.log"
+
+      - name: Collect synthetic test artifacts
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/eduflow-ci-artifacts"
+          for file in "$RUNNER_TEMP/eduflow-build.log" "$RUNNER_TEMP/eduflow-standalone.log" "$RUNNER_TEMP/eduflow-browser.log" EduFlow/.tmp/launch-smoke/*.pdf EduFlow/.tmp/launch-smoke/*.docx EduFlow/.tmp/launch-smoke/*.png; do
+            if [ -f "$file" ]; then
+              cp "$file" "$RUNNER_TEMP/eduflow-ci-artifacts/"
+            fi
+          done
+
+      - name: Upload synthetic exports and check logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: eduflow-server-log
-          path: ${{ runner.temp }}/eduflow-server.log
+          name: eduflow-launch-regression
+          path: ${{ runner.temp }}/eduflow-ci-artifacts/
           if-no-files-found: ignore
+          retention-days: 7

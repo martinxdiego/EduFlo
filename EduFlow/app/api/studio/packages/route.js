@@ -1,3 +1,4 @@
+import { withHostingPolicy } from '@/lib/server/hosting-route-policy'
 import { NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
 import { getDatabase } from '@/lib/server/database'
@@ -12,7 +13,7 @@ export async function OPTIONS(request) {
   return applyCorsHeaders(new NextResponse(null, { status: 204 }), request)
 }
 
-export async function GET(request) {
+async function GETHandler(request) {
   const user = verifyAuthToken(request)
   if (!user) return respond(request, { error: 'Unauthorized' }, 401)
   const db = await getDatabase()
@@ -20,7 +21,7 @@ export async function GET(request) {
   return respond(request, packages.map(({ _id, ...item }) => item))
 }
 
-export async function POST(request) {
+async function POSTHandler(request) {
   const user = verifyAuthToken(request)
   if (!user) return respond(request, { error: 'Unauthorized' }, 401)
   const body = await request.json().catch(() => null)
@@ -50,7 +51,7 @@ export async function POST(request) {
   return respond(request, cleaned, 201)
 }
 
-export async function DELETE(request) {
+async function DELETEHandler(request) {
   const user = verifyAuthToken(request)
   if (!user) return respond(request, { error: 'Unauthorized' }, 401)
   const id = new URL(request.url).searchParams.get('id')
@@ -59,3 +60,9 @@ export async function DELETE(request) {
   const result = await db.collection('studio_packages').deleteOne({ id, user_id: user.userId })
   return result.deletedCount ? respond(request, { success: true }) : respond(request, { error: 'Paket nicht gefunden.' }, 404)
 }
+
+export const GET = withHostingPolicy(GETHandler)
+
+export const POST = withHostingPolicy(POSTHandler)
+
+export const DELETE = withHostingPolicy(DELETEHandler)

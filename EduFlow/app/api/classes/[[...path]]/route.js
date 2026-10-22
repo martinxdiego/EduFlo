@@ -1,4 +1,5 @@
-import OpenAI from 'openai'
+import { withHostingPolicy } from '@/lib/server/hosting-route-policy'
+import { reviewableSubmission, requiresTeacherReview } from '@/lib/server/submission-grading'
 import { NextResponse } from 'next/server'
 import { v4 as uuidv4 } from 'uuid'
 import { generateUniqueCode } from '@/lib/server/access-codes'
@@ -75,7 +76,7 @@ async function classDetails(request, db, session, classId) {
   const studentsById = new Map(students.map((student) => [student.id, student]))
   const enriched = enrolled.map((entry) => {
     const student = studentsById.get(entry.student_id)
-    const grades = submissions.filter((submission) => submission.student_id === entry.student_id).map((submission) => submission.swiss_grade || 1)
+    const grades = submissions.filter((submission) => submission.student_id === entry.student_id).map(reviewableSubmission).map((submission) => submission.swiss_grade).filter(Number.isFinite)
     return {
       ...entry,
       display_name: student?.display_name || entry.display_name,
@@ -130,7 +131,7 @@ async function classStats(request, db, session, classId) {
   if (!cls) return jsonResponse({ error: 'Klasse nicht gefunden.' }, { status: 404 }, request)
   const assignments = await db.collection('assignments').find({ class_id: classId, teacher_id: session.userId }).toArray()
   if (!assignments.length) return jsonResponse({ assignments: [], studentStats: [], classStats: null }, undefined, request)
-  const submissions = await db.collection('submissions').find({ assignment_id: { $in: assignments.map((assignment) => assignment.id) } }).toArray()
+  const submissions = (await db.collection('submissions').find({ assignment_id: { $in: assignments.map((assignment) => assignment.id) } }).toArray()).map(reviewableSubmission)
   const studentMap = new Map((cls.enrolled_students || []).map((student) => [student.student_id, {
     student_id: student.student_id, display_name: student.display_name, niveau: student.niveau || 'B', submissions: 0,
     total_earned: 0, total_possible: 0, grades: [], avg_grade: null, avg_score: null,
@@ -139,16 +140,17 @@ async function classStats(request, db, session, classId) {
     const student = studentMap.get(submission.student_id)
     if (!student) continue
     student.submissions += 1
+    if (submission.needs_review) continue
     student.total_earned += submission.earned_points || 0
     student.total_possible += submission.total_points || 0
-    student.grades.push(submission.swiss_grade || 1)
+    student.grades.push(submission.swiss_grade)
   }
   const studentStats = [...studentMap.values()].map((student) => ({
     ...student,
     avg_grade: student.grades.length ? Math.round(student.grades.reduce((a, b) => a + b, 0) / student.grades.length * 10) / 10 : null,
     avg_score: student.total_possible ? Math.round(student.total_earned / student.total_possible * 100) : null,
   }))
-  const grades = submissions.map((submission) => submission.swiss_grade || 1)
+  const grades = submissions.map((submission) => submission.swiss_grade).filter(Number.isFinite)
   const passing = grades.filter((grade) => grade >= 4).length
   const classStatsValue = grades.length ? {
     totalAssignments: assignments.length, totalSubmissions: submissions.length,
@@ -158,7 +160,7 @@ async function classStats(request, db, session, classId) {
     niveauStats: { A: studentStats.filter((s) => s.niveau === 'A'), B: studentStats.filter((s) => s.niveau === 'B'), C: studentStats.filter((s) => s.niveau === 'C') },
   } : null
   const summaries = assignments.map((assignment) => {
-    const assignmentGrades = submissions.filter((submission) => submission.assignment_id === assignment.id).map((submission) => submission.swiss_grade || 1)
+    const assignmentGrades = submissions.filter((submission) => submission.assignment_id === assignment.id).map((submission) => submission.swiss_grade).filter(Number.isFinite)
     const settings = normalizeAssignmentSettings(assignment)
     return { id: assignment.id, title: assignment.worksheet_title, target_niveau: assignment.target_niveau, created_at: assignment.created_at,
       status: assignment.status, deadline: assignment.deadline, code: assignment.code, unit: settings.unit,
@@ -188,6 +190,7 @@ async function classInsights(request, db, session, classId) {
     const worksheet = worksheetMap.get(assignmentMap.get(submission.assignment_id)?.worksheet_id)
     const topic = worksheet?.topic || 'Unbekannt'
     for (const result of submission.question_results || []) {
+      if (requiresTeacherReview(result)) continue
       insight.totalQuestions += 1
       insight.topics[topic] ||= { wrong: 0, total: 0 }
       insight.topics[topic].total += 1
@@ -214,15 +217,7 @@ async function classInsights(request, db, session, classId) {
     topic, subject: value.subject, errorRate: Math.round(value.wrong / value.total * 100), affectedStudents: value.studentsWrong.size,
     totalStudents: studentIds.length, total: value.total, wrong: value.wrong,
   })).sort((a, b) => b.affectedStudents - a.affectedStudents || b.errorRate - a.errorRate)
-  let recommendations = ''
-  if (topicWeaknesses.length && process.env.OPENAI_API_KEY) {
-    try {
-      const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-      const prompt = `Gib einer Schweizer Lehrperson drei konkrete Unterrichtsmassnahmen und Differenzierungsideen für diese Klassenschwächen:\n${topicWeaknesses.slice(0, 5).map((item) => `- ${item.topic}: ${item.errorRate}% Fehler, ${item.affectedStudents}/${item.totalStudents} betroffen`).join('\n')}`
-      const result = await client.chat.completions.create({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], max_tokens: 800 })
-      recommendations = result.choices[0]?.message?.content || ''
-    } catch (error) { console.error('Class insights AI error:', error) }
-  }
+  const recommendations = '' // Provider recommendations have no authority in Implementation A.
   const learningGoals = buildLearningGoalProgress(assignments, submissions)
   const supportGroups = learningGoals.filter((goal) => goal.mastery !== 'secure').map((goal) => ({
     goal: goal.goal,
@@ -232,6 +227,7 @@ async function classInsights(request, db, session, classId) {
       .map((student) => ({ student_id: student.student_id, display_name: student.display_name, niveau: student.niveau })),
   })).filter((group) => group.students.length)
   return jsonResponse({ students: students.sort((a, b) => b.errorRate - a.errorRate), topicWeaknesses, recommendations,
+    providerRecommendationsStatus: 'PROVIDER_DISABLED',
     learningGoals, followUpRecommendations: buildSupportRecommendations(learningGoals), supportGroups, totalSubmissions: submissions.length }, undefined, request)
 }
 
@@ -270,7 +266,7 @@ async function handleClasses(request, { params }) {
   }
 }
 
-export const GET = handleClasses
-export const POST = handleClasses
-export const PUT = handleClasses
-export const DELETE = handleClasses
+export const GET = withHostingPolicy(handleClasses)
+export const POST = withHostingPolicy(handleClasses)
+export const PUT = withHostingPolicy(handleClasses)
+export const DELETE = withHostingPolicy(handleClasses)

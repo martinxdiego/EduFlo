@@ -1,11 +1,30 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { BookOpen, CheckCircle2, ArrowRight, Clock, Send, ArrowLeft, Star, Trophy, Loader2, XCircle, AlertCircle, Sparkles, ChevronDown, ChevronUp, LogOut, User, BarChart3, Award, TrendingUp, Hash, Trash2, Users, Zap, Target, Crown, Flame, Brain, Lightbulb, ChevronRight, RefreshCw } from 'lucide-react'
 import StudentLearningHome from '@/components/StudentLearningHome'
+import TutorReflectionCard from '@/components/learning-v2/student/TutorReflectionCard'
+import { createOperationReceipts } from '@/components/learning-v2/operation-receipts'
+import { useRequestScope } from '@/components/learning-v2/request-scope'
+import {
+  assignmentDraftBinding,
+  assignmentDraftStorage,
+  clearAllAssignmentDrafts,
+  clearAssignmentDraft,
+  clearExpiredAssignmentDrafts,
+  clearForeignAuthenticatedDrafts,
+  clearLegacyAssignmentDrafts,
+  readAssignmentDraft,
+  STUDENT_ASSIGNMENT_DRAFT_TTL_MS,
+  writeAssignmentDraft,
+} from '@/lib/client/student-assignment-drafts'
 
 const SESSION_MARKER = 'cookie-session'
+
+function removeLegacyStudentToken() {
+  try { window.localStorage.removeItem('eduflow_student_token') } catch { /* legacy storage can be unavailable */ }
+}
 
 export default function SchuelerPage() {
   // Auth state
@@ -34,6 +53,10 @@ export default function SchuelerPage() {
   const [error, setError] = useState('')
   const [results, setResults] = useState(null)
   const [showDetails, setShowDetails] = useState(false)
+  const [tutorByQuestion, setTutorByQuestion] = useState({})
+  const tutorScope = `${student?.id || student?.student_id || ''}:${results?.submissionId || ''}`
+  const tutorRequests = useRequestScope(tutorScope)
+  const tutorReceipts = useMemo(() => createOperationReceipts(), [tutorScope])
   const [deleteConfirm, setDeleteConfirm] = useState(null) // submission id to confirm delete
 
   // Gamification state
@@ -59,10 +82,80 @@ export default function SchuelerPage() {
   const [showHint, setShowHint] = useState(false)
   const [completedExercises, setCompletedExercises] = useState(new Set())
 
+  const updateTutor = (index, patch) => setTutorByQuestion((current) => ({
+    ...current, [index]: { ...(current[index] || {}), ...patch },
+  }))
+
+  const requestTutorHint = async (index, existingSessionId) => {
+    const request = tutorRequests.begin(`hint:${index}`)
+    updateTutor(index, { loading: true, error: '' })
+    try {
+      let sessionId = existingSessionId || tutorByQuestion[index]?.sessionId
+      let currentSession = tutorByQuestion[index]?.session
+      if (!sessionId) {
+        const started = await fetch('/api/v2/learning/tutor/sessions', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ schema_version: 'learning-v2-phase3-v1', submission_id: results.submissionId, question_index: index }),
+        })
+        const body = await started.json()
+        if (!request.current()) return
+        if (!started.ok) throw new Error(body?.error?.message || 'Tutor konnte nicht gestartet werden.')
+        sessionId = body.session.session_id
+        currentSession = body.session
+        updateTutor(index, { sessionId, session: body.session })
+        if (body.session.phase === 'awaiting_reflection' || body.session.reflection?.status === 'submitted') {
+          updateTutor(index, {
+            loading: false,
+            sessionId,
+            session: body.session,
+            retryResult: { correctness: 'correct', outcome: 'correct_after_hint', next_action: body.session.phase === 'awaiting_reflection' ? 'submit_reflection' : 'session_closed' },
+          })
+          return
+        }
+      }
+      const slot = `${sessionId}:hint:${(currentSession?.highest_hint_level || 0) + 1}`
+      const response = await fetch(`/api/v2/learning/tutor/sessions/${sessionId}/hints`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        signal: request.signal,
+        body: JSON.stringify(tutorReceipts.get(slot, { schema_version: 'learning-v2-phase3-v1' })),
+      })
+      const body = await response.json()
+      if (!request.current()) return
+      if (!response.ok) throw new Error(body?.error?.message || 'Hinweis konnte nicht geladen werden.')
+      tutorReceipts.confirmed(slot)
+      updateTutor(index, { loading: false, sessionId, session: body.session, hint: body.hint, selectedResponse: '' })
+    } catch (error) { if (request.current()) updateTutor(index, { loading: false, error: error.message }) }
+  }
+
+  const submitTutorRetry = async (index) => {
+    const tutor = tutorByQuestion[index]
+    if (!tutor?.sessionId || !tutor.selectedResponse) return
+    const request = tutorRequests.begin(`retry:${index}`)
+    const slot = `${tutor.sessionId}:retry:${tutor.session.highest_hint_level}`
+    const operation = tutorReceipts.get(slot, { schema_version: 'learning-v2-phase3-v1', selected_response: tutor.selectedResponse })
+    updateTutor(index, { loading: true, error: '', selectedResponse: operation.selected_response, pendingRetry: true })
+    try {
+      const response = await fetch(`/api/v2/learning/tutor/sessions/${tutor.sessionId}/retries`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        signal: request.signal,
+        body: JSON.stringify(operation),
+      })
+      const body = await response.json()
+      if (!request.current()) return
+      if (!response.ok) throw new Error(body?.error?.message || 'Antwort konnte nicht geprüft werden.')
+      tutorReceipts.confirmed(slot)
+      updateTutor(index, { loading: false, pendingRetry: false, session: body.session, retryResult: body.result })
+    } catch (error) { if (request.current()) updateTutor(index, { loading: false, error: error.message }) }
+  }
+
   useEffect(() => {
     if (!assignment?.assignmentCode || submitted) return
-    localStorage.setItem(`eduflow_assignment_draft_v1:${assignment.assignmentCode}`, JSON.stringify({ answers, currentQuestion, savedAt: new Date().toISOString() }))
-  }, [assignment?.assignmentCode, answers, currentQuestion, submitted])
+    const storage = assignmentDraftStorage(window, studentToken === 'guest')
+    const binding = assignmentDraftBinding({ student, assignment, guest: studentToken === 'guest' })
+    if (!writeAssignmentDraft(storage, binding, { answers, currentQuestion })) return
+    const expiry = setTimeout(() => clearAssignmentDraft(storage, assignment.assignmentCode), STUDENT_ASSIGNMENT_DRAFT_TTL_MS + 100)
+    return () => clearTimeout(expiry)
+  }, [assignment, answers, currentQuestion, student, studentToken, submitted])
 
   useEffect(() => {
     if (view !== 'quiz' || !assignment) return
@@ -74,7 +167,12 @@ export default function SchuelerPage() {
 
   // Restore the HttpOnly cookie session on mount.
   useEffect(() => {
-    localStorage.removeItem('eduflow_student_token')
+    removeLegacyStudentToken()
+    const durableDrafts = assignmentDraftStorage(window, false)
+    const guestDrafts = assignmentDraftStorage(window, true)
+    clearLegacyAssignmentDrafts(durableDrafts, guestDrafts)
+    clearExpiredAssignmentDrafts(durableDrafts)
+    clearExpiredAssignmentDrafts(guestDrafts)
     setStudentToken(SESSION_MARKER)
     fetchStudentProfile(SESSION_MARKER)
   }, [])
@@ -102,6 +200,7 @@ export default function SchuelerPage() {
       const res = await fetch('/api/student/me', { cache: 'no-store' })
       if (res.ok) {
         const data = await res.json()
+        clearForeignAuthenticatedDrafts(assignmentDraftStorage(window, false), String(data.id || data.student_id || ''))
         setStudent(data)
         setStudentName(data.display_name)
         loadMyResults(token)
@@ -136,10 +235,11 @@ export default function SchuelerPage() {
       if (!res.ok) {
         setAuthError(data.error || 'Fehler bei der Anmeldung.')
       } else {
+        clearForeignAuthenticatedDrafts(assignmentDraftStorage(window, false), String(data.student?.id || data.student?.student_id || ''))
         setStudentToken(SESSION_MARKER)
         setStudent(data.student)
         setStudentName(data.student.display_name)
-        localStorage.removeItem('eduflow_student_token')
+        removeLegacyStudentToken()
         loadMyResults(SESSION_MARKER)
         loadGamification(SESSION_MARKER)
         loadMyClasses(SESSION_MARKER)
@@ -157,10 +257,11 @@ export default function SchuelerPage() {
     } catch (e) {
       console.error('Logout error:', e)
     }
+    clearAllAssignmentDrafts(assignmentDraftStorage(window, false), assignmentDraftStorage(window, true))
     setStudentToken(null)
     setStudent(null)
     setMyResults(null)
-    localStorage.removeItem('eduflow_student_token')
+    removeLegacyStudentToken()
     setView('dashboard')
     setAssignment(null)
     setSubmitted(false)
@@ -194,9 +295,11 @@ export default function SchuelerPage() {
           if (!prev) return prev
           const updated = prev.submissions.filter(s => s.id !== submissionId)
           const totalQuizzes = updated.length
-          const avgScore = totalQuizzes > 0 ? Math.round(updated.reduce((sum, s) => sum + (s.score_percentage || 0), 0) / totalQuizzes) : 0
-          const avgGrade = totalQuizzes > 0 ? Math.round(updated.reduce((sum, s) => sum + (s.swiss_grade || 1), 0) / totalQuizzes * 10) / 10 : 0
-          const bestGrade = totalQuizzes > 0 ? Math.max(...updated.map(s => s.swiss_grade || 1)) : 0
+          const scored = updated.filter(s => Number.isFinite(s.score_percentage))
+          const graded = updated.filter(s => Number.isFinite(s.swiss_grade))
+          const avgScore = scored.length ? Math.round(scored.reduce((sum, s) => sum + s.score_percentage, 0) / scored.length) : 0
+          const avgGrade = graded.length ? Math.round(graded.reduce((sum, s) => sum + s.swiss_grade, 0) / graded.length * 10) / 10 : 0
+          const bestGrade = graded.length ? Math.max(...graded.map(s => s.swiss_grade)) : 0
           const totalPoints = updated.reduce((sum, s) => sum + (s.earned_points || 0), 0)
           return { submissions: updated, stats: { totalQuizzes, totalPoints, avgScore, avgGrade, bestGrade } }
         })
@@ -339,11 +442,11 @@ export default function SchuelerPage() {
       }
       const data = await res.json()
       setAssignment(data)
-      try {
-        const draft = JSON.parse(localStorage.getItem(`eduflow_assignment_draft_v1:${resolvedCode}`) || 'null')
-        if (draft?.answers) setAnswers(draft.answers)
-        if (Number.isInteger(draft?.currentQuestion)) setCurrentQuestion(draft.currentQuestion)
-      } catch {}
+      const storage = assignmentDraftStorage(window, studentToken === 'guest')
+      const binding = assignmentDraftBinding({ student, assignment: data, guest: studentToken === 'guest' })
+      const draft = readAssignmentDraft(storage, binding)
+      setAnswers(draft?.answers || {})
+      setCurrentQuestion(draft?.currentQuestion || 0)
       setStartTime(Date.now())
       setElapsedSeconds(0)
       setView('quiz')
@@ -370,6 +473,7 @@ export default function SchuelerPage() {
         studentName: studentName || student?.display_name || 'Unbekannt',
         answers: answersArray,
         duration,
+        ...(assignment?.learningV2SubmissionIntent ? { learningV2SubmissionIntent: assignment.learningV2SubmissionIntent } : {}),
       }
       const res = await fetch('/api/student/submit', {
         method: 'POST',
@@ -390,7 +494,12 @@ export default function SchuelerPage() {
       }
       setResults(data)
       setSubmitted(true)
-      if (assignment?.assignmentCode) localStorage.removeItem(`eduflow_assignment_draft_v1:${assignment.assignmentCode}`)
+      if (assignment?.assignmentCode) {
+        try {
+          const storage = assignmentDraftStorage(window, studentToken === 'guest')
+          clearAssignmentDraft(storage, assignment.assignmentCode)
+        } catch { /* storage can be unavailable */ }
+      }
       // Calculate XP earned for animation
       if (studentToken && studentToken !== 'guest') {
         let xp = 10 + (data.earnedPoints || 0)
@@ -417,6 +526,7 @@ export default function SchuelerPage() {
     setResults(null)
     setCurrentQuestion(0)
     setShowDetails(false)
+    setTutorByQuestion({})
     setView('dashboard')
   }
 
@@ -543,7 +653,7 @@ export default function SchuelerPage() {
     const percentage = results.scorePercentage ?? (results.correctCount ? Math.round((results.correctCount / totalQuestions) * 100) : 0)
     const questionFeedback = results.questionResults || []
     const swissGrade = results.swissGrade ?? null
-    const feedbackPending = Boolean(results.feedbackPending)
+    const feedbackPending = Boolean(results.feedbackPending || results.needsReview)
 
     return (
       <div className="min-h-screen bg-gradient-to-b from-green-50 via-white to-blue-50 p-4">
@@ -684,6 +794,69 @@ export default function SchuelerPage() {
                                 qr.isCorrect === false ? 'text-red-700' : 'text-gray-500'
                               }`}>{qr.feedback}</p>
                             )}
+                            {qr.tutorAvailable && (() => {
+                              const questionIndex = qr.questionIndex ?? idx
+                              const tutor = tutorByQuestion[questionIndex] || {}
+                              const options = questions[questionIndex]?.options || []
+                              const awaitingRetry = tutor.session?.phase === 'awaiting_retry'
+                              const canRequestNext = tutor.retryResult?.correctness === 'incorrect' && tutor.session?.phase === 'awaiting_hint'
+                              return (
+                                <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3">
+                                  <div className="flex items-center gap-2 text-sm font-semibold text-blue-900">
+                                    <Lightbulb className="h-4 w-4" /> Lernhilfe
+                                  </div>
+                                  {!tutor.hint && (
+                                    <button type="button" disabled={tutor.loading} onClick={() => requestTutorHint(questionIndex)}
+                                      className="mt-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
+                                      {tutor.loading ? 'Hinweis wird vorbereitet…' : 'Ersten Hinweis anfordern'}
+                                    </button>
+                                  )}
+                                  {tutor.hint && (
+                                    <div className="mt-2">
+                                      <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">Hinweis {tutor.hint.hint_level} von 3</p>
+                                      <p className="mt-1 text-sm text-blue-950">{tutor.hint.learner_message}</p>
+                                    </div>
+                                  )}
+                                  {awaitingRetry && (
+                                    <div className="mt-3 space-y-2">
+                                      {options.map((option) => (
+                                        <button type="button" key={option} disabled={tutor.loading || tutor.pendingRetry} onClick={() => updateTutor(questionIndex, { selectedResponse: option })}
+                                          className={`block w-full break-words rounded-lg border p-2 text-left text-sm ${tutor.selectedResponse === option ? 'border-blue-500 bg-white font-medium' : 'border-blue-100 bg-blue-50'}`}>
+                                          {option}
+                                        </button>
+                                      ))}
+                                      {tutor.pendingRetry && !tutor.loading && <p className="text-xs">Die Antwort ist noch nicht bestätigt. Erneut prüfen sendet dieselbe Antwort mit derselben Vorgangskennung.</p>}
+                                      <button type="button" disabled={tutor.loading || !tutor.selectedResponse} onClick={() => submitTutorRetry(questionIndex)}
+                                        className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
+                                        {tutor.loading ? 'Wird geprüft…' : 'Antwort prüfen'}
+                                      </button>
+                                    </div>
+                                  )}
+                                  {tutor.retryResult?.correctness === 'correct' && (
+                                    <p className="mt-3 text-sm font-semibold text-green-700">Richtig – du hast die Aufgabe mit Unterstützung gelöst.</p>
+                                  )}
+                                  {tutor.session?.reflection && tutor.session.reflection.status !== 'not_required' && (
+                                    <TutorReflectionCard
+                                      session={tutor.session}
+                                      onSessionChange={(session) => updateTutor(questionIndex, { session })}
+                                    />
+                                  )}
+                                  {canRequestNext && (
+                                    <div className="mt-3">
+                                      <p className="mb-2 text-sm text-amber-800">Noch nicht richtig. Hole dir den nächsten Hinweis.</p>
+                                      <button type="button" disabled={tutor.loading} onClick={() => requestTutorHint(questionIndex, tutor.sessionId)}
+                                        className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
+                                        {tutor.loading ? 'Hinweis wird vorbereitet…' : 'Nächsten Hinweis anfordern'}
+                                      </button>
+                                    </div>
+                                  )}
+                                  {tutor.session?.status === 'escalated' && (
+                                    <p className="mt-3 text-sm font-medium text-amber-800">Hier ist weitere Unterstützung sinnvoll. Die richtige Lösung wird nicht eingeblendet.</p>
+                                  )}
+                                  {tutor.error && <p role="alert" className="mt-2 text-sm text-red-700">{tutor.error}</p>}
+                                </div>
+                              )
+                            })()}
                           </div>
                         </div>
                       </motion.div>
@@ -897,6 +1070,29 @@ export default function SchuelerPage() {
             </div>
           )
 
+        case 'table':
+          return (
+            <div className="space-y-4">
+              <div className="overflow-x-auto rounded-xl border border-gray-200" role="region" aria-label="Aufgabentabelle" tabIndex={0}>
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-blue-50"><tr>{(q.tableHeaders || []).map((header, index) => <th key={index} scope="col" className="border-b p-3">{header}</th>)}</tr></thead>
+                  <tbody>{(q.tableRows || []).map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, columnIndex) => <td key={columnIndex} className="border-b p-3">{cell}</td>)}</tr>)}</tbody>
+                </table>
+              </div>
+              <textarea value={currentAnswer || ''} onChange={event => setAnswers(previous => ({ ...previous, [currentQuestion]: event.target.value }))}
+                aria-label="Antwort zur Tabelle" placeholder="Deine Antwort zur Tabelle..." rows={4}
+                className="w-full rounded-xl border border-gray-200 px-4 py-3 text-base focus:ring-2 focus:ring-blue-400" />
+            </div>
+          )
+
+        case 'image_block':
+          return (
+            <figure className="space-y-3 rounded-xl bg-blue-50 p-4 text-center">
+              {q.imageUrl ? <img src={q.imageUrl} alt={q.question || 'Bild zum Material'} className="mx-auto max-h-80 rounded-xl object-contain" /> : <p>Für diesen Materialhinweis ist noch kein Bild hinterlegt.</p>}
+              <figcaption className="text-sm text-gray-600">Materialhinweis – hier ist keine Antwort erforderlich.</figcaption>
+            </figure>
+          )
+
         case 'image':
           return (
             <div className="space-y-4">
@@ -949,7 +1145,7 @@ export default function SchuelerPage() {
           <AnimatePresence mode="wait">
             <motion.div key={currentQuestion} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.2 }}>
               <div className="mb-6">
-                <span className="text-sm text-blue-600 font-medium">Frage {currentQuestion + 1} von {questions.length}</span>
+                <span className="text-sm text-blue-600 font-medium">{q.type === 'image_block' ? 'Materialhinweis' : 'Frage'} {currentQuestion + 1} von {questions.length}</span>
                 <h2 className="text-xl font-bold text-gray-900 mt-1">{q.question}</h2>
                 {q.points && <span className="text-xs text-gray-400 mt-1 block">{q.points} Punkte</span>}
               </div>
@@ -1275,8 +1471,8 @@ export default function SchuelerPage() {
                       return (
                         <div key={sub.id || i} className="px-6 py-4 hover:bg-gray-50/50 transition-colors">
                           <div className="flex items-center gap-4">
-                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${grade ? gradeBg(grade) : sub.feedback_pending ? 'bg-amber-100' : 'bg-blue-100'}`}>
-                              <span className={`text-sm font-bold ${grade ? gradeColor(grade) : sub.feedback_pending ? 'text-amber-700' : 'text-blue-700'}`}>{grade || (sub.feedback_pending ? '…' : `${sub.score_percentage || 0}%`)}</span>
+                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${grade ? gradeBg(grade) : (sub.feedback_pending || sub.needs_review) ? 'bg-amber-100' : 'bg-blue-100'}`}>
+                              <span className={`text-sm font-bold ${grade ? gradeColor(grade) : (sub.feedback_pending || sub.needs_review) ? 'text-amber-700' : 'text-blue-700'}`}>{grade || ((sub.feedback_pending || sub.needs_review) ? '…' : `${sub.score_percentage || 0}%`)}</span>
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="font-medium text-gray-900 text-sm truncate">{sub.assignment_title}</p>
@@ -1289,9 +1485,9 @@ export default function SchuelerPage() {
                               </div>
                             </div>
                             <div className="text-right flex-shrink-0">
-                              <p className="text-sm font-bold text-gray-600">{sub.feedback_pending ? 'Auswertung folgt' : `${sub.earned_points}/${sub.total_points} P.`}</p>
+                              <p className="text-sm font-bold text-gray-600">{(sub.feedback_pending || sub.needs_review) ? 'Auswertung folgt' : `${sub.earned_points}/${sub.total_points} P.`}</p>
                               <p className={`text-xs font-medium ${sub.score_percentage >= 80 ? 'text-green-600' : sub.score_percentage >= 50 ? 'text-amber-600' : 'text-red-600'}`}>
-                                {sub.score_percentage}%
+                                {Number.isFinite(sub.score_percentage) ? `${sub.score_percentage}%` : 'Prüfung ausstehend'}
                               </p>
                             </div>
                             <div className="flex-shrink-0">

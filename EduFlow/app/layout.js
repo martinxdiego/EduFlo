@@ -1,9 +1,15 @@
 import './globals.css'
+import PublicFooter from '@/components/PublicFooter'
+import { publicSiteOrigin } from '@/lib/public-site'
 import PWARegister from '@/components/PWARegister'
 import { Analytics } from '@vercel/analytics/next'
 import { SpeedInsights } from '@vercel/speed-insights/next'
 
+const origin = publicSiteOrigin()
+const publiclyLaunched = process.env.EDUFLOW_PUBLIC_LAUNCH === 'true' && Boolean(origin)
+
 export const metadata = {
+  ...(origin ? { metadataBase: new URL(origin) } : {}),
   title: 'EduFlow – Editierbare Lernmaterialien für den Lehrplan 21',
   description: 'Aus eigenen Unterlagen werden differenzierte, editierbare Arbeitsblätter und Prüfungen mit Lehrplan-21-Bezug – bereit für PDF und DOCX.',
   applicationName: 'EduFlow',
@@ -16,8 +22,8 @@ export const metadata = {
     description: 'Eigene Unterlagen hochladen, differenzieren, bearbeiten und druckfertig exportieren.',
   },
   robots: {
-    index: true,
-    follow: true,
+    index: publiclyLaunched,
+    follow: publiclyLaunched,
   },
   manifest: '/manifest.webmanifest',
   appleWebApp: {
@@ -51,7 +57,7 @@ export const viewport = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="de">
+    <html lang="de-CH">
       <head>
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -62,9 +68,9 @@ export default function RootLayout({ children }) {
       </head>
       <body className="antialiased overscroll-y-none">
         {children}
+        <PublicFooter />
         <PWARegister />
-        <Analytics />
-        <SpeedInsights />
+        {process.env.EDUFLOW_ANALYTICS_ENABLED === 'true' ? <><Analytics /><SpeedInsights /></> : null}
       </body>
     </html>
   )

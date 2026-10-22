@@ -1,7 +1,7 @@
 // ============================================================
-// LEHRPLAN 21 – Vollständige Kompetenzen (Erweitert)
-// Alle Zyklen, Fachbereiche und Kompetenzbereiche
-// 300+ Kompetenzen, 500+ Sub-Kompetenzen
+// HISTORISCHE PLANUNGSENTWÜRFE – NICHT QUELLENGEPRÜFT
+// Codes und Inhalte sind teilweise fehlerhaft. Offizielle Kompetenzstufen
+// werden separat in verified-curriculum.js mit Quellen gepflegt.
 // ============================================================
 
 export const LEHRPLAN_CYCLES = [

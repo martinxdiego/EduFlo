@@ -7,7 +7,6 @@ import {
   PlusCircle, FileText, ChevronRight, Send, Users, GraduationCap, BookOpen, Sparkles
 } from 'lucide-react'
 import { useEduFlow } from '@/contexts/EduFlowContext'
-import { WelcomeBanner } from '@/components/OnboardingHint'
 import FirstSuccessFlow from '@/components/FirstSuccessFlow'
 
 const staggerContainer = {
@@ -72,11 +71,6 @@ export default function DashboardView({ STARTER_TEMPLATES, handleUseTemplate }) 
 
   return (
     <motion.div key="home" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.4 }} className="max-w-6xl mx-auto">
-      <WelcomeBanner
-        hasMaterial={worksheets.length > 0}
-        onStart={() => { setActiveView('create'); setSelectedWorksheet(null); setShowEditorPanel(false) }}
-      />
-
       {showFirstSuccess ? <FirstSuccessFlow /> : null}
 
       {/* Hero greeting with ambient sparkles */}

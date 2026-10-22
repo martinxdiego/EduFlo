@@ -1,0 +1,34 @@
+// Small source-checked launch subset. Summaries are EduFlow paraphrases, not
+// official wording. Cycle assignments follow the linked 2016 template.
+const natureSource = 'https://v-fe.lehrplan.ch/index.php?code=a%7C6%7C1%7C2%7C0%7C2'
+const weatherSource = 'https://v-fe.lehrplan.ch/index.php?code=a%7C6%7C1%7C4%7C0%7C4'
+const numberSource = 'https://v-fe.lehrplan.ch/index.php?code=a%7C5%7C0%7C1%7C1%7C1'
+const readingSource = 'https://v-fe.lehrplan.ch/index.php?code=a%7C1%7C11%7C2%7C2%7C1'
+const matterSource = 'https://v-fe.lehrplan.ch/index.php?code=a%7C6%7C2%7C2%7C0%7C1'
+
+export const VERIFIED_CURRICULUM = [
+  { code: 'NMG.2.2.a', cycle: 'z1', name: 'Naturgrundlagen erkunden', description: 'An Alltagsbeispielen untersuchen, wie Licht, Wärme und Wasser das Leben von Tieren und Pflanzen beeinflussen.', sourceUrl: natureSource },
+  { code: 'NMG.2.2.b', cycle: 'z1', name: 'Lebensgrundlagen erkennen', description: 'Überlegen und beschreiben, welche natürlichen Grundlagen Lebewesen benötigen.', sourceUrl: natureSource },
+  { code: 'NMG.2.2.f', cycle: 'z2', name: 'Wasserkreislauf und Naturzusammenhänge', description: 'Zusammenhänge zwischen Naturgrundlagen erklären; dazu gehören Verdunstung, Kondensation und der Wasserkreislauf.', sourceUrl: natureSource },
+  { code: 'NMG.4.4.1c', cycle: 'z1', name: 'Wetter beobachten', description: 'Einfache Wettererscheinungen unterscheiden und Beobachtungen festhalten.', sourceUrl: weatherSource },
+  { code: 'NMG.4.4.1d', cycle: 'z2', name: 'Wetter und Jahreszeiten', description: 'Wettermerkmale beschreiben und mit Jahreszeiten und eigenen Erfahrungen verbinden.', sourceUrl: weatherSource },
+  { code: 'NMG.4.4.1e', cycle: 'z2', name: 'Wetter messen', description: 'Wetterelemente untersuchen, Messwerte ordnen und als Diagramme darstellen.', sourceUrl: weatherSource },
+  { code: 'MA.1.A.1.b', cycle: 'z1', subject: 'Mathematik', name: 'Plus, Minus und Gleich', description: 'Die Zeichen für Addition, Subtraktion und Gleichheit mit den passenden Begriffen verbinden.', sourceUrl: numberSource, sourceCheckedAt: '2026-10-21' },
+  { code: 'MA.1.A.1.c', cycle: 'z1', subject: 'Mathematik', name: 'Zahlen und Begriffe bis 100', description: 'Zahlen bis 100 lesen und notieren; Zehner, Einer und grundlegende Zahlbeziehungen benennen.', sourceUrl: numberSource, sourceCheckedAt: '2026-10-21' },
+  { code: 'MA.1.A.1.e', cycle: 'z2', subject: 'Mathematik', name: 'Stellenwerte bis 1000', description: 'Zahlen bis 1000 lesen und schreiben sowie Begriffe der vier Grundoperationen einordnen.', sourceUrl: numberSource, sourceCheckedAt: '2026-10-21' },
+  { code: 'MA.1.A.1.g', cycle: 'z2', subject: 'Mathematik', name: 'Brüche und Prozente benennen', description: 'Bruch- und Dezimalschreibweisen lesen; Zähler, Nenner, Prozent und Rundungsbegriffe zuordnen.', sourceUrl: numberSource, sourceCheckedAt: '2026-10-21' },
+  { code: 'MA.1.A.1.i', cycle: 'z3', subject: 'Mathematik', name: 'Terme und Potenzen benennen', description: 'Algebraische und vorzeichenbezogene Begriffe sowie Wurzelsymbole verwenden; grosse Zahlen lesen und schreiben.', sourceUrl: numberSource, sourceCheckedAt: '2026-10-21' },
+  { code: 'MA.1.A.1.j', cycle: 'z3', subject: 'Mathematik', name: 'Wissenschaftliche Zahlschreibweise', description: 'Zahlen mit positiven Zehnerexponenten und Potenzen rationaler Zahlen mit natürlichen Exponenten darstellen.', sourceUrl: numberSource, sourceCheckedAt: '2026-10-21' },
+  { code: 'D.2.B.1.a', cycle: 'z1', subject: 'Deutsch', name: 'Bildliche Informationen verstehen', description: 'Einfache Bildaufträge und Alltagssymbole deuten; über Informationen aus Medien erzählen.', sourceUrl: readingSource, sourceCheckedAt: '2026-10-21' },
+  { code: 'D.2.B.1.b', cycle: 'z1', subject: 'Deutsch', name: 'Kurze Sachtexte erschliessen', description: 'Kurze Sachaussagen und wichtige Themenwörter mit Bildern oder Unterstützung verstehen.', sourceUrl: readingSource, sourceCheckedAt: '2026-10-21' },
+  { code: 'D.2.B.1.e', cycle: 'z2', subject: 'Deutsch', name: 'Sachtexte vorbereiten und markieren', description: 'Vorwissen und Abbildungen nutzen; mit Unterstützung wichtige Stellen und offene Fragen kennzeichnen.', sourceUrl: readingSource, sourceCheckedAt: '2026-10-21' },
+  { code: 'D.2.B.1.f', cycle: 'z2', subject: 'Deutsch', name: 'Zusammenhänge im Sachtext', description: 'Textaufbau und Informationen erschliessen; Wortbedeutungen mithilfe des Zusammenhangs oder geeigneter Hilfen klären.', sourceUrl: readingSource, sourceCheckedAt: '2026-10-21' },
+  { code: 'D.2.B.1.h', cycle: 'z3', subject: 'Deutsch', name: 'Mehrteilige Sachtexte auswerten', description: 'Informationen aus Texten und Darstellungen verbinden und für den eigenen Wissensaufbau weiterverarbeiten.', sourceUrl: readingSource, sourceCheckedAt: '2026-10-21' },
+  { code: 'D.2.B.1.i', cycle: 'z3', subject: 'Deutsch', name: 'Aussagen und Quellen beurteilen', description: 'Zu Textaussagen begründet Stellung nehmen und die Verlässlichkeit von Internet-Sachtexten hinterfragen.', sourceUrl: readingSource, sourceCheckedAt: '2026-10-21' },
+  { code: 'NT.2.1.1a', cycle: 'z3', subject: 'Natur und Technik', name: 'Stoffeigenschaften bestimmen', description: 'Angeleitete Messungen mit passenden Geräten durchführen, um Eigenschaften von Stoffen zu bestimmen.', sourceUrl: matterSource, sourceCheckedAt: '2026-10-21' },
+  { code: 'NT.2.1.1b', cycle: 'z3', subject: 'Natur und Technik', name: 'Messungen vergleichen', description: 'Versuchsergebnisse gegenüberstellen und die Genauigkeit der verwendeten Messverfahren besprechen.', sourceUrl: matterSource, sourceCheckedAt: '2026-10-21' },
+  { code: 'NT.2.1.1c', cycle: 'z3', subject: 'Natur und Technik', name: 'Stoffuntersuchungen planen', description: 'Eigene Versuche zum Unterscheiden und Gruppieren von Stoffen planen, ausführen und auswerten.', sourceUrl: matterSource, sourceCheckedAt: '2026-10-21' },
+  { code: 'NT.2.1.2a', cycle: 'z3', subject: 'Natur und Technik', name: 'Zustandsänderungen modellieren', description: 'Zustandsformen und ihre Übergänge anhand eines Teilchenmodells darstellen und erklären.', sourceUrl: matterSource, sourceCheckedAt: '2026-10-21' },
+  { code: 'NT.2.1.2b', cycle: 'z3', subject: 'Natur und Technik', name: 'Modellgrenzen untersuchen', description: 'Grenzen einfacher Teilchenmodelle erkennen und Nutzen weiterführender Ladungs- oder Magnetmodelle erläutern.', sourceUrl: matterSource, sourceCheckedAt: '2026-10-21' },
+  { code: 'NT.2.1.2c', cycle: 'z3', subject: 'Natur und Technik', name: 'Modell und Wirklichkeit', description: 'An ausgewählten Beispielen herausarbeiten, wie sich Modellvorstellung und Wirklichkeit unterscheiden.', sourceUrl: matterSource, sourceCheckedAt: '2026-10-21' },
+].map(item => Object.freeze({ subject: 'NMG', sourceCheckedAt: '2026-10-20', ...item, sourceVersion: 'Lehrplanvorlage 29.02.2016', sourceVerified: true }))

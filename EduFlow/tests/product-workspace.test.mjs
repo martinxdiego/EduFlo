@@ -28,3 +28,16 @@ test('library filtering searches question content and respects archive and favou
   assert.equal(filterMaterials(materials, { showArchived: false }).length, 1)
   assert.equal(filterMaterials(materials, { showArchived: true }).length, 2)
 })
+
+
+test('decorative images need no answer, and an absent quality report never claims a passed check', () => {
+  const material = { grade: '5', subject: 'NMG', content: { questions: [
+    { type: 'open', question: 'Erkläre den Wasserkreislauf.', answer: 'Wasser verdunstet.' },
+    { type: 'image_block', question: '', answer: '' },
+  ] } }
+  const unchecked = materialQualityChecklist(material)
+  assert.equal(unchecked.checks.find(check => check.id === 'solutions').passed, true)
+  assert.equal(unchecked.checks.find(check => check.id === 'quality').passed, false)
+  assert.equal(unchecked.ready, false)
+  assert.equal(materialQualityChecklist({ ...material, content: { ...material.content, quality: { score: 95 } } }).ready, true)
+})

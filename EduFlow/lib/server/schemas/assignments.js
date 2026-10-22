@@ -46,4 +46,5 @@ export const studentSubmissionSchema = z.object({
   studentName: z.string().trim().min(1).max(100),
   answers: z.array(z.unknown()).max(200),
   duration: z.number().finite().int().min(0).max(7 * 24 * 60 * 60),
+  learningV2SubmissionIntent: z.string().min(20).max(8_000).optional(),
 }).strict()

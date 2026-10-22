@@ -26,7 +26,7 @@ export function applyCorsHeaders(response, request) {
   }
 
   response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
-  response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+  response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, Idempotency-Key')
   return response
 }
 
@@ -34,7 +34,7 @@ function verifyJwt(token) {
   if (!token || !process.env.JWT_SECRET) return null
 
   try {
-    return jwt.verify(token, process.env.JWT_SECRET)
+    return jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] })
   } catch {
     return null
   }

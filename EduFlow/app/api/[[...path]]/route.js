@@ -1,6 +1,14 @@
+import { saveGeneratedWorksheet, worksheetCompetencyContext } from '@/lib/server/worksheet-generation'
+import { parseJsonBody } from '@/lib/server/validation'
+import { regenerateWorksheetSchema, worksheetGenerationSchema } from '@/lib/server/schemas/worksheet-generation'
+import { withHostingPolicy } from '@/lib/server/hosting-route-policy'
+import { submissionTotals, reviewableSubmission } from '@/lib/server/submission-grading'
+import { submissionResponseBody } from '@/lib/server/student-assignments'
 import { v4 as uuidv4 } from 'uuid'
 import { NextResponse } from 'next/server'
-import OpenAI, { toFile } from 'openai'
+import { toFile } from 'openai'
+import { getOpenAIClient } from '@/lib/server/openai-service'
+import { providerDeniedResponse } from '@/lib/server/provider-denial'
 import mammoth from 'mammoth'
 import pdfParse from 'pdf-parse'
 import { getDatabase } from '@/lib/server/database'
@@ -10,7 +18,12 @@ import {
   publicErrorMessage,
   verifyAuthToken,
 } from '@/lib/server/security'
+import { completeCountedDossier, generationFingerprint, validGenerationRequestKey, worksheetUsage } from '@/lib/server/worksheet-usage'
 import { prepareWorksheetContent } from '@/lib/server/worksheet-quality'
+import {
+  WORKSHEET_QUESTION_IDENTITY_VERSION,
+  reconcileWorksheetQuestionIds,
+} from '@/lib/server/worksheet-question-identity'
 import { completeGeneration, failGeneration, startGeneration } from '@/lib/server/ai-telemetry'
 import { generateOpenAISpeech } from '@/lib/server/openai-service'
 import { validateChatToolCall } from '@/lib/chat-tools'
@@ -28,10 +41,6 @@ async function connectToMongo() {
   return getDatabase()
 }
 
-// OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
 
 // Helper function to handle CORS
 function handleCORS(response) {
@@ -77,6 +86,8 @@ Quality requirements:
 - Every answer must be a concrete, complete model solution. Multiple-choice distractors must be plausible but clearly wrong.
 - Avoid duplicate questions, trick questions and unsupported claims. For source material, never invent facts beyond the source.
 - Align visibly with the requested Lehrplan-21 competency and use Swiss spelling (ss instead of ß).
+- For true_false use exactly the German options ["Wahr", "Falsch"] and one of them as the answer. Never use True/False as labels.
+- For ordering and fill_blank return answer as an ordered array of strings. For matching return an array of {"left": "...", "right": "..."} pairs. For other types use a string answer.
 - Before returning JSON, silently verify question count, solutions, option consistency, point sum and age appropriateness.
 
 Format your response as a JSON object with:
@@ -85,9 +96,9 @@ Format your response as a JSON object with:
   "questions": [
     {
       "number": 1,
-      "type": "multiple_choice" | "true_false" | "open" | "math" | "matching" | "fill_blank" | "ordering" | "either_or",
+      "type": "multiple_choice" | "true_false" | "open" | "math" | "matching" | "fill_blank" | "ordering" | "either_or" | "image" | "table" | "image_block",
       "question": "Question text",
-      "options": ["A", "B", "C", "D"] (for multiple choice only),
+      "options": ["A", "B", "C", "D"] (for choice questions),
       "answer": "Correct answer",
       "points": 1-3
     }
@@ -148,7 +159,7 @@ async function generateJsonContent({ provider, messages, taskType, context, temp
     return parseJsonObject(result.text)
   }
 
-  const completion = await openai.chat.completions.create({
+  const completion = await getOpenAIClient().chat.completions.create({
     model: OPENAI_GENERATION_MODEL,
     messages,
     temperature,
@@ -159,7 +170,7 @@ async function generateJsonContent({ provider, messages, taskType, context, temp
 }
 
 async function ensureWorksheetQuality({ content, provider, messages, taskType, context, questionCount }) {
-  let prepared = prepareWorksheetContent(content, questionCount)
+  let prepared = prepareWorksheetContent(content, questionCount, { subject: context?.subject })
   if (prepared.quality.passed) return prepared
 
   const feedback = [...prepared.quality.errors, ...prepared.quality.warnings].join('\n- ')
@@ -178,7 +189,7 @@ async function ensureWorksheetQuality({ content, provider, messages, taskType, c
     temperature: 0.2,
   })
 
-  prepared = prepareWorksheetContent(repairedContent, questionCount)
+  prepared = prepareWorksheetContent(repairedContent, questionCount, { subject: context?.subject })
   if (!prepared.quality.passed) {
     console.error('Worksheet quality gate rejected AI output:', prepared.quality)
     throw new Error('Der KI-Entwurf hat die Qualitätskontrolle nicht bestanden. Bitte erneut versuchen.')
@@ -186,61 +197,19 @@ async function ensureWorksheetQuality({ content, provider, messages, taskType, c
   return prepared
 }
 
-async function saveGeneratedWorksheet({
-  db,
-  user,
-  content,
-  topic,
-  grade,
-  subject,
-  difficulty,
-  questionCount,
-  resourceType,
-  aiProvider
-}) {
-  const prepared = prepareWorksheetContent(content, questionCount || 10)
-  if (!prepared.quality.passed) {
-    console.error('Refusing to save low-quality worksheet:', prepared.quality)
-    throw new Error('Der KI-Entwurf hat die Qualitätskontrolle nicht bestanden. Bitte erneut versuchen.')
+async function replayGeneratedWorksheet(db, request, userId, body, streaming = false) {
+  const requestKey = request.headers.get('Idempotency-Key')
+  if (!requestKey) return null
+  const saved = await db.collection('worksheets').findOne({ user_id: userId, generation_request_id: requestKey })
+  if (!saved) return null
+  if (saved.generation_fingerprint !== generationFingerprint(body)) {
+    return handleCORS(NextResponse.json({ error: 'Der Generierungsschlüssel gehört zu einer anderen Anfrage.' }, { status: 409 }))
   }
-  const checkedContent = prepared.content
-  const worksheet = {
-    id: uuidv4(),
-    user_id: user.id,
-    title: checkedContent.title,
-    topic,
-    grade,
-    subject,
-    difficulty,
-    resourceType: resourceType || 'worksheet',
-    question_count: questionCount || 10,
-    ai_provider: aiProvider,
-    content: {
-      ...checkedContent,
-      resourceType: resourceType || 'worksheet',
-      quality: {
-        score: prepared.quality.score,
-        warnings: prepared.quality.warnings,
-        checked_at: new Date().toISOString(),
-      },
-    },
-    status: 'review',
-    revision: 1,
-    archived: false,
-    favorite: false,
-    tags: [],
-    folder: '',
-    created_at: new Date(),
-    updated_at: new Date(),
-  }
-
-  await db.collection('worksheets').insertOne(worksheet)
-  await db.collection('users').updateOne(
-    { id: user.id },
-    { $inc: { worksheets_used_this_month: 1 } }
-  )
-
-  return worksheet
+  const { _id, ...worksheet } = saved
+  if (!streaming) return handleCORS(NextResponse.json(worksheet))
+  return handleCORS(new NextResponse(`data: ${JSON.stringify({ type: 'complete', worksheet, progress: 100 })}\n\n`, {
+    headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+  }))
 }
 
 // ============================================================
@@ -487,6 +456,13 @@ async function handleRoute(request, { params }) {
   const { path = [] } = await params
   const route = `/${path.join('/')}`
   const method = request.method
+    if (!validGenerationRequestKey(request.headers.get('Idempotency-Key'))) {
+      return handleCORS(NextResponse.json({ error: 'Ungültiger Generierungsschlüssel.' }, { status: 400 }))
+    }
+  if (['/generate-worksheet', '/generate-worksheet-stream', '/regenerate-worksheet', '/analyze-upload',
+    '/chat', '/chat-add-questions', '/ki-action', '/generate-image', '/analyze-errors', '/analyze-exam-scan',
+    '/tts', '/generate-dossier-stream', '/export/dossier/pdf', '/student/learning-coach'].includes(route)
+    || route === '/dossiers' || route.startsWith('/dossiers/')) return handleCORS(providerDeniedResponse())
   const requestStartedAt = Date.now()
   const requestId = request.headers.get('x-vercel-id') || request.headers.get('x-request-id') || uuidv4()
   logEvent('info', 'api.request.started', { requestId, route, method })
@@ -516,29 +492,24 @@ async function handleRoute(request, { params }) {
       const assignmentMap = new Map(assignments.map((assignment) => [assignment.id, assignment]))
 
       const enriched = submissions.map((sub) => {
-        const { _id, ...clean } = sub
+        const { _id, ...clean } = reviewableSubmission(sub)
         const assignment = assignmentMap.get(clean.assignment_id)
-        const settings = normalizeAssignmentSettings(assignment || clean)
-        const feedbackVisible = assignment ? isAssignmentFeedbackVisible(assignment) : true
+        const feedbackAssignment = assignment || { ...clean, show_solutions: false }
+        const settings = normalizeAssignmentSettings(feedbackAssignment)
+        const feedback = submissionResponseBody(clean, feedbackAssignment, settings)
         clean.assignment_title = assignment?.worksheet_title || 'Unbenannt'
         clean.class_name = assignment?.class_name || ''
         clean.subject = assignment?.subject || ''
         clean.activity_type = settings.activityType
         clean.activity_label = ACTIVITY_MODES[settings.activityType].label
         clean.learning_goals = settings.learningGoals
-        clean.feedback_pending = !feedbackVisible
-        // Calculate Swiss grade
-        if (!clean.swiss_grade && clean.total_points > 0) {
-          clean.swiss_grade = Math.round((clean.earned_points / clean.total_points * 5 + 1) * 2) / 2
-        }
-        if (!feedbackVisible) {
-          clean.earned_points = null
-          clean.score_percentage = null
-          clean.swiss_grade = null
-          clean.question_results = []
-        } else if (!settings.graded) {
-          clean.swiss_grade = null
-        }
+        clean.feedback_pending = feedback.feedbackPending
+        clean.needs_review = feedback.needsReview
+        clean.correct_count = feedback.correctCount
+        clean.earned_points = feedback.earnedPoints
+        clean.score_percentage = feedback.scorePercentage
+        clean.swiss_grade = feedback.swissGrade
+        clean.question_results = feedback.questionResults
         return clean
       })
 
@@ -841,7 +812,7 @@ async function handleRoute(request, { params }) {
             `Thema: "${w.topic}" (${w.subject}, ${w.grade}. Klasse) — ${w.errorRate}% Fehlerquote\nBeispiel-Fehler:\n${w.sampleErrors.map(e => `  Frage: "${e.question}"\n  Schüler-Antwort: "${e.studentAnswer}"\n  Korrekt: "${e.correctAnswer}"`).join('\n')}`
           ).join('\n\n')
 
-          const exerciseRes = await openai.chat.completions.create({
+          const exerciseRes = await getOpenAIClient().chat.completions.create({
             model: 'gpt-4o-mini',
             temperature: 0.7,
             messages: [
@@ -1209,7 +1180,7 @@ Regeln:
     // Generate worksheet - POST /api/generate-worksheet
     if (route === '/generate-worksheet' && method === 'POST') {
       const decoded = await verifyToken(request)
-      if (!decoded) {
+      if (!decoded?.userId || decoded.role === 'student') {
         return handleCORS(NextResponse.json(
           { error: "Unauthorized" },
           { status: 401 }
@@ -1217,16 +1188,22 @@ Regeln:
       }
 
       const user = await db.collection('users').findOne({ id: decoded.userId })
+      if (!user || user.account_deletion) return handleCORS(NextResponse.json({ error: 'Nicht authentifiziert.' }, { status: 401 }))
       
+      const parsed = await parseJsonBody(request, worksheetGenerationSchema, 192 * 1024)
+      if (!parsed.success) return handleCORS(NextResponse.json({ error: parsed.error, fields: parsed.fields }, { status: parsed.status }))
+      const body = parsed.data
+      const replay = await replayGeneratedWorksheet(db, request, decoded.userId, body, false)
+      if (replay) return replay
+
       // Check usage limits
-      if (user.subscription_tier === 'free' && user.worksheets_used_this_month >= 5) {
+      if (worksheetUsage(user).exhausted) {
         return handleCORS(NextResponse.json(
           { error: "Monthly limit reached. Please upgrade to Premium." },
           { status: 403 }
         ))
       }
 
-      const body = await request.json()
       const { topic, grade, subject, difficulty, questionCount, resourceType, sourceText, aiProvider, provider, competencyCode } = body
 
       if (!topic || !grade || !subject || !difficulty) {
@@ -1238,7 +1215,8 @@ Regeln:
 
       const selectedProvider = normalizeAIProvider(aiProvider || provider)
       const systemPrompt = getSystemPrompt(grade, subject, difficulty)
-      const userPrompt = `Create a worksheet with ${questionCount || 10} questions about: ${topic}\n\nMake it engaging and appropriate for ${grade}. Klasse students in Switzerland.`
+      const competency = worksheetCompetencyContext(competencyCode, grade, subject)
+      const userPrompt = `Create a worksheet with ${questionCount || 10} questions about: ${topic}\n\nMake it engaging and appropriate for ${grade}. Klasse students in Switzerland.${competency.instruction}`
 
       const generationMessages = [
         { role: "system", content: systemPrompt },
@@ -1251,7 +1229,7 @@ Regeln:
         difficulty,
         questionCount: questionCount || 10,
         resourceType: resourceType || 'worksheet',
-        competencyCode: competencyCode || null,
+        competencyCode: competency.code,
         sourceText: sourceText || null
       }
       const draftContent = await generateJsonContent({
@@ -1279,7 +1257,10 @@ Regeln:
         difficulty,
         questionCount,
         resourceType,
-        aiProvider: selectedProvider
+        aiProvider: selectedProvider,
+        requestKey: request.headers.get('Idempotency-Key'),
+        requestFingerprint: generationFingerprint(body),
+        competencyCode: competency.code,
       })
 
       return handleCORS(NextResponse.json(worksheet))
@@ -1288,7 +1269,7 @@ Regeln:
     // STREAMING Generate worksheet - POST /api/generate-worksheet-stream
     if (route === '/generate-worksheet-stream' && method === 'POST') {
       const decoded = await verifyToken(request)
-      if (!decoded) {
+      if (!decoded?.userId || decoded.role === 'student') {
         return handleCORS(NextResponse.json(
           { error: "Unauthorized" },
           { status: 401 }
@@ -1296,17 +1277,24 @@ Regeln:
       }
 
       const user = await db.collection('users').findOne({ id: decoded.userId })
+      if (!user || user.account_deletion) return handleCORS(NextResponse.json({ error: 'Nicht authentifiziert.' }, { status: 401 }))
       
+      const parsed = await parseJsonBody(request, worksheetGenerationSchema, 192 * 1024)
+      if (!parsed.success) return handleCORS(NextResponse.json({ error: parsed.error, fields: parsed.fields }, { status: parsed.status }))
+      const body = parsed.data
+      const replay = await replayGeneratedWorksheet(db, request, decoded.userId, body, true)
+      if (replay) return replay
+
       // Check usage limits
-      if (user.subscription_tier === 'free' && user.worksheets_used_this_month >= 5) {
+      if (worksheetUsage(user).exhausted) {
         return handleCORS(NextResponse.json(
           { error: "Monthly limit reached. Please upgrade to Premium." },
           { status: 403 }
         ))
       }
 
-      const body = await request.json()
       const { topic, grade, subject, difficulty, questionCount, questionTypes, resourceType, sourceText, competencyCode, aiProvider, provider } = body
+      const competency = worksheetCompetencyContext(competencyCode, grade, subject)
 
       if (!topic || !grade || !subject || !difficulty) {
         return handleCORS(NextResponse.json(
@@ -1414,9 +1402,7 @@ ${sourceParts.join('\n\n')}
               }
             }
 
-            const competencyInstruction = competencyCode
-              ? `\n\nLehrplan-21-Kompetenz: ${competencyCode}. Richte Aufgaben und Hinweise sichtbar daran aus.`
-              : ''
+            const competencyInstruction = competency.instruction
             const userPrompt = `Erstelle ${materialType} mit ${questionCount || 10} Fragen zum Thema: ${topic}\n\nDas Material ist für die ${grade}. Klasse in der Schweiz. Formuliere die Fragen klar, abwechslungsreich und didaktisch sinnvoll. Die Sprache soll natürlich klingen, nicht wie ein KI-Generator.${questionTypeInstruction}\n\n${pointsInstruction}${competencyInstruction}${sourceInstruction}`
 
             if (selectedProvider === 'gemini') {
@@ -1438,7 +1424,7 @@ ${sourceParts.join('\n\n')}
                 questionCount: questionCount || 10,
                 questionTypes: questionTypes || [],
                 resourceType: resourceType || 'worksheet',
-                competencyCode: competencyCode || null,
+                competencyCode: competency.code,
                 hasSourceText: Boolean(sourceText)
               }
               const draftContent = await generateJsonContent({
@@ -1487,7 +1473,10 @@ ${sourceParts.join('\n\n')}
                 difficulty,
                 questionCount,
                 resourceType,
-                aiProvider: selectedProvider
+                aiProvider: selectedProvider,
+        requestKey: request.headers.get('Idempotency-Key'),
+        requestFingerprint: generationFingerprint(body),
+        competencyCode: competency.code,
               })
 
               await completeGeneration(worksheetGenerationId, {
@@ -1504,7 +1493,7 @@ ${sourceParts.join('\n\n')}
               return
             }
 
-            const stream = await openai.chat.completions.create({
+            const stream = await getOpenAIClient().chat.completions.create({
               model: OPENAI_GENERATION_MODEL,
               messages: [
                 { role: "system", content: systemPrompt },
@@ -1574,7 +1563,7 @@ ${sourceParts.join('\n\n')}
               questionCount: questionCount || 10,
               questionTypes: questionTypes || [],
               resourceType: resourceType || 'worksheet',
-              competencyCode: competencyCode || null,
+              competencyCode: competency.code,
               hasSourceText: Boolean(sourceText)
             }
             const { content: worksheetContent, quality } = await ensureWorksheetQuality({
@@ -1595,7 +1584,10 @@ ${sourceParts.join('\n\n')}
               difficulty,
               questionCount,
               resourceType,
-              aiProvider: selectedProvider
+              aiProvider: selectedProvider,
+        requestKey: request.headers.get('Idempotency-Key'),
+        requestFingerprint: generationFingerprint(body),
+        competencyCode: competency.code,
             })
 
             await completeGeneration(worksheetGenerationId, {
@@ -1716,16 +1708,18 @@ ${sourceParts.join('\n\n')}
       const original = await db.collection('worksheets').findOne({ id: worksheetId, user_id: decoded.userId })
       if (!original) return handleCORS(NextResponse.json({ error: 'Worksheet not found' }, { status: 404 }))
 
-      const { _id, ...source } = original
+      const { _id, generation_request_id, generation_fingerprint, ...source } = original
       const now = new Date()
       const duplicate = {
         ...source,
         id: uuidv4(),
         title: `${source.title || 'Material'} (Kopie)`,
+        content: reconcileWorksheetQuestionIds(source.content),
         status: 'draft',
         archived: false,
         reviewed_at: null,
         revision: 1,
+        question_identity_version: WORKSHEET_QUESTION_IDENTITY_VERSION,
         duplicated_from: worksheetId,
         created_at: now,
         updated_at: now,
@@ -1738,15 +1732,19 @@ ${sourceParts.join('\n\n')}
     // Regenerate worksheet with different difficulty - POST /api/regenerate-worksheet
     if (route === '/regenerate-worksheet' && method === 'POST') {
       const decoded = await verifyToken(request)
-      if (!decoded) {
+      if (!decoded?.userId || decoded.role === 'student') {
         return handleCORS(NextResponse.json(
           { error: "Unauthorized" },
           { status: 401 }
         ))
       }
 
-      const body = await request.json()
+      const parsed = await parseJsonBody(request, regenerateWorksheetSchema, 192 * 1024)
+      if (!parsed.success) return handleCORS(NextResponse.json({ error: parsed.error, fields: parsed.fields }, { status: parsed.status }))
+      const body = parsed.data
       const { worksheetId, newDifficulty } = body
+      const replay = await replayGeneratedWorksheet(db, request, decoded.userId, body)
+      if (replay) return replay
 
       // Get original worksheet
       const original = await db.collection('worksheets').findOne({ 
@@ -1761,9 +1759,14 @@ ${sourceParts.join('\n\n')}
         ))
       }
 
+      const user = await db.collection('users').findOne({ id: decoded.userId })
+      if (!user || user.account_deletion) return handleCORS(NextResponse.json({ error: 'Nicht authentifiziert.' }, { status: 401 }))
+      if (!user || worksheetUsage(user).exhausted) return handleCORS(NextResponse.json({ error: 'Ihr Monatskontingent ist aufgebraucht.' }, { status: 403 }))
+
       // Generate new version
       const systemPrompt = getSystemPrompt(original.grade, original.subject, newDifficulty)
-      const userPrompt = `Create a worksheet with ${original.question_count} questions about: ${original.topic}\n\nMake it engaging and appropriate for ${original.grade}. Klasse students in Switzerland.`
+      const competency = worksheetCompetencyContext(original.competency_code, original.grade, original.subject)
+      const userPrompt = `Create a worksheet with ${original.question_count} questions about: ${original.topic}\n\nMake it engaging and appropriate for ${original.grade}. Klasse students in Switzerland.${competency.instruction}`
 
       const generationMessages = [
         { role: "system", content: systemPrompt },
@@ -1776,6 +1779,7 @@ ${sourceParts.join('\n\n')}
         difficulty: newDifficulty,
         questionCount: original.question_count,
         resourceType: original.resourceType || 'worksheet',
+        competencyCode: competency.code,
       }
       const draftContent = await generateJsonContent({
         provider: 'openai',
@@ -1783,7 +1787,7 @@ ${sourceParts.join('\n\n')}
         taskType: getGenerationTaskType(original.resourceType, null),
         context: generationContext,
       })
-      const { content: worksheetContent, quality } = await ensureWorksheetQuality({
+      const { content: worksheetContent } = await ensureWorksheetQuality({
         content: draftContent,
         provider: 'openai',
         messages: generationMessages,
@@ -1793,37 +1797,23 @@ ${sourceParts.join('\n\n')}
       })
 
       // Save new worksheet
-      const worksheet = {
-        id: uuidv4(),
-        user_id: decoded.userId,
-        title: worksheetContent.title,
+      const saved = await saveGeneratedWorksheet({
+        db,
+        user,
+        content: worksheetContent,
         topic: original.topic,
         grade: original.grade,
         subject: original.subject,
         difficulty: newDifficulty,
-        question_count: original.question_count,
-        content: {
-          ...worksheetContent,
-          quality: {
-            score: quality.score,
-            warnings: quality.warnings,
-            checked_at: new Date().toISOString(),
-          },
-        },
-        status: 'review',
-        revision: 1,
-        archived: false,
-        favorite: false,
-        tags: [],
-        folder: '',
-        created_at: new Date(),
-        updated_at: new Date(),
-        regenerated_from: worksheetId
-      }
-
-      await db.collection('worksheets').insertOne(worksheet)
-
-      return handleCORS(NextResponse.json(worksheet))
+        questionCount: original.question_count,
+        resourceType: original.resourceType || 'worksheet',
+        aiProvider: 'openai',
+        competencyCode: competency.code,
+        regeneratedFrom: worksheetId,
+        requestKey: request.headers.get('Idempotency-Key'),
+        requestFingerprint: generationFingerprint(body),
+      })
+      return handleCORS(NextResponse.json(saved))
     }
 
     // ========== SUBSCRIPTION MANAGEMENT ==========
@@ -1961,11 +1951,11 @@ Antworte als JSON:
         if (useVision && extension === 'pdf') {
           let uploadedFile
           try {
-            uploadedFile = await openai.files.create({
+            uploadedFile = await getOpenAIClient().files.create({
               file: await toFile(buffer, fileName, { type: fileType || 'application/pdf' }),
               purpose: 'user_data',
             })
-            const response = await openai.responses.create({
+            const response = await getOpenAIClient().responses.create({
               model: analysisModel,
               input: [{
                 role: 'user',
@@ -1979,10 +1969,10 @@ Antworte als JSON:
             aiAnalysis = JSON.parse(response.output_text)
             analysisUsage = response.usage || {}
           } finally {
-            if (uploadedFile?.id) await openai.files.delete(uploadedFile.id).catch(() => {})
+            if (uploadedFile?.id) await getOpenAIClient().files.delete(uploadedFile.id).catch(() => {})
           }
         } else {
-          const completion = await openai.chat.completions.create({
+          const completion = await getOpenAIClient().chat.completions.create({
             model: analysisModel,
             messages,
             temperature: 0.35,
@@ -2200,7 +2190,7 @@ WICHTIGE REGELN:
       try {
         const chatModel = process.env.OPENAI_CHAT_MODEL || 'gpt-4o'
         chatGenerationId = await startGeneration({ userId: decoded.userId, feature: 'chat', model: chatModel, prompt: message, metadata: { hasWorksheet: Boolean(worksheetContext) } })
-        const stream = await openai.chat.completions.create({
+        const stream = await getOpenAIClient().chat.completions.create({
           model: chatModel,
           messages,
           tools: worksheetContext ? chatTools : [chatTools[3]], // Only navigation tool if no worksheet
@@ -2318,7 +2308,7 @@ Jede Frage hat diese Struktur:
 ${existingQuestions.length > 0 ? `\nBereits vorhandene Fragen (NICHT wiederholen):\n${existingQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n')}` : ''}`
 
       try {
-        const completion = await openai.chat.completions.create({
+        const completion = await getOpenAIClient().chat.completions.create({
           model: 'gpt-4o',
           messages: [
             { role: 'system', content: systemMsg },
@@ -2394,7 +2384,7 @@ ${worksheetContext ? `Kontext: ${worksheetContext.subject}, ${worksheetContext.g
 Aktion: ${actionPrompt}`
 
       try {
-        const completion = await openai.chat.completions.create({
+        const completion = await getOpenAIClient().chat.completions.create({
           model: 'gpt-4o-mini',
           messages: [
             { role: 'system', content: systemMsg },
@@ -2427,15 +2417,24 @@ Aktion: ${actionPrompt}`
       const { content, title } = body
 
       const updateFields = {}
+      let currentWorksheet = null
       if (content) {
-        updateFields.content = content
+        currentWorksheet = await db.collection('worksheets').findOne(
+          { id: worksheetId, user_id: decoded.userId },
+          { projection: { content: 1, revision: 1, status: 1, folder: 1, tags: 1, favorite: 1, archived: 1, reviewed_at: 1 } },
+        )
+        if (!currentWorksheet) {
+          return handleCORS(NextResponse.json({ error: 'Worksheet not found' }, { status: 404 }))
+        }
+        updateFields.content = reconcileWorksheetQuestionIds(content, currentWorksheet.content)
+        updateFields.question_identity_version = WORKSHEET_QUESTION_IDENTITY_VERSION
         updateFields.status = 'review'
         updateFields.reviewed_at = null
       }
       if (title) updateFields.title = title
       const metadataKeys = ['status', 'folder', 'tags', 'favorite', 'archived', 'reviewed_at']
       if (metadataKeys.some(key => Object.prototype.hasOwnProperty.call(body, key))) {
-        const currentMetadata = await db.collection('worksheets').findOne(
+        const currentMetadata = currentWorksheet || await db.collection('worksheets').findOne(
           { id: worksheetId, user_id: decoded.userId },
           { projection: { status: 1, folder: 1, tags: 1, favorite: 1, archived: 1, reviewed_at: 1 } },
         )
@@ -2502,7 +2501,7 @@ Aktion: ${actionPrompt}`
           metadata: { style, size },
         })
         imageGenerationId = generationId
-        const response = await openai.images.generate({
+        const response = await getOpenAIClient().images.generate({
           model: imageModel,
           prompt: enhancedPrompt,
           n: 1,
@@ -2600,7 +2599,7 @@ Bitte gib:
 2. Identifizierte Lernlücken und Fehlermuster
 3. Konkrete Förderhinweise
 4. Vorschläge für Wiederholungsübungen`
-        const aiRes = await openai.chat.completions.create({
+        const aiRes = await getOpenAIClient().chat.completions.create({
           model: 'gpt-4o-mini',
           messages: [{ role: 'user', content: analysisPrompt }],
           max_tokens: 1000
@@ -2642,7 +2641,7 @@ Bitte gib:
             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}` } }
           ]
         }]
-        const response = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages, max_tokens: 2000 })
+        const response = await getOpenAIClient().chat.completions.create({ model: 'gpt-4o-mini', messages, max_tokens: 2000 })
         const content = response.choices[0]?.message?.content || '{}'
         let parsed
         try {
@@ -2686,14 +2685,22 @@ Bitte gib:
     // Generate dossier (streaming) - POST /api/generate-dossier-stream
     if (route === '/generate-dossier-stream' && method === 'POST') {
       const decoded = await verifyToken(request)
-      if (!decoded) return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+      if (!decoded?.userId || decoded.role === 'student') return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
 
+      const body = await request.json()
       const user = await db.collection('users').findOne({ id: decoded.userId })
-      if (user.subscription_tier === 'free' && user.worksheets_used_this_month >= 5) {
+      if (!user || user.account_deletion) return handleCORS(NextResponse.json({ error: 'Nicht authentifiziert.' }, { status: 401 }))
+      if (body.resumeDossierId) {
+        const completed = await db.collection('dossiers').findOne({ id: body.resumeDossierId, user_id: decoded.userId, generation_status: 'complete' })
+        if (completed) {
+          const { _id, ...dossier } = completed
+          return handleCORS(new NextResponse(`data: ${JSON.stringify({ type: 'dossier_complete', dossier, progress: 100 })}\n\n`, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' } }))
+        }
+      }
+      if (worksheetUsage(user).exhausted) {
         return handleCORS(NextResponse.json({ error: "Monatliches Limit erreicht. Bitte auf Premium upgraden." }, { status: 403 }))
       }
 
-      const body = await request.json()
       const { topic, grade, subject, difficulty, theme, competency_codes, sourceText, resumeDossierId } = body
 
       if (!topic || !grade || !subject) {
@@ -2809,7 +2816,7 @@ WICHTIG:
 
             let outline = existingCheckpoint?.outline
             if (!outline) try {
-              const planningResponse = await openai.chat.completions.create({
+              const planningResponse = await getOpenAIClient().chat.completions.create({
                 model: dossierModel,
                 messages: [
                   { role: 'system', content: planningPrompt },
@@ -2939,7 +2946,7 @@ WICHTIG:
 
               let sectionContent
               try {
-                const sectionResponse = await openai.chat.completions.create({
+                const sectionResponse = await getOpenAIClient().chat.completions.create({
                   model: dossierModel,
                   messages: [
                     { role: 'system', content: sectionPrompt },
@@ -2955,7 +2962,7 @@ WICHTIG:
                   const exerciseRequirement = sectionType === 'exercises'
                     ? ' Die korrigierte Sektion muss mindestens vier vollständige question-Blöcke mit answer enthalten.'
                     : ''
-                  const repairResponse = await openai.chat.completions.create({
+                  const repairResponse = await getOpenAIClient().chat.completions.create({
                     model: dossierModel,
                     messages: [
                       { role: 'system', content: sectionPrompt },
@@ -2970,7 +2977,7 @@ WICHTIG:
                   prepared = prepareDossierSection(sectionContent, { sectionType, grade })
                 }
                 if (sectionType === 'exercises' && !prepared.quality.passed) {
-                  const exerciseResponse = await openai.chat.completions.create({
+                  const exerciseResponse = await getOpenAIClient().chat.completions.create({
                     model: dossierModel,
                     messages: [
                       {
@@ -3097,11 +3104,7 @@ WICHTIG:
               updated_at: now
             }
 
-            await db.collection('dossiers').updateOne(
-              { id: dossierId, user_id: decoded.userId },
-              { $set: { ...dossier, completed_at: now } },
-            )
-            await db.collection('users').updateOne({ id: decoded.userId }, { $inc: { worksheets_used_this_month: 1 } })
+            await completeCountedDossier(db, dossier, now)
             await completeGeneration(dossierGenerationId, {
               result: { dossierId, title: dossierTitle }, usage: dossierUsage, model: dossierModel,
               quality: dossierQuality, metadata: { sections: generatedSections.length },
@@ -3116,7 +3119,7 @@ WICHTIG:
             console.error('Dossier streaming error:', error)
             if (dossierGenerationId) await failGeneration(dossierGenerationId, error, { dossierId })
             await db.collection('dossiers').updateOne(
-              { id: dossierId, user_id: decoded.userId },
+              { id: dossierId, user_id: decoded.userId, generation_status: { $ne: 'complete' } },
               { $set: { generation_status: 'failed', last_error: String(error.message || error).slice(0, 500), updated_at: new Date() } },
             ).catch(() => {})
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: publicErrorMessage(error, 'Dossier-Generierung wurde unterbrochen.'), dossierId, recoverable: true })}\n\n`))
@@ -3515,8 +3518,8 @@ WICHTIG:
 }
 
 // Export all HTTP methods
-export const GET = handleRoute
-export const POST = handleRoute
-export const PUT = handleRoute
-export const DELETE = handleRoute
-export const PATCH = handleRoute
+export const GET = withHostingPolicy(handleRoute)
+export const POST = withHostingPolicy(handleRoute)
+export const PUT = withHostingPolicy(handleRoute)
+export const DELETE = withHostingPolicy(handleRoute)
+export const PATCH = withHostingPolicy(handleRoute)

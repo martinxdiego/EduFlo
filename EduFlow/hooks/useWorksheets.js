@@ -1,9 +1,20 @@
 'use client'
+import { normalizeWorksheet } from '@/lib/worksheet-answers'
 import { useState, useCallback } from 'react'
 
 export function useWorksheets(token) {
-  const [worksheets, setWorksheets] = useState([])
-  const [selectedWorksheet, setSelectedWorksheet] = useState(null)
+  const [worksheets, setWorksheetsState] = useState([])
+  const [selectedWorksheet, setSelectedWorksheetState] = useState(null)
+  const setWorksheets = useCallback(update => {
+    setWorksheetsState(previous => {
+      const next = typeof update === 'function' ? update(previous) : update
+      return (Array.isArray(next) ? next : []).map(item => normalizeWorksheet(item)).filter(Boolean)
+    })
+  }, [])
+  const setSelectedWorksheet = useCallback(update => {
+    setSelectedWorksheetState(previous => normalizeWorksheet(typeof update === 'function' ? update(previous) : update))
+  }, [])
+
   const [showEditorPanel, setShowEditorPanel] = useState(false)
 
   const fetchWorksheets = useCallback(async (authToken) => {
