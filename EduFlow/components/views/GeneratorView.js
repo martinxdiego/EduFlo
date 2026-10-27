@@ -186,13 +186,17 @@ export default function GeneratorView({ handleExportPDF, handleExportDOCX, handl
       const updated = { ...selectedWorksheet, content: updatedContent, status: 'draft', reviewed_at: null, revision: (selectedWorksheet.revision || 1) + 1 }
 
       try {
-        await fetch(`/api/worksheets/${selectedWorksheet.id}`, {
+        const res = await fetch(`/api/worksheets/${selectedWorksheet.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
           body: JSON.stringify({ content: updatedContent, status: 'draft' })
         })
+        if (!res.ok) throw new Error('Save failed')
       } catch (err) {
         console.error('Draft save error:', err)
+        setError('Speichern fehlgeschlagen. Bitte versuchen Sie es erneut.')
+        setSaveStatus('unsaved')
+        return
       }
 
       setSelectedWorksheet(updated)
