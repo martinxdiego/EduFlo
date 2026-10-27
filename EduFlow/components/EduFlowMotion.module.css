@@ -1,0 +1,327 @@
+.mark {
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 13px;
+  background: linear-gradient(145deg,#4087ff 0%,#2762e9 48%,#4b49d9 100%);
+  color: #fff;
+  box-shadow: inset 0 1px 1px #ffffff70,0 5px 12px #2959d522
+}
+.mark svg {
+  width: 100%;
+  height: 100%
+}
+.motionControl {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid #dce2ed;
+  border-radius: 999px;
+  background: #ffffff90;
+  color: #505b70;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background .2s,color .2s,border-color .2s
+}
+.motionControl:hover {
+  background: #fff;
+  color: #1d4ed8;
+  border-color: #b5c7ee
+}
+.motionControl:focus-visible {
+  outline: 3px solid #407cff;
+  outline-offset: 4px
+}
+.motionControl:disabled {
+  cursor: default;
+  opacity: .75
+}
+.motionControl svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor
+}
+.loadingScreen {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: #f6f8fd;
+  color: #151d36;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-family: Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif
+}
+.loadingAmbient {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 38%,#dbe9ff 0%,#edf0ff 30%,transparent 65%);
+  pointer-events: none
+}
+.loadingBrand {
+  position: absolute;
+  left: clamp(24px,5vw,80px);
+  top: clamp(24px,4vw,52px);
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  font-weight: 700;
+  font-size: 19px;
+  letter-spacing: -.6px
+}
+.loadingBrand .mark {
+  height: 35px;
+  width: 35px;
+  border-radius: 11px
+}
+.loadingCenter {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 620px;
+  padding: 24px;
+  text-align: center;
+  transform: translateY(-12px)
+}
+.loadingSculpture {
+  height: 235px;
+  width: 280px;
+  position: relative;
+  margin: 0 auto 32px;
+  perspective: 700px
+}
+.sculptureHalo {
+  position: absolute;
+  inset: 0;
+  border: 1px solid #95acdf40;
+  border-radius: 50%;
+  transform: rotateX(60deg) translateY(100px);
+  background: radial-gradient(ellipse,#a7c6ff33,transparent 68%)
+}
+.sculpturePage {
+  position: absolute;
+  width: 135px;
+  height: 172px;
+  left: 76px;
+  top: 20px;
+  border-radius: 14px;
+  border: 1px solid #fff;
+  box-shadow: 0 16px 40px #365ca822;
+  transform-origin: 50% 85%
+}
+.sculptureBack {
+  transform: translate(28px,-8px) rotate(18deg);
+  background: linear-gradient(160deg,#97bdfc,#a4a9fb);
+  opacity: .6
+}
+.sculptureMiddle {
+  transform: translate(-25px,4px) rotate(-17deg);
+  background: linear-gradient(160deg,#d9e9ff,#c5d2ff)
+}
+.sculptureFront {
+  transform: rotate(-3deg);
+  background: linear-gradient(140deg,#fff,#f4f7ff);
+  padding: 22px;
+  text-align: left
+}
+.sculptureFront .mark {
+  width: 31px;
+  height: 31px;
+  border-radius: 10px;
+  margin-bottom: 24px
+}
+.sculptureLine {
+  display: block;
+  height: 4px;
+  background: #d8e1f2;
+  border-radius: 3px;
+  margin: 8px 0;
+  width: 100%
+}
+.sculptureLine:nth-last-child(2) {
+  width: 80%
+}
+.sculptureLine:last-child {
+  width: 60%
+}
+.sculptureDot {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  right: 12px;
+  top: 30px;
+  background: linear-gradient(140deg,#b1d1ff,#4f7ff3);
+  border-radius: 50%;
+  box-shadow: inset 0 1px 1px #fff,0 4px 14px #5585ed44
+}
+.loadingEyebrow {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .22em;
+  color: #647599;
+  margin-bottom: 14px
+}
+.loadingCenter h1 {
+  font-size: clamp(36px,6vw,56px);
+  font-weight: 600;
+  line-height: 1.06;
+  letter-spacing: -.055em;
+  margin: 0
+}
+.loadingStatus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin-top: 22px;
+  min-height: 24px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #67738d
+}
+.statusPulse {
+  height: 6px;
+  width: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #5689f2;
+  box-shadow: 0 0 0 4px #4a82f010
+}
+.loadingBottom {
+  position: absolute;
+  bottom: max(24px,env(safe-area-inset-bottom));
+  left: clamp(24px,5vw,80px);
+  right: clamp(24px,5vw,80px);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  font-size: 11px;
+  color: #72809b
+}
+.loadingScreen[data-motion='on'] .sculptureFront {
+  animation: flow-front 5s ease-in-out infinite
+}
+.loadingScreen[data-motion='on'] .sculptureMiddle {
+  animation: flow-middle 5s ease-in-out infinite
+}
+.loadingScreen[data-motion='on'] .sculptureBack {
+  animation: flow-back 5s ease-in-out infinite
+}
+.loadingScreen[data-motion='on'] .sculptureDot {
+  animation: flow-dot 6s ease-in-out infinite
+}
+.loadingScreen[data-motion='on'] .statusPulse {
+  animation: flow-pulse 2s ease-in-out infinite
+}
+.loadingScreen[data-motion='off'] * {
+  animation-play-state: paused!important
+}
+.compact {
+  position: relative;
+  min-height: 440px
+}
+.compact .loadingBrand {
+  display: none
+}
+.compact .loadingBottom {
+  bottom: 16px
+}
+.compact .loadingSculpture {
+  transform: scale(.8);
+  margin-bottom: 0;
+  height: 190px
+}
+.compact .loadingCenter {
+  padding: 52px 20px 76px
+}
+@keyframes flow-front {
+  0%,100% {
+    transform: translateY(0) rotate(-3deg)
+  }
+  50% {
+    transform: translateY(-10px) rotate(1deg)
+  }
+}
+@keyframes flow-middle {
+  0%,100% {
+    transform: translate(-25px,4px) rotate(-17deg)
+  }
+  50% {
+    transform: translate(-34px,-2px) rotate(-23deg)
+  }
+}
+@keyframes flow-back {
+  0%,100% {
+    transform: translate(28px,-8px) rotate(18deg)
+  }
+  50% {
+    transform: translate(34px,-15px) rotate(24deg)
+  }
+}
+@keyframes flow-dot {
+  0%,100% {
+    transform: translate(0,0)
+  }
+  50% {
+    transform: translate(-5px,22px)
+  }
+}
+@keyframes flow-pulse {
+  0%,100% {
+    opacity: .4
+  }
+  50% {
+    opacity: 1
+  }
+}
+@media(max-width:600px) {
+  .loadingBottom {
+    justify-content: center;
+    flex-direction: column;
+    gap: 9px
+  }
+  .loadingBottom>span {
+    display: none
+  }
+  .loadingSculpture {
+    transform: scale(.86);
+    margin-bottom: 4px
+  }
+  .loadingCenter {
+    transform: translateY(-18px)
+  }
+  .motionControl span {
+    display: none
+  }
+  .motionControl {
+    width: 44px;
+    padding: 8px
+  }
+  .loadingBottom .motionControl {
+    width: auto;
+    padding: 8px 12px
+  }
+  .loadingBottom .motionControl span {
+    display: inline
+  }
+}
+@media(prefers-reduced-motion:reduce) {
+  .loadingScreen * {
+    animation: none!important;
+    transition: none!important
+  }
+  .motionControl {
+    transition: none
+  }
+}
