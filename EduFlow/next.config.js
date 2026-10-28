@@ -38,6 +38,11 @@ const nextConfig = {
     maxInactiveAge: 10000,
     pagesBufferLength: 2,
   },
+  async rewrites() {
+    return process.env.NEXT_PUBLIC_EDUFLOW_DEMO === 'true'
+      ? { beforeFiles: [{ source: '/api/:path*', destination: '/demo-api-unavailable' }] }
+      : [];
+  },
   async headers() {
     // React Refresh relies on eval in webpack development builds. Keep the
     // production policy strict, but do not let the dev CSP disable hydration
