@@ -7,7 +7,7 @@ import test from 'node:test'
 import { generateDomainId } from '../lib/server/learning-v2/contracts/ids.js'
 import {
   PHASE_3_SCHEMA_VERSION, TUTOR_ACTION_BY_LEVEL, TUTOR_EVIDENCE_WEIGHTS, TUTOR_MODEL,
-  TUTOR_PROVIDER_SCHEMA_VERSION, tutorHintRequestSchema, tutorPolicyRequestSchema,
+  TUTOR_PROVIDER_SCHEMA_VERSION, tutorHintRequestSchema, tutorPolicyRequestSchema, tutorSessionDocumentSchema,
 } from '../lib/server/learning-v2/contracts/phase3.js'
 import { learningV2IndexSpecifications } from '../lib/server/learning-v2/database/bootstrap.js'
 import { isLearningV2Phase3DevelopmentEnabled } from '../lib/server/learning-v2/feature-flags/learning-v2.js'
@@ -62,11 +62,29 @@ test('activity modes and restrictions resolve exactly to the three frozen preset
   assert.equal(tutorPolicyRequestSchema.safeParse({ schema_version: PHASE_3_SCHEMA_VERSION, preset: 'HINTS_ONLY' }).success, false)
 })
 
-test('strict request contracts reject client authority and oversized retry tokens', () => {
+test('strict request and session contracts reject authority and preserve bounded opaque receipts', async () => {
   const base = { schema_version: PHASE_3_SCHEMA_VERSION, idempotency_key: 'request-key-123' }
   assert.equal(tutorHintRequestSchema.safeParse(base).success, true)
   assert.equal(tutorHintRequestSchema.safeParse({ ...base, hint_level: 3 }).success, false)
   assert.equal(tutorHintRequestSchema.safeParse({ ...base, student_id: studentId }).success, false)
+  const h = harness()
+  const session = await h.service.start(actor, { schema_version: PHASE_3_SCHEMA_VERSION, submission_id: 'submission-phase3', question_index: 0 })
+  const stored = structuredClone(h.sessions.get(session.session_id))
+  const receipt = { accepted: false, score: 0, text: '', empty: null, nested: { ratio: 0.45 }, values: [false, 0, null] }
+  const document = { ...stored, last_hint: receipt, last_retry: receipt,
+    hint_receipts: [receipt], retry_receipts: [receipt], completion_receipt: receipt }
+  assert.deepEqual(tutorSessionDocumentSchema.parse(document), document)
+  for (const field of ['last_hint', 'last_retry', 'completion_receipt']) {
+    assert.equal(tutorSessionDocumentSchema.safeParse({ ...document, [field]: false }).success, false)
+  }
+  for (const field of ['hint_receipts', 'retry_receipts']) {
+    assert.equal(tutorSessionDocumentSchema.safeParse({ ...document, [field]: [false] }).success, false)
+    assert.equal(tutorSessionDocumentSchema.safeParse({ ...document, [field]: Array(4).fill(receipt) }).success, false)
+  }
+  const withoutOptional = tutorSessionDocumentSchema.parse(stored)
+  assert.equal(Object.hasOwn(withoutOptional, 'completion_receipt'), false)
+  assert.equal(withoutOptional.last_hint, null)
+  assert.equal(withoutOptional.last_retry, null)
 })
 
 test('immutable local registry implements only the three-level ladder and passes the same validator', () => {

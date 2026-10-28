@@ -17,7 +17,7 @@ import { DETERMINISTIC_GRADER_VERSION, GRADING_REVISION } from '../lib/server/le
 import { phase5Fixture } from './helpers/phase5-fixture.mjs'
 import { multipleChoiceEligibility } from '../lib/server/learning-v2/assignments/assignment-binding-service.js'
 import { AttemptService } from '../lib/server/learning-v2/attempts/attempt-service.js'
-import { bindAssignmentRequestSchema, PHASE_2_COEFFICIENTS } from '../lib/server/learning-v2/contracts/phase2.js'
+import { bindAssignmentRequestSchema, PHASE_2_COEFFICIENTS, learningEventDocumentSchema, explanationDocumentSchema } from '../lib/server/learning-v2/contracts/phase2.js'
 import { generateDomainId } from '../lib/server/learning-v2/contracts/ids.js'
 import { learningV2IndexSpecifications } from '../lib/server/learning-v2/database/bootstrap.js'
 import { correctnessEvidenceForAttempt } from '../lib/server/learning-v2/evidence/evidence-rules.js'
@@ -151,7 +151,7 @@ test('Phase 2 multiple-choice eligibility is deliberately exact and narrow', () 
   assert.equal(multipleChoiceEligibility({ type: 'multiple_choice', options: ['A', 'B', 'C'], answer: 'b' }).eligible, false)
 })
 
-test('assignment binding accepts exact task versions and rejects authority injection', () => {
+test('Phase 2 contracts preserve exact pins and opaque evidence without authority injection', () => {
   const valid = {
     schema_version: 'learning-v2-phase2-v1',
     task_pins: [{ question_id: generateDomainId('wqi'), task_id: generateDomainId('tsk'), task_version: 3 }],
@@ -159,6 +159,32 @@ test('assignment binding accepts exact task versions and rejects authority injec
   assert.equal(bindAssignmentRequestSchema.safeParse(valid).success, true)
   assert.equal(bindAssignmentRequestSchema.safeParse({ ...valid, tenant_id: tenantId }).success, false)
   assert.equal(bindAssignmentRequestSchema.safeParse({ ...valid, task_pins: [{ ...valid.task_pins[0], content_hash: 'client-value' }] }).success, false)
+
+  // Audit payloads and explanation records retain authored JSON, including falsy values.
+  const opaque = { '': false, score: 0, text: '', absent: null, nested: { weight: 0.6 }, list: [false, 0, null] }
+  const event = {
+    event_id: generateDomainId('evt'), event_schema_version: 'learning-event-v1', tenant_id: tenantId,
+    aggregate: { type: 'evidence', id: 'evidence-audit' }, type: 'EVIDENCE_RECORDED',
+    occurred_at: now, recorded_at: now, actor: { kind: 'system', id: 'learning-v2' },
+    correlation_id: 'correlation-audit', causation_id: null, payload: opaque, idempotency_key: 'event-audit',
+  }
+  assert.deepEqual(learningEventDocumentSchema.parse(event).payload, opaque)
+  for (const payload of [undefined, null, [], false, 0]) {
+    assert.equal(learningEventDocumentSchema.safeParse({ ...event, payload }).success, false)
+  }
+  const explanation = {
+    schema_version: 'knowledge-state-explanation-v1', student_id: studentId, competency_id: competencyRef.competency_id,
+    computed: { mastery: 0, confidence: 0.54, band: 'developing', qualifier: 'development' }, secure: false,
+    confidence_meaning: 'certainty_about_the_estimate_not_performance',
+    evidence_summary: { active: 0, positive: 0, negative: 0, weighted_volume: 0, distinct_tasks: 0, distinct_modalities: 0, distinct_producers: 0 },
+    contributing_evidence: [opaque], contextual_evidence: [opaque], excluded_evidence: [opaque],
+    limitations: [], reason_codes: [], confidence_caps: [{ code: 'cap', value: 0.4 }], projection: opaque,
+  }
+  assert.deepEqual(explanationDocumentSchema.parse(explanation), explanation)
+  for (const field of ['contributing_evidence', 'contextual_evidence', 'excluded_evidence']) {
+    assert.equal(explanationDocumentSchema.safeParse({ ...explanation, [field]: [false] }).success, false)
+  }
+  assert.equal(explanationDocumentSchema.safeParse({ ...explanation, projection: [] }).success, false)
 })
 
 test('signed intents bind actor, tenant, assignment, slot and exact pin hash', () => {

@@ -129,7 +129,7 @@ function packetFixture(options = {}) {
       final_gate_pass_proof: gateProof(),
     }
   })
-  const packet = buildTutorHumanReviewPacket({
+  const input = {
     source: {
       source_run_id: sample.source_run_id,
       source_result_sha256: sample.source_result_sha256,
@@ -151,8 +151,9 @@ function packetFixture(options = {}) {
     sampling_input: sampling,
     selected_final_outputs: selected,
     packet_created_at: timestamp,
-  })
-  return { sampling, sample, packet, selected }
+  }
+  const packet = buildTutorHumanReviewPacket(input)
+  return { sampling, sample, packet, selected, input }
 }
 
 function grant(packet, overrides = {}) {
@@ -231,8 +232,18 @@ test('Review Packet enforces text, word, item and encoded size bounds', () => {
   assert.throws(() => verifyTutorHumanReviewPacket({ ...packet, items: [] }))
 })
 
-test('every Packet item requires all eleven canonical gates exactly PASS in order', () => {
-  const { packet } = packetFixture()
+test('every Packet item requires source proofs and all eleven canonical gates exactly PASS in order', () => {
+  const { packet, input } = packetFixture()
+  for (const field of ['sample_manifest', 'sampling_input']) {
+    const missing = { ...input }
+    delete missing[field]
+    assert.throws(() => buildTutorHumanReviewPacket(missing),
+      error => error.issues?.some(issue => issue.path.join('.') === field))
+  }
+  const missingProof = structuredClone(input)
+  delete missingProof.selected_final_outputs[0].final_gate_pass_proof
+  assert.throws(() => buildTutorHumanReviewPacket(missingProof),
+    error => error.issues?.some(issue => issue.path.join('.') === 'selected_final_outputs.0.final_gate_pass_proof'))
   assert.equal(packet.items[0].final_gate_pass_proof.gates.length, 11)
   const failed = structuredClone(packet)
   failed.items[0].final_gate_pass_proof.gates[2].status = 'FAIL'

@@ -198,12 +198,30 @@ test('objective versions are immutable after publication and stale edits conflic
   )
 })
 
-test('objective validation enforces exactly one primary and preserves supporting competencies', async () => {
+test('objective validation preserves competency roles and independent audience defaults', async () => {
   assert.equal(competencyTargetsSchema.safeParse([target(primaryId, 'supporting')]).success, false)
   assert.equal(competencyTargetsSchema.safeParse([target(primaryId, 'primary'), target(supportingId, 'primary')]).success, false)
   const { objectives } = services()
   const objective = await objectives.create(teacherA, objectiveInput())
   assert.deepEqual(objective.competency_targets.map((item) => item.role), ['primary', 'supporting'])
+
+  // Defaults belong to one request; mutating an earlier result must not poison later objectives.
+  const withoutAudience = objectiveInput()
+  delete withoutAudience.audience
+  const first = createObjectiveRequestSchema.parse(withoutAudience)
+  assert.deepEqual(first.audience, { cycles: [], grades: [] })
+  first.audience.cycles.push('mutated-cycle')
+  first.audience.grades.push(99)
+  const second = createObjectiveRequestSchema.parse(withoutAudience)
+  assert.deepEqual(second.audience, { cycles: [], grades: [] })
+  assert.notEqual(first.audience.cycles, second.audience.cycles)
+  assert.notEqual(first.audience.grades, second.audience.grades)
+  assert.deepEqual(createObjectiveRequestSchema.parse({ ...withoutAudience, audience: {} }).audience,
+    { cycles: [], grades: [] })
+  const explicit = createObjectiveRequestSchema.parse({ ...withoutAudience, audience: { cycles: ['  cycle-2  '], grades: [5] } })
+  assert.deepEqual(explicit.audience, { cycles: ['cycle-2'], grades: [5] })
+  assert.equal(createObjectiveRequestSchema.safeParse({ ...withoutAudience, audience: { grades: [99] } }).success, false)
+  assert.equal(createObjectiveRequestSchema.safeParse({ ...withoutAudience, audience: { injected: true } }).success, false)
 })
 
 test('invalid curriculum references and request-owned authority fields are rejected', async () => {

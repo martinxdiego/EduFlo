@@ -15,6 +15,16 @@ test('generation input bounds expensive work and rejects invalid providers and t
   const normalized = worksheetGenerationSchema.parse({ ...valid, grade: 5, subscription_tier: 'premium' })
   assert.equal(normalized.grade, '5')
   assert.equal('subscription_tier' in normalized, false)
+  const { questionCount: _omitted, ...withoutCount } = valid
+  const defaults = worksheetGenerationSchema.parse({ ...withoutCount, dyslexiaFont: false })
+  assert.equal(defaults.questionCount, 10)
+  assert.equal(defaults.resourceType, 'worksheet')
+  assert.equal(defaults.dyslexiaFont, false)
+  assert.equal(defaults.grade, '5')
+  assert.equal(Object.hasOwn(defaults, 'questionTypes'), false)
+  for (const grade of [undefined, 5.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN]) {
+    assert.equal(worksheetGenerationSchema.safeParse({ ...valid, grade }).success, false)
+  }
   assert.equal(regenerateWorksheetSchema.safeParse({ worksheetId: 'saved', newDifficulty: 'hard' }).success, true)
   assert.equal(regenerateWorksheetSchema.safeParse({ worksheetId: 'saved', newDifficulty: 'unlimited' }).success, false)
 
