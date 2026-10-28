@@ -233,7 +233,7 @@ export const learningEventDocumentSchema = z.object({
   actor: z.object({ kind: z.enum(['student', 'teacher', 'system']), id: z.string().min(1).max(160) }).strict(),
   correlation_id: z.string().min(1).max(240),
   causation_id: z.string().max(240).nullable(),
-  payload: z.record(z.unknown()),
+  payload: z.record(z.string(), z.unknown()),
   idempotency_key: z.string().min(1).max(200),
 }).strict()
 
@@ -300,13 +300,13 @@ export const explanationDocumentSchema = z.object({
     weighted_volume: z.number().min(0), distinct_tasks: z.number().int().min(0),
     distinct_modalities: z.number().int().min(0), distinct_producers: z.number().int().min(0),
   }).strict(),
-  contributing_evidence: z.array(z.record(z.unknown())).max(1_000),
-  contextual_evidence: z.array(z.record(z.unknown())).max(1_000).optional(),
-  excluded_evidence: z.array(z.record(z.unknown())).max(1_000),
+  contributing_evidence: z.array(z.record(z.string(), z.unknown())).max(1_000),
+  contextual_evidence: z.array(z.record(z.string(), z.unknown())).max(1_000).optional(),
+  excluded_evidence: z.array(z.record(z.string(), z.unknown())).max(1_000),
   limitations: z.array(z.string()),
   reason_codes: z.array(z.string()),
   confidence_caps: z.array(z.object({ code: z.string(), value: z.number() }).strict()),
-  projection: z.record(z.unknown()),
+  projection: z.record(z.string(), z.unknown()),
 }).strict()
 
 export const knowledgeStateIdentitySchema = z.object({

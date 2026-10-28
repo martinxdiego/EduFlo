@@ -50,7 +50,8 @@ export const objectiveDefinitionSchema = z.object({
   title: boundedTextSchema(240),
   learner_statement: boundedTextSchema(1_000),
   competency_targets: competencyTargetsSchema,
-  audience: audienceSchema.default({ cycles: [], grades: [] }),
+  // Parse the fallback too, so its nested arrays remain private to this request.
+  audience: audienceSchema.prefault({ cycles: [], grades: [] }),
   difficulty: ratioSchema.optional(),
   estimated_effort_minutes: z.number().int().min(1).max(1_440).optional(),
   legacy_learning_goal: boundedTextSchema(1_000).optional(),
