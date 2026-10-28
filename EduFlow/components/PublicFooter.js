@@ -3,6 +3,7 @@ export default function PublicFooter() {
     <footer className="border-t border-slate-200 bg-white px-6 py-5 text-sm text-slate-600">
       <nav aria-label="Informationen zur Demo" className="mx-auto flex max-w-6xl flex-wrap justify-center gap-x-6 gap-y-3">
         <a className="underline" href="/demo">Demo öffnen</a>
+        <a className="underline" href="/intro">Motion-Intros</a>
         <a className="underline" href="/demo/hinweise">Demo und Datenspeicherung</a>
         <span>Beispieldaten · kein Konto erforderlich</span>
       </nav>

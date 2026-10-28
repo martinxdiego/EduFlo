@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { motion, useReducedMotion } from 'framer-motion'
+import { useReducedMotion } from 'framer-motion'
 import { Pause, Play } from 'lucide-react'
+import FlowIntro from './motion/FlowIntro'
 import styles from './EduFlowMotion.module.css'
 
 const motionPreferenceKey = 'eduflow-motion-paused'
@@ -73,29 +74,16 @@ export function LoadingScreen({ message = 'Dein Arbeitsraum wird geladen …', c
   const { motionEnabled } = motionPreference
 
   return (
-    <motion.div
+    <div
       className={`${styles.loadingScreen} ${compact ? styles.compact : ''}`}
       data-motion={motionEnabled ? 'on' : 'off'}
-      initial={false}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: motionEnabled ? 0.25 : 0 }}
       data-loading-screen
     >
       <div className={styles.loadingAmbient} aria-hidden="true" />
       <div className={styles.loadingBrand}><FlowMark /><span>EduFlow</span></div>
       <div className={styles.loadingCenter}>
-        <div className={styles.loadingSculpture} aria-hidden="true">
-          <div className={styles.sculptureHalo} />
-          <div className={`${styles.sculpturePage} ${styles.sculptureBack}`} />
-          <div className={`${styles.sculpturePage} ${styles.sculptureMiddle}`} />
-          <div className={`${styles.sculpturePage} ${styles.sculptureFront}`}>
-            <FlowMark />
-            <span className={styles.sculptureLine} /><span className={styles.sculptureLine} /><span className={styles.sculptureLine} />
-          </div>
-          <span className={styles.sculptureDot} />
-        </div>
-        <p className={styles.loadingEyebrow}>GUTE IDEEN NEHMEN FORM AN.</p>
+        <FlowIntro variant="orbit" motionEnabled={motionEnabled} compact className={styles.loadingIntro} />
+        <p className={styles.loadingEyebrow}>Deine Ideen nehmen Form an.</p>
         <h1>Gleich im Flow.</h1>
         <div role="status" aria-live="polite" aria-atomic="true" className={styles.loadingStatus}>
           <span className={styles.statusPulse} aria-hidden="true" />
@@ -106,6 +94,6 @@ export function LoadingScreen({ message = 'Dein Arbeitsraum wird geladen …', c
         <span>Mehr Raum fürs Unterrichten.</span>
         <MotionControl {...motionPreference} />
       </div>
-    </motion.div>
+    </div>
   )
 }

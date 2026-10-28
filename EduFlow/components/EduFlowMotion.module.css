@@ -93,6 +93,12 @@
   text-align: center;
   transform: translateY(-12px)
 }
+.loadingIntro {
+  width:min(100%,410px);
+  height:245px;
+  min-height:245px!important;
+  margin:0 auto 8px;
+}
 .loadingSculpture {
   height: 235px;
   width: 280px;

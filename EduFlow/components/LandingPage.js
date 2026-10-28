@@ -3,12 +3,15 @@
 import Link from 'next/link'
 import { useRef, useState } from 'react'
 import { AnimatePresence, motion, useScroll, useTransform } from 'framer-motion'
-import { ArrowDown, ArrowRight, ArrowUpRight, BookOpen, Check, ChevronRight, Download, Eye, EyeOff, FileText, FolderOpen, Layers, LoaderCircle, PencilLine, Plus, ShieldCheck, Sparkles } from 'lucide-react'
+import { ArrowRight, ArrowUpRight, BookOpen, Check, ChevronRight, Download, Eye, EyeOff, FileText, FolderOpen, Layers, LoaderCircle, PencilLine, Plus, ShieldCheck, Sparkles } from 'lucide-react'
 import { Button } from '@/ui/button'
 import { Input } from '@/ui/input'
 import { Label } from '@/ui/label'
 import { Alert, AlertDescription } from '@/ui/alert'
 import { FlowMark, MotionControl, useEduFlowMotion } from './EduFlowMotion'
+import CinematicHero from './motion/CinematicHero'
+import WelcomeFrame from './motion/WelcomeFrame'
+import motionStyles from './motion/MotionSurfaces.module.css'
 import styles from './LandingPage.module.css'
 
 const ease = [0.22, 1, 0.36, 1]
@@ -141,23 +144,15 @@ export default function LandingPage({ authMode = 'login', setAuthMode, authForm,
       <header className={styles.header}>
         <div className={styles.navInner}>
           <a className={styles.brand} href="#top" aria-label="EduFlow Startseite"><FlowMark /><span>EduFlow</span></a>
-          <nav className={styles.nav} aria-label="Hauptnavigation"><a href="#entdecken" className={styles.navExplore}>Entdecken</a>{!demoMode && <Link href="/schueler" className={styles.studentLink}>Schülerportal <ArrowUpRight /></Link>}</nav>
+          <nav className={styles.nav} aria-label="Hauptnavigation"><a href="#entdecken" className={styles.navExplore}>Entdecken</a><a href="/intro" className={styles.navExplore}>Motion</a>{!demoMode && <Link href="/schueler" className={styles.studentLink}>Schülerportal <ArrowUpRight /></Link>}</nav>
           <div className={styles.navActions}><MotionControl {...motionPreference} /><a href={demoMode ? '/demo' : '#auth'} className={styles.navLogin} onClick={demoMode ? undefined : () => switchMode('login')}>{demoMode ? 'Demo öffnen' : 'Anmelden'} <ArrowRight /></a></div>
         </div>
       </header>
 
-      <section id="top" className={styles.hero} aria-labelledby="landing-title">
-        <div className={styles.heroAmbient} aria-hidden="true" />
-        <motion.div className={styles.heroContent} initial={motionEnabled ? { opacity: 0, y: 16 } : false} animate={{ opacity: 1, y: 0 }} transition={{ duration: motionEnabled ? 0.75 : 0, ease }}>
-          <div className={styles.eyebrow}><span className={styles.eyebrowDot} /> Für Lehrpersonen mit guten Ideen.</div>
-          <h1 id="landing-title">Gute Ideen.<br /><span>Starker Unterricht.</span></h1>
-          <p className={styles.heroLead}>Dein Wissen. Deine Handschrift. Dein Flow.<br className={styles.desktopBreak} /> Ein Arbeitsraum für Material, das zu deiner Klasse passt.</p>
-          <div className={styles.heroActions}><a href={demoMode ? '/demo' : '#auth'} className={styles.primaryAction}>{demoMode ? 'Kostenlos ausprobieren' : 'EduFlow entdecken'} <ArrowRight /></a><a href="#entdecken" className={styles.secondaryAction}>Einen Blick hineinwerfen <ArrowDown /></a></div>
-          <Link href={demoMode ? '/demo/hinweise' : '/schueler'} className={styles.mobileStudentPortal}>{demoMode ? 'Ohne Konto · nur Beispieldaten' : 'Zum Schülerportal'} <ArrowUpRight aria-hidden="true" /></Link>
-          <div className={styles.heroDetails}><span><Check /> Editierbar bis ins Detail</span><span><Check /> PDF & Word</span><span><Check /> Für den Schweizer Unterricht</span></div>
-        </motion.div>
-        <Reveal className={styles.heroProduct} motionEnabled={motionEnabled} delay={0.12}><ProductScene motionEnabled={motionEnabled} /></Reveal>
-        <div className={styles.heroCaption}><span>WENIGER REIBUNG.</span><span>MEHR DEIN FLOW.</span></div>
+      <CinematicHero demoMode={demoMode} motionEnabled={motionEnabled} />
+      <section className={motionStyles.productReveal} aria-label="Ein Blick in EduFlow">
+        <h2>Dein Material.<br />Bis ins Detail dein eigenes.</h2>
+        <ProductScene motionEnabled={motionEnabled} />
       </section>
 
       <section id="entdecken" className={styles.story} aria-labelledby="story-title">
@@ -183,11 +178,9 @@ export default function LandingPage({ authMode = 'login', setAuthMode, authForm,
         </Reveal>
       </section>
 
-      <section id="auth" className={styles.authSection} aria-labelledby="auth-heading">
-        <div className={styles.authAmbient} aria-hidden="true" />
-        <div className={styles.authInner}>
-          <Reveal className={styles.authCopy} motionEnabled={motionEnabled}><FlowMark /><p className={styles.sectionEyebrow}>DEIN NÄCHSTER GUTER UNTERRICHT.</p><h2 id="auth-heading">Beginnt mit<br /><span>einem guten Flow.</span></h2><p>Öffne deinen Arbeitsraum und gib deinen Ideen eine Form.</p><div className={styles.authNote}><ShieldCheck /><p>{demoMode ? 'Deine Demo-Entwürfe bleiben auf diesem Gerät. Bitte nutze ausschliesslich erfundene Beispieldaten.' : 'Du behältst die pädagogische Kontrolle. Entwürfe und KI-Inhalte prüfst du vor dem Einsatz selbst.'}</p></div><div className={styles.testNote}><span /> {demoMode ? 'Kostenlose Browser-Demo · ohne Anmeldung und ohne eingebautes Ablaufdatum.' : 'Testversion · Der verfügbare Funktionsumfang hängt von deiner Freigabe ab.'}</div></Reveal>
-          <Reveal className={styles.authCard} motionEnabled={motionEnabled} delay={0.1}>
+      <section id="auth" className={motionStyles.authStage} aria-labelledby="auth-heading">
+        <WelcomeFrame motionEnabled={motionEnabled} demoMode={demoMode}>
+          <div className={`${styles.authCard} ${motionStyles.authFormCard}`}>
             {demoMode ? <div className={styles.demoCard}>
               <span className={styles.demoBadge}>BEREIT ZUM AUSPROBIEREN</span>
               <h3>Dein erster Aha-Moment.</h3>
@@ -210,8 +203,8 @@ export default function LandingPage({ authMode = 'login', setAuthMode, authForm,
             </form>
             </>}
             <div className={styles.authCardFooter}><span>Für Lehrpersonen.</span><span>Mit Raum für deine Ideen.</span></div>
-          </Reveal>
-        </div>
+          </div>
+        </WelcomeFrame>
       </section>
       <footer className={styles.footer}><a href="#top" className={styles.brand}><FlowMark /><span>EduFlow</span></a><p>Dein Unterricht. Dein Flow.</p><span>Entwickelt für den Schweizer Unterricht.</span><a href="#top" className={styles.backTop} aria-label="Zurück zum Anfang"><ArrowUpRight /></a></footer>
     </main>
