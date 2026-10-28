@@ -15,7 +15,7 @@
     "next": {
       "postcss": "8.5.25",
       "sharp": "0.35.5",
-      ".": "16.3.8"
+      ".": "16.4.3"
     },
     "@xmldom/xmldom@^0.8.6": "0.8.15",
     "@xmldom/xmldom@^0.9.10": "0.9.12",
@@ -30,6 +30,6 @@
     },
     "@tiptap/extension-bubble-menu": "3.30.5",
     "@tiptap/extension-floating-menu": "3.30.5",
-    "dompurify": "3.4.16"
+    "dompurify": "3.4.17"
   }
 }
