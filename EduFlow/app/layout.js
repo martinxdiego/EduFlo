@@ -6,20 +6,21 @@ import { Analytics } from '@vercel/analytics/next'
 import { SpeedInsights } from '@vercel/speed-insights/next'
 
 const origin = publicSiteOrigin()
+const demo = process.env.NEXT_PUBLIC_EDUFLOW_DEMO === 'true'
 const publiclyLaunched = process.env.EDUFLOW_PUBLIC_LAUNCH === 'true' && Boolean(origin)
 
 export const metadata = {
   ...(origin ? { metadataBase: new URL(origin) } : {}),
-  title: 'EduFlow – Editierbare Lernmaterialien für den Lehrplan 21',
-  description: 'Aus eigenen Unterlagen werden differenzierte, editierbare Arbeitsblätter und Prüfungen mit Lehrplan-21-Bezug – bereit für PDF und DOCX.',
+  title: demo ? 'EduFlow Demo – Unterrichtsmaterial ausprobieren' : 'EduFlow – Editierbare Lernmaterialien für den Lehrplan 21',
+  description: demo ? 'Kostenlose Browser-Demo: Beispielmaterialien bearbeiten, auf diesem Gerät speichern und als PDF oder Word exportieren. Ohne Anmeldung und ohne KI-Aufrufe.' : 'Aus eigenen Unterlagen werden differenzierte, editierbare Arbeitsblätter und Prüfungen mit Lehrplan-21-Bezug – bereit für PDF und DOCX.',
   applicationName: 'EduFlow',
   keywords: ['Lehrplan 21', 'Arbeitsblätter', 'Unterrichtsmaterial', 'Differenzierung', 'Schweizer Lehrpersonen'],
   openGraph: {
     type: 'website',
     locale: 'de_CH',
     siteName: 'EduFlow',
-    title: 'EduFlow – Unterrichtsmaterial, das zu Ihrer Klasse passt',
-    description: 'Eigene Unterlagen hochladen, differenzieren, bearbeiten und druckfertig exportieren.',
+    title: demo ? 'EduFlow kostenlos ausprobieren' : 'EduFlow – Unterrichtsmaterial, das zu Ihrer Klasse passt',
+    description: demo ? 'Drei Beispiele, elf Aufgabentypen und dein eigener Feinschliff. Lokal speichern, PDF und Word mitnehmen. Ohne Konto.' : 'Eigene Unterlagen hochladen, differenzieren, bearbeiten und druckfertig exportieren.',
   },
   robots: {
     index: publiclyLaunched,
