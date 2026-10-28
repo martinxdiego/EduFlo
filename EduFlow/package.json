@@ -10,7 +10,7 @@
         "build": "next build --webpack",
         "check:launch": "node scripts/check-launch-readiness.mjs",
         "postbuild": "node scripts/prepare-vercel-output.mjs",
-        "test:security": "node --test tests/security.test.mjs tests/validation.test.mjs tests/worksheet-quality.test.mjs tests/worksheet-answers.test.mjs tests/worksheet-generation.test.mjs tests/worksheet-usage.test.mjs tests/teaching-context.test.mjs tests/launch-readiness.test.mjs tests/student-material.test.mjs tests/ai-cost.test.mjs tests/public-site.test.mjs tests/dossier-quality.test.mjs tests/chat-tools.test.mjs tests/studio-quality.test.mjs tests/product-workspace.test.mjs tests/learning-workflow.test.mjs",
+        "test:security": "node --test tests/security.test.mjs tests/validation.test.mjs tests/worksheet-quality.test.mjs tests/worksheet-answers.test.mjs tests/worksheet-generation.test.mjs tests/worksheet-usage.test.mjs tests/teaching-context.test.mjs tests/launch-readiness.test.mjs tests/student-material.test.mjs tests/ai-cost.test.mjs tests/public-site.test.mjs tests/dossier-quality.test.mjs tests/chat-tools.test.mjs tests/studio-quality.test.mjs tests/product-workspace.test.mjs tests/learning-workflow.test.mjs tests/demo-store.test.mjs tests/demo-export.test.mjs",
         "test:learning-v2": "node --import ./tests/helpers/setup-unit-hosting.mjs --test tests/hosting-capabilities.test.mjs tests/hosting-provider-foundations.test.mjs tests/learning-v2-phase0.test.mjs tests/learning-v2-phase1.test.mjs tests/learning-v2-phase2.test.mjs tests/learning-v2-phase3.test.mjs tests/learning-v2-phase3b.test.mjs tests/learning-v2-phase4.test.mjs tests/learning-v2-phase5.test.mjs tests/learning-v2-hardening-p1a.test.mjs tests/learning-v2-h10-runner.test.mjs tests/learning-v2-h12a.test.mjs tests/learning-v2-h12b.test.mjs tests/learning-v2-h14a.test.mjs tests/learning-v2-h14b.test.mjs tests/learning-v2-h14b-prompt-v2.test.mjs tests/learning-v2-h14b-diagnostic-probe.test.mjs tests/learning-v2-h14b-full-evaluation-run-2.test.mjs tests/learning-v2-h14b-prompt-v2-full-evaluation-run-1.test.mjs tests/learning-v2-h14b-leakage-evidence.test.mjs tests/learning-v2-h14b-evidence-hardened-run-1.test.mjs tests/learning-v2-h14b-prompt-v3.test.mjs tests/learning-v2-h14b-prompt-v3-fixture-006-probe.test.mjs tests/learning-v2-h14b-safe-fallback.test.mjs tests/learning-v2-h14b-v7-r1-r2-run-1.test.mjs tests/learning-v2-h14b-evaluation-accounting.test.mjs tests/learning-v2-h14b-accounting-release-truth-verification.test.mjs tests/learning-v2-h14b-v8-r1-r2-run-1.test.mjs tests/learning-v2-h14b-quality-policy.test.mjs tests/learning-v2-h14b-human-review-framework.test.mjs tests/learning-v2-h14b-human-review-verification-fixes.test.mjs tests/learning-v2-h14b-human-review-trusted-clock.test.mjs tests/learning-v2-h14b-human-review-first-pass-binding.test.mjs tests/learning-v2-h14b-paid-execution-framework.test.mjs tests/learning-v2-h14b-paid-execution-fixes.test.mjs tests/learning-v2-h14b-paid-execution-rv-fixes.test.mjs tests/learning-v2-h14b-paid-execution-fia01.test.mjs tests/learning-v2-qualification-integration.test.mjs tests/learning-v2-qualification-native-wire.test.mjs tests/learning-v2-qualification-native-bridge.test.mjs tests/learning-v2-qualification-user-mode-trust.test.mjs tests/learning-v2-qualification-qi-a2.test.mjs",
         "diagnostic:tutor-provider": "node scripts/learning-v2-diagnostic-probe.mjs",
         "evaluate:tutor-provider:run-2": "node scripts/learning-v2-full-evaluation-run-2.mjs",
@@ -94,7 +94,7 @@
         "lucide-react": "^0.516.0",
         "mammoth": "^1.12.0",
         "mongodb": "^6.6.0",
-        "next": "16.3.8",
+        "next": "16.4.3",
         "next-themes": "^0.4.6",
         "openai": "6.16.0",
         "pdf-parse": "^1.1.1",
@@ -111,7 +111,7 @@
         "tailwind-merge": "^3.3.1",
         "uuid": "14.0.1",
         "vaul": "^1.1.2",
-        "zod": "^3.25.67"
+        "zod": "4.6.7"
     },
     "devDependencies": {
         "autoprefixer": "^10.4.19",
