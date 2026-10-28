@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, CheckCircle2, ChevronDown, Copy, Download, FileText, FolderOpen, HardDrive, Image as ImageIcon, Info, Layers, Link2, LoaderCircle, PencilLine, Plus, RotateCcw, Save, ShieldCheck, Trash2, Upload, X } from 'lucide-react'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/ui/alert-dialog'
-import { FlowMark } from '@/components/EduFlowMotion'
+import { FlowMark, LoadingScreen } from '@/components/EduFlowMotion'
 import { DEMO_MAX_BYTES, createDemoLibrary, createDemoQuestion, createDemoWorksheet, parseDemoBackup, readDemoLibrary, saveDemoLibrary, serializeDemoBackup } from '@/lib/demo-store'
 import { answerItems, joinAnswerItems, matchingPairs, normalizeQuestion, trueFalseLabel } from '@/lib/worksheet-answers'
 import { shuffledMatchingRight, shuffledOrderingItems } from '@/lib/student-material'
@@ -280,7 +280,7 @@ export default function DemoWorkspace() {
     setPendingAction({ kind: 'leave' })
   }
 
-  if (!ready || !library || !draft) return <main className={styles.startup}><FlowMark /><h1>Dein Demo-Arbeitsraum.</h1><p role="status">Die lokal gespeicherten Beispiele werden gelesen …</p></main>
+  if (!ready || !library || !draft) return <LoadingScreen message="Deine lokal gespeicherten Beispiele werden gelesen …" compact />
 
   const questions = draft.content.questions
   const selectedIndex = Math.max(0, questions.findIndex((question) => question.id === selectedQuestionId))
