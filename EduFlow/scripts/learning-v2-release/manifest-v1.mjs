@@ -23,6 +23,7 @@ const SECURITY_TESTS = Object.freeze([
   'tests/ai-cost.test.mjs', 'tests/public-site.test.mjs',
   'tests/dossier-quality.test.mjs', 'tests/chat-tools.test.mjs', 'tests/studio-quality.test.mjs',
   'tests/product-workspace.test.mjs', 'tests/learning-workflow.test.mjs',
+  'tests/demo-store.test.mjs', 'tests/demo-export.test.mjs',
 ])
 
 const LEARNING_UNIT_TESTS = Object.freeze([
@@ -77,7 +78,7 @@ const routeProfile = (id, profileFlags, capabilities, nodeEnv = 'test') => profi
 export const RELEASE_PROFILES = Object.freeze([
   profile('unit-default', {
     steps: Object.freeze([
-      step('security-unit', SECURITY_TESTS, counts(61, 61)),
+      step('security-unit', SECURITY_TESTS, counts(86, 86)),
       step('hosting-provider-foundations', ['tests/hosting-provider-foundations.test.mjs'], counts(7, 7)),
       step('hosting-capabilities', ['tests/hosting-capabilities.test.mjs'], counts(36, 36)),
       step('staging-activation', ['tests/hosting-activation-v2.test.mjs', 'tests/staging-activation-cli.test.mjs'], counts(46, 46)),
