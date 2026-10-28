@@ -3181,3 +3181,12 @@
     width: 13px;
   }
 }
+.demoCard{display:flex;flex-direction:column;gap:22px;padding:16px 0;color:#334155}
+.demoCard h3{font-size:30px;line-height:1.15;letter-spacing:-1px;font-weight:650;color:#17233a}
+.demoCard p{font-size:15px;line-height:1.8;color:#52627a}
+.demoBadge{font-size:10px;letter-spacing:.14em;color:#4468b2;font-weight:650}
+.demoCard ul{display:grid;gap:16px;list-style:none;padding:0;margin:0 0 10px;font-size:14px;line-height:1.6}
+.demoCard li{display:flex;align-items:flex-start;gap:10px}
+.demoCard li svg{width:17px;height:17px;margin-top:3px;color:#3464d0}
+.demoCard .primaryAction{min-height:48px;font-size:15px;justify-content:center}
+.demoNotes{font-size:12px;line-height:1.7;text-align:center;color:#526785;text-decoration:underline!important;min-height:44px;display:flex;align-items:center;justify-content:center}

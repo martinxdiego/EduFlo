@@ -118,7 +118,7 @@ function MaterialConstellation() {
   </div>
 }
 
-export default function LandingPage({ authMode, setAuthMode, authForm, setAuthForm, handleAuth, handleGoogleLogin, error, setError }) {
+export default function LandingPage({ authMode = 'login', setAuthMode, authForm, setAuthForm, handleAuth, handleGoogleLogin, error, setError, demoMode = false }) {
   const [showPassword, setShowPassword] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const motionPreference = useEduFlowMotion()
@@ -137,12 +137,12 @@ export default function LandingPage({ authMode, setAuthMode, authForm, setAuthFo
 
   return (
     <main className={styles.page} data-motion={motionEnabled ? 'on' : 'off'}>
-      <a className={styles.skipLink} href="#auth">Direkt zur Anmeldung</a>
+      <a className={styles.skipLink} href={demoMode ? '/demo' : '#auth'}>{demoMode ? 'Direkt zur Demo' : 'Direkt zur Anmeldung'}</a>
       <header className={styles.header}>
         <div className={styles.navInner}>
           <a className={styles.brand} href="#top" aria-label="EduFlow Startseite"><FlowMark /><span>EduFlow</span></a>
-          <nav className={styles.nav} aria-label="Hauptnavigation"><a href="#entdecken" className={styles.navExplore}>Entdecken</a><Link href="/schueler" className={styles.studentLink}>Schülerportal <ArrowUpRight /></Link></nav>
-          <div className={styles.navActions}><MotionControl {...motionPreference} /><a href="#auth" className={styles.navLogin} onClick={() => switchMode('login')}>Anmelden <ArrowRight /></a></div>
+          <nav className={styles.nav} aria-label="Hauptnavigation"><a href="#entdecken" className={styles.navExplore}>Entdecken</a>{!demoMode && <Link href="/schueler" className={styles.studentLink}>Schülerportal <ArrowUpRight /></Link>}</nav>
+          <div className={styles.navActions}><MotionControl {...motionPreference} /><a href={demoMode ? '/demo' : '#auth'} className={styles.navLogin} onClick={demoMode ? undefined : () => switchMode('login')}>{demoMode ? 'Demo öffnen' : 'Anmelden'} <ArrowRight /></a></div>
         </div>
       </header>
 
@@ -152,8 +152,8 @@ export default function LandingPage({ authMode, setAuthMode, authForm, setAuthFo
           <div className={styles.eyebrow}><span className={styles.eyebrowDot} /> Für Lehrpersonen mit guten Ideen.</div>
           <h1 id="landing-title">Gute Ideen.<br /><span>Starker Unterricht.</span></h1>
           <p className={styles.heroLead}>Dein Wissen. Deine Handschrift. Dein Flow.<br className={styles.desktopBreak} /> Ein Arbeitsraum für Material, das zu deiner Klasse passt.</p>
-          <div className={styles.heroActions}><a href="#auth" className={styles.primaryAction}>EduFlow entdecken <ArrowRight /></a><a href="#entdecken" className={styles.secondaryAction}>Einen Blick hineinwerfen <ArrowDown /></a></div>
-          <Link href="/schueler" className={styles.mobileStudentPortal}>Zum Schülerportal <ArrowUpRight aria-hidden="true" /></Link>
+          <div className={styles.heroActions}><a href={demoMode ? '/demo' : '#auth'} className={styles.primaryAction}>{demoMode ? 'Kostenlos ausprobieren' : 'EduFlow entdecken'} <ArrowRight /></a><a href="#entdecken" className={styles.secondaryAction}>Einen Blick hineinwerfen <ArrowDown /></a></div>
+          <Link href={demoMode ? '/demo/hinweise' : '/schueler'} className={styles.mobileStudentPortal}>{demoMode ? 'Ohne Konto · nur Beispieldaten' : 'Zum Schülerportal'} <ArrowUpRight aria-hidden="true" /></Link>
           <div className={styles.heroDetails}><span><Check /> Editierbar bis ins Detail</span><span><Check /> PDF & Word</span><span><Check /> Für den Schweizer Unterricht</span></div>
         </motion.div>
         <Reveal className={styles.heroProduct} motionEnabled={motionEnabled} delay={0.12}><ProductScene motionEnabled={motionEnabled} /></Reveal>
@@ -186,8 +186,16 @@ export default function LandingPage({ authMode, setAuthMode, authForm, setAuthFo
       <section id="auth" className={styles.authSection} aria-labelledby="auth-heading">
         <div className={styles.authAmbient} aria-hidden="true" />
         <div className={styles.authInner}>
-          <Reveal className={styles.authCopy} motionEnabled={motionEnabled}><FlowMark /><p className={styles.sectionEyebrow}>DEIN NÄCHSTER GUTER UNTERRICHT.</p><h2 id="auth-heading">Beginnt mit<br /><span>einem guten Flow.</span></h2><p>Öffne deinen Arbeitsraum und gib deinen Ideen eine Form.</p><div className={styles.authNote}><ShieldCheck /><p>Du behältst die pädagogische Kontrolle. Entwürfe und KI-Inhalte prüfst du vor dem Einsatz selbst.</p></div><div className={styles.testNote}><span /> Testversion · Der verfügbare Funktionsumfang hängt von deiner Freigabe ab.</div></Reveal>
+          <Reveal className={styles.authCopy} motionEnabled={motionEnabled}><FlowMark /><p className={styles.sectionEyebrow}>DEIN NÄCHSTER GUTER UNTERRICHT.</p><h2 id="auth-heading">Beginnt mit<br /><span>einem guten Flow.</span></h2><p>Öffne deinen Arbeitsraum und gib deinen Ideen eine Form.</p><div className={styles.authNote}><ShieldCheck /><p>{demoMode ? 'Deine Demo-Entwürfe bleiben auf diesem Gerät. Bitte nutze ausschliesslich erfundene Beispieldaten.' : 'Du behältst die pädagogische Kontrolle. Entwürfe und KI-Inhalte prüfst du vor dem Einsatz selbst.'}</p></div><div className={styles.testNote}><span /> {demoMode ? 'Kostenlose Browser-Demo · ohne Anmeldung und ohne eingebautes Ablaufdatum.' : 'Testversion · Der verfügbare Funktionsumfang hängt von deiner Freigabe ab.'}</div></Reveal>
           <Reveal className={styles.authCard} motionEnabled={motionEnabled} delay={0.1}>
+            {demoMode ? <div className={styles.demoCard}>
+              <span className={styles.demoBadge}>BEREIT ZUM AUSPROBIEREN</span>
+              <h3>Dein erster Aha-Moment.</h3>
+              <p>Wähle ein Beispiel. Passe Aufgaben und Lösungen an. Nimm dein Material als PDF oder Word-Datei mit.</p>
+              <ul><li><Check /> Drei Beispiele, elf Aufgabentypen</li><li><Check /> Lokal speichern und weiterarbeiten</li><li><Check /> Kein Konto und keine KI-Kosten</li></ul>
+              <a className={styles.primaryAction} href="/demo">Demo jetzt öffnen <ArrowRight /></a>
+              <a className={styles.demoNotes} href="/demo/hinweise">So werden deine Demo-Daten gespeichert</a>
+            </div> : <>
             <div className={styles.authTabs} aria-label="Anmeldung oder Registrierung"><button type="button" onClick={() => switchMode('login')} className={isLogin ? styles.activeTab : ''} aria-pressed={isLogin}>Anmelden</button><button type="button" onClick={() => switchMode('register')} className={!isLogin ? styles.activeTab : ''} aria-pressed={!isLogin}>Konto erstellen</button></div>
             <div className={styles.authTitle}><h3>{isLogin ? 'Schön, dass du da bist.' : 'Platz für deine Ideen.'}</h3><p>{isLogin ? 'Melde dich mit deinem EduFlow-Konto an.' : 'Erstelle dein persönliches EduFlow-Konto.'}</p></div>
             <form onSubmit={submitAuth} className={styles.authForm} aria-label={isLogin ? 'Bei EduFlow anmelden' : 'EduFlow-Konto erstellen'}>
@@ -200,6 +208,7 @@ export default function LandingPage({ authMode, setAuthMode, authForm, setAuthFo
               <Button type="button" variant="outline" className={styles.googleButton} onClick={handleGoogleLogin} disabled={isSubmitting}><GoogleIcon /> Mit Google fortfahren</Button>
               {!isLogin && <p className={styles.registrationTerms}>Mit der Registrierung akzeptierst du die <Link href="/agb">AGB</Link>. Informationen zu deinen Daten findest du im <Link href="/datenschutz">Datenschutz</Link>.</p>}
             </form>
+            </>}
             <div className={styles.authCardFooter}><span>Für Lehrpersonen.</span><span>Mit Raum für deine Ideen.</span></div>
           </Reveal>
         </div>
